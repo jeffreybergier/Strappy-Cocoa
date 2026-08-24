@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
 static int strappy_utf8_is_continuation(unsigned char value)
 {
@@ -170,6 +171,34 @@ char *strappy_utf8_sanitized_string_duplicate(const char *value,
 void strappy_free_string(char *value)
 {
   free(value);
+}
+
+void strappy_secure_free_string(char *value)
+{
+  volatile unsigned char *bytes;
+  size_t length;
+
+  if (value == NULL) {
+    return;
+  }
+  bytes = (volatile unsigned char *)value;
+  length = strlen(value);
+  while (length > 0U) {
+    *bytes++ = 0U;
+    length--;
+  }
+  free(value);
+}
+
+long long strappy_unix_milliseconds(void)
+{
+  struct timeval now;
+
+  if ((gettimeofday(&now, NULL) != 0) || (now.tv_sec < 0)) {
+    return 0LL;
+  }
+  return ((long long)now.tv_sec * 1000LL) +
+    ((long long)now.tv_usec / 1000LL);
 }
 
 void strappy_set_error(char **error_out, const char *message)

@@ -7,9 +7,9 @@
 #import "StrappyPreferencesDatabaseWhitelistView.h"
 #import "StrappyPreferencesDatabaseStudyView.h"
 #import "StrappyPreferencesModelWhitelistView.h"
+#import "StrappyModelProviderEditor.h"
 #import "StrappyPreferencesSystemPromptsView.h"
 #import "StrappySessionOptionsViewController.h"
-#import "StrappyKeychain.h"
 
 static const CGFloat kStrappyPreferencesWidth = 640.0;
 static const CGFloat kStrappyPreferencesHeight = 480.0;
@@ -151,6 +151,21 @@ static NSString *StrappyDatabaseAppNameForRow(NSDictionary *row)
   return NSLocalizedString(@"Other", nil);
 }
 
+static NSString *StrappyModelProviderDisplayName(NSString *providerId)
+{
+  if ([providerId isEqualToString:@"openrouter"]) {
+    return @"OpenRouter";
+  }
+  if ([providerId isEqualToString:@"openai_chatgpt"]) {
+    return @"ChatGPT";
+  }
+  if ([providerId isEqualToString:@"other"]) {
+    return NSLocalizedString(@"Custom", nil);
+  }
+  return ([providerId length] > 0U) ? providerId :
+    NSLocalizedString(@"Other", nil);
+}
+
 static NSString *StrappyDatabaseBundleIdentifierForRow(NSDictionary *row)
 {
   NSString *bundleIdentifier;
@@ -234,7 +249,7 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
   if ([name length] > 0U) {
     return name;
   }
-  return StrappyStringForModelRow(row, @"id");
+  return StrappyStringForModelRow(row, @"wire_model_id");
 }
 
 static NSString *StrappyModelNumberString(NSDictionary *row, NSString *key)
@@ -290,6 +305,11 @@ static NSArray *StrappyModelSearchKeys(void)
   if (keys == nil) {
     keys = [[NSArray alloc] initWithObjects:
       @"id",
+      @"wire_model_id",
+      @"provider_account_id",
+      @"provider_id",
+      @"provider_name",
+      @"provider_account_name",
       @"canonical_slug",
       @"hugging_face_id",
       @"name",
@@ -359,6 +379,8 @@ static NSString *StrappyModelSearchTextForRow(NSDictionary *row)
 
 static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
+  NSMutableDictionary *rowsByProviderModel;
+  NSMutableArray *providerModels;
   NSMutableArray *preparedRows;
   NSUInteger index;
 
@@ -366,16 +388,68 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return [NSArray array];
   }
 
-  preparedRows = [NSMutableArray arrayWithCapacity:[rows count]];
+  rowsByProviderModel = [NSMutableDictionary dictionary];
+  providerModels = [NSMutableArray array];
   for (index = 0U; index < [rows count]; index++) {
     NSDictionary *row;
-    NSMutableDictionary *preparedRow;
+    NSMutableDictionary *providerModel;
+    NSString *providerId;
+    NSString *wireModelId;
+    NSString *providerModelKey;
 
     row = [rows objectAtIndex:index];
     if (![row isKindOfClass:[NSDictionary class]]) {
       continue;
     }
 
+    providerId = StrappyStringForModelRow(row, @"provider_id");
+    wireModelId = StrappyStringForModelRow(row, @"wire_model_id");
+    if (([providerId length] == 0U) || ([wireModelId length] == 0U)) {
+      continue;
+    }
+    providerModelKey = [NSString stringWithFormat:@"%@\n%@",
+      providerId, wireModelId];
+    providerModel = [rowsByProviderModel objectForKey:providerModelKey];
+    if (providerModel == nil) {
+      providerModel = [NSMutableDictionary dictionaryWithDictionary:row];
+      [providerModel setObject:providerModelKey forKey:@"provider_model_key"];
+      [providerModel setObject:StrappyModelProviderDisplayName(providerId)
+                       forKey:@"provider_name"];
+      [rowsByProviderModel setObject:providerModel forKey:providerModelKey];
+      [providerModels addObject:providerModel];
+    } else {
+      BOOL allowed;
+      BOOL selected;
+
+      allowed = [[providerModel objectForKey:@"allowed"] boolValue] ||
+        [[row objectForKey:@"allowed"] boolValue];
+      selected = [[providerModel objectForKey:@"selected"] boolValue] ||
+        [[row objectForKey:@"selected"] boolValue];
+      if ([[row objectForKey:@"selected"] boolValue]) {
+        NSString *savedKey;
+        NSString *savedProviderName;
+
+        savedKey = [[providerModel objectForKey:@"provider_model_key"] retain];
+        savedProviderName = [[providerModel objectForKey:@"provider_name"] retain];
+        [providerModel setDictionary:row];
+        [providerModel setObject:savedKey forKey:@"provider_model_key"];
+        [providerModel setObject:savedProviderName forKey:@"provider_name"];
+        [savedKey release];
+        [savedProviderName release];
+      }
+      [providerModel setObject:[NSNumber numberWithBool:allowed]
+                       forKey:@"allowed"];
+      [providerModel setObject:[NSNumber numberWithBool:selected]
+                       forKey:@"selected"];
+    }
+  }
+
+  preparedRows = [NSMutableArray arrayWithCapacity:[providerModels count]];
+  for (index = 0U; index < [providerModels count]; index++) {
+    NSDictionary *row;
+    NSMutableDictionary *preparedRow;
+
+    row = [providerModels objectAtIndex:index];
     preparedRow = [NSMutableDictionary dictionaryWithDictionary:row];
     [preparedRow setObject:StrappyModelSearchTextForRow(row)
                     forKey:kStrappyModelSearchTextKey];
@@ -394,7 +468,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (NSToolbarItem *)makeToolbarItemWithIdentifier:(NSString *)identifier
                                             icon:(AIFontAwesomeIcon)icon
                                            label:(NSString *)label;
-- (void)refreshAPITokenStatusWithSaved:(BOOL)saved;
 - (void)preferencesWindowDidBecomeKey:(NSNotification *)notification;
 - (void)loadSystemPrompt;
 - (void)loadDatabaseStudy;
@@ -445,6 +518,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)modelCatalogRefreshDidStart:(NSNotification *)notification;
 - (void)modelCatalogRefreshDidFinish:(NSNotification *)notification;
 - (void)modelCatalogDidChange:(NSNotification *)notification;
+- (void)providerAccountsDidChange:(NSNotification *)notification;
+- (void)modelProviderEditorDidClose:(id)editor;
 - (NSString *)currentDatabaseSearchText;
 - (NSArray *)databaseRows:(NSArray *)rows
   matchingSearchText:(NSString *)searchText;
@@ -510,6 +585,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     databaseRows_ = [[NSArray alloc] init];
     allDatabaseStudyRows_ = [[NSArray alloc] init];
     databaseStudyRows_ = [[NSArray alloc] init];
+    modelCatalogDirty_ = YES;
+    databaseCatalogDirty_ = YES;
+    databaseStudyDirty_ = YES;
     databaseStudyDateFormatter_ = [[NSDateFormatter alloc] init];
     [databaseStudyDateFormatter_
       setFormatterBehavior:NSDateFormatterBehavior10_4];
@@ -533,6 +611,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
            object:nil];
     [[NSNotificationCenter defaultCenter]
       addObserver:self
+         selector:@selector(providerAccountsDidChange:)
+             name:StrappyProviderAccountsDidChangeNotification
+           object:nil];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
          selector:@selector(databaseCatalogDidChange:)
              name:FileScannerDatabaseCatalogDidChangeNotification
            object:nil];
@@ -549,9 +632,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     [self buildContentView];
     [self loadSystemPrompt];
     [self setModelCatalogRefreshing:[StrappySession isModelCatalogRefreshInFlight]];
-    [self loadOpenRouterModels];
     [self setScanning:NO];
-    [self loadCatalogedDatabases];
   }
 
   [window release];
@@ -566,21 +647,17 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
   contentView = [[self window] contentView];
   bounds = [contentView bounds];
-  contentPaneView_ =
-    [[NSView alloc] initWithFrame:NSInsetRect(bounds,
-      kStrappyPreferencesWindowEdgeInset,
-      kStrappyPreferencesWindowEdgeInset)];
+  contentPaneView_ = [[NSView alloc] initWithFrame:bounds];
   [contentPaneView_ setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
 
-  paneFrame = [contentPaneView_ bounds];
+  paneFrame = NSInsetRect([contentPaneView_ bounds],
+    kStrappyPreferencesWindowEdgeInset,
+    kStrappyPreferencesWindowEdgeInset);
 
   authenticationPaneView_ =
-    [[StrappyPreferencesAuthenticationView alloc] initWithFrame:paneFrame
+    [[StrappyPreferencesAuthenticationView alloc]
+      initWithFrame:[contentPaneView_ bounds]
                                                          target:self];
-  apiEndpointField_ = [[authenticationPaneView_ apiEndpointField] retain];
-  apiTokenField_ = [[authenticationPaneView_ apiTokenField] retain];
-  apiTokenStatusLabel_ = [[authenticationPaneView_ statusLabel] retain];
-  [self refreshAPITokenStatusWithSaved:NO];
 
   sessionDefaultsController_ =
     [[StrappySessionOptionsViewController alloc] initForSessionDefaults];
@@ -592,7 +669,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                                                        delegate:self];
   modelSearchField_ = [[modelWhitelistView_ searchField] retain];
   modelTableView_ = [[modelWhitelistView_ tableView] retain];
-  fetchModelsButton_ = [[modelWhitelistView_ fetchButton] retain];
+  editModelsButton_ = [[modelWhitelistView_ editButton] retain];
   modelProgressIndicator_ = [[modelWhitelistView_ progressIndicator] retain];
   modelStatusLabel_ = [[modelWhitelistView_ statusLabel] retain];
   [[NSNotificationCenter defaultCenter]
@@ -636,8 +713,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
        selector:@selector(databaseStudySearchTextDidChange:)
            name:NSControlTextDidChangeNotification
          object:databaseStudySearchField_];
-  [self loadDatabaseStudy];
-
   systemPromptsPaneView_ =
     [[StrappyPreferencesSystemPromptsView alloc] initWithFrame:paneFrame];
   systemPromptTextView_ = [[systemPromptsPaneView_ textView] retain];
@@ -667,8 +742,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   return [NSArray arrayWithObjects:
     kStrappyPreferencesToolbarAuthentication,
-    kStrappyPreferencesToolbarSessionDefaults,
     kStrappyPreferencesToolbarModels,
+    kStrappyPreferencesToolbarSessionDefaults,
     kStrappyPreferencesToolbarDatabases,
     kStrappyPreferencesToolbarStudy,
     kStrappyPreferencesToolbarPrompts,
@@ -694,6 +769,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)selectPreferencePaneWithIdentifier:(NSString *)identifier
 {
   NSView *paneView;
+  NSRect paneFrame;
   NSArray *subviews;
   NSUInteger index;
 
@@ -708,11 +784,19 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                isEqualToString:kStrappyPreferencesToolbarSessionDefaults]) {
     paneView = [sessionDefaultsController_ view];
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
+    if (modelCatalogDirty_) {
+      [self loadOpenRouterModels];
+    }
     paneView = modelWhitelistView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
+    if (databaseCatalogDirty_) {
+      [self loadCatalogedDatabases];
+    }
     paneView = databaseWhitelistView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarStudy]) {
-    [self loadDatabaseStudy];
+    if (databaseStudyDirty_) {
+      [self loadDatabaseStudy];
+    }
     paneView = databaseStudyPaneView_;
   } else if ([identifier isEqualToString:kStrappyPreferencesToolbarPrompts]) {
     paneView = systemPromptsPaneView_;
@@ -727,7 +811,14 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
   [subviews release];
 
-  [paneView setFrame:[contentPaneView_ bounds]];
+  paneFrame = [contentPaneView_ bounds];
+  if (![identifier
+        isEqualToString:kStrappyPreferencesToolbarAuthentication]) {
+    paneFrame = NSInsetRect(paneFrame,
+      kStrappyPreferencesWindowEdgeInset,
+      kStrappyPreferencesWindowEdgeInset);
+  }
+  [paneView setFrame:paneFrame];
   [paneView setAutoresizingMask:NSViewWidthSizable | NSViewHeightSizable];
   [contentPaneView_ addSubview:paneView];
   if ([identifier
@@ -766,8 +857,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
   if ([identifier isEqualToString:kStrappyPreferencesToolbarAuthentication]) {
     return [self makeToolbarItemWithIdentifier:identifier
-                                          icon:AIFAKey
-                                         label:NSLocalizedString(@"Auth", nil)];
+                                          icon:AIFAUsers
+                                         label:NSLocalizedString(@"Accounts", nil)];
   }
   if ([identifier
         isEqualToString:kStrappyPreferencesToolbarSessionDefaults]) {
@@ -831,7 +922,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
   identifier = [[[self window] toolbar] selectedItemIdentifier];
-  if ([identifier isEqualToString:kStrappyPreferencesToolbarStudy]) {
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarStudy] &&
+      databaseStudyDirty_) {
     [self loadDatabaseStudy];
   }
 }
@@ -846,7 +938,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  [self loadDatabaseStudy];
+  databaseStudyDirty_ = YES;
+  if ([[[[self window] toolbar] selectedItemIdentifier]
+        isEqualToString:kStrappyPreferencesToolbarStudy]) {
+    [self loadDatabaseStudy];
+  }
   errorMessage = [userInfo objectForKey:@"error"];
   if ([errorMessage isKindOfClass:[NSString class]] &&
       ([errorMessage length] > 0U)) {
@@ -884,6 +980,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
+  databaseStudyDirty_ = NO;
   [allDatabaseStudyRows_ release];
   allDatabaseStudyRows_ = [rows copy];
   [self updateDatabaseStudyProgress];
@@ -1289,7 +1386,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
   window = [self window];
   if (window == nil) {
-    [alert runModal];
+    NSBeep();
     return;
   }
   [alert XP_beginSheetModalForWindow:window
@@ -1383,26 +1480,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
   [[self window] close];
-}
-
-#pragma mark - Authentication
-
-- (void)refreshAPITokenStatusWithSaved:(BOOL)saved
-{
-  NSString *message;
-
-  if (apiTokenStatusLabel_ == nil) {
-    return;
-  }
-
-  if (saved) {
-    message = NSLocalizedString(@"API credentials saved to keychain.", nil);
-  } else if ([[StrappyKeychain sharedKeychain] hasAPICredentials]) {
-    message = NSLocalizedString(@"API credentials are available.", nil);
-  } else {
-    message = NSLocalizedString(@"No API credentials are saved in the keychain.", nil);
-  }
-  [apiTokenStatusLabel_ setStringValue:message];
 }
 
 - (void)loadSystemPrompt
@@ -1516,8 +1593,13 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
           (unsigned long)count]];
     }
   } else if (count == 0U) {
-    [modelStatusLabel_ setStringValue:
-      NSLocalizedString(@"No models have been fetched yet.", nil)];
+    if (noAvailableModelAccounts_) {
+      [modelStatusLabel_ setStringValue:
+        NSLocalizedString(@"No Accounts Configured", nil)];
+    } else {
+      [modelStatusLabel_ setStringValue:
+        NSLocalizedString(@"No Models Available", nil)];
+    }
   } else if (count == 1U) {
     [modelStatusLabel_ setStringValue:
       NSLocalizedString(@"1 model available.", nil)];
@@ -1542,12 +1624,22 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)loadOpenRouterModels
 {
+  NSArray *accounts;
   NSError *error;
   NSArray *rows;
 
   error = nil;
-  rows = [StrappySession openRouterModelCatalogWithError:&error];
+  accounts = [StrappySession providerAccountCatalogWithError:&error];
+  if (accounts == nil) {
+    [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
+      error,
+      NSLocalizedString(@"Account list could not be loaded.", nil))];
+    return;
+  }
+  rows = [StrappySession configuredProviderModelCatalogWithError:&error];
   if (rows != nil) {
+    modelCatalogDirty_ = NO;
+    noAvailableModelAccounts_ = ([accounts count] == 0U) ? YES : NO;
     [allModelRows_ release];
     allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
     [self sortAllModelRows];
@@ -1587,7 +1679,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   return StrappyStringForModelRow([modelRows_ objectAtIndex:(NSUInteger)row],
-                                  @"id");
+                                  @"provider_model_key");
 }
 
 - (void)selectModelTableRowWithIdentifier:(NSString *)modelIdentifier
@@ -1608,7 +1700,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     NSDictionary *row;
 
     row = [modelRows_ objectAtIndex:index];
-    if ([StrappyStringForModelRow(row, @"id")
+    if ([StrappyStringForModelRow(row, @"provider_model_key")
           isEqualToString:modelIdentifier]) {
       [modelTableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:index]
                      byExtendingSelection:NO];
@@ -1724,7 +1816,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)setModelCatalogRefreshing:(BOOL)refreshing
 {
   refreshingModels_ = refreshing;
-  [fetchModelsButton_ setEnabled:(refreshingModels_ ? NO : YES)];
   if (refreshingModels_) {
     [modelProgressIndicator_ startAnimation:self];
     [modelStatusLabel_ setToolTip:nil];
@@ -1734,11 +1825,37 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 }
 
+- (void)editModelProviders:(id)sender
+{
+  (void)sender;
+  if (modelProviderEditor_ != nil) {
+    return;
+  }
+  modelProviderEditor_ = [[StrappyModelProviderEditor alloc]
+                           initWithTarget:self];
+  [modelProviderEditor_ beginSheetForWindow:[self window]];
+}
+
+- (void)modelProviderEditorDidClose:(id)editor
+{
+  if (editor != modelProviderEditor_) {
+    return;
+  }
+  [modelProviderEditor_ autorelease];
+  modelProviderEditor_ = nil;
+  if (modelCatalogDirty_ &&
+      [[[[self window] toolbar] selectedItemIdentifier]
+        isEqualToString:kStrappyPreferencesToolbarModels]) {
+    [self loadOpenRouterModels];
+  }
+}
+
 - (void)refreshModels:(id)sender
 {
   NSError *error;
   NSString *message;
   NSAlert *alert;
+  NSWindow *window;
 
   (void)sender;
   if (refreshingModels_) {
@@ -1754,7 +1871,16 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     alert = [[[NSAlert alloc] init] autorelease];
     [alert setMessageText:NSLocalizedString(@"Could not fetch models", nil)];
     [alert setInformativeText:message];
-    [alert runModal];
+    [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
+    window = [self window];
+    if (window == nil) {
+      NSBeep();
+      return;
+    }
+    [alert XP_beginSheetModalForWindow:window
+                         modalDelegate:nil
+                        didEndSelector:NULL
+                           contextInfo:NULL];
     return;
   }
 
@@ -1771,7 +1897,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   NSDictionary *userInfo;
   NSString *errorMessage;
-  NSNumber *count;
 
   userInfo = [notification userInfo];
   errorMessage = [userInfo objectForKey:@"error"];
@@ -1782,20 +1907,37 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  [self loadOpenRouterModels];
-  count = [userInfo objectForKey:@"model_count"];
-  if (([self currentModelSearchText] == nil) &&
-      [count isKindOfClass:[NSNumber class]]) {
-    [modelStatusLabel_ setStringValue:
-      [NSString stringWithFormat:NSLocalizedString(@"%lu models available.", nil),
-        (unsigned long)[count XP_unsignedIntegerValue]]];
+  if ([[[[self window] toolbar] selectedItemIdentifier]
+        isEqualToString:kStrappyPreferencesToolbarModels]) {
+    [self loadOpenRouterModels];
   }
 }
 
 - (void)modelCatalogDidChange:(NSNotification *)notification
 {
+  NSString *identifier;
+
   (void)notification;
-  [self loadOpenRouterModels];
+  modelCatalogDirty_ = YES;
+  if (updatingModelWhitelist_) {
+    return;
+  }
+  identifier = [[[self window] toolbar] selectedItemIdentifier];
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
+    [self loadOpenRouterModels];
+  }
+}
+
+- (void)providerAccountsDidChange:(NSNotification *)notification
+{
+  NSString *identifier;
+
+  (void)notification;
+  modelCatalogDirty_ = YES;
+  identifier = [[[self window] toolbar] selectedItemIdentifier];
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
+    [self loadOpenRouterModels];
+  }
 }
 
 - (NSString *)currentDatabaseSearchText
@@ -1905,6 +2047,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   error = nil;
   rows = [[FileScanner sharedScanner] catalogedSQLiteDatabasesWithError:&error];
   if (rows != nil) {
+    databaseCatalogDirty_ = NO;
     [allDatabaseRows_ release];
     allDatabaseRows_ = [rows copy];
     [self applyDatabaseRows];
@@ -1920,11 +2063,18 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 {
   NSArray *rows;
   NSArray *selectedPaths;
+  NSString *identifier;
 
+  databaseCatalogDirty_ = YES;
   rows = [[notification userInfo] objectForKey:@"rows"];
   if (![rows isKindOfClass:[NSArray class]]) {
     return;
   }
+  identifier = [[[self window] toolbar] selectedItemIdentifier];
+  if (![identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
+    return;
+  }
+  databaseCatalogDirty_ = NO;
   selectedPaths = [self selectedDatabaseTableRowPaths];
   [allDatabaseRows_ release];
   allDatabaseRows_ = [rows copy];
@@ -1997,41 +2147,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
   [databaseStatusLabel_ setStringValue:message];
   [databaseStatusLabel_ setToolTip:message];
-}
-
-- (void)saveAPICredentials:(id)sender
-{
-  NSString *apiEndpoint;
-  NSString *apiToken;
-  NSAlert *alert;
-
-  (void)sender;
-  apiEndpoint = [[apiEndpointField_ stringValue]
-    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  apiToken = [[apiTokenField_ stringValue]
-    stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if (([apiEndpoint length] == 0U) || ([apiToken length] == 0U)) {
-    alert = [[[NSAlert alloc] init] autorelease];
-    [alert setMessageText:NSLocalizedString(@"API credentials are required", nil)];
-    [alert setInformativeText:NSLocalizedString(
-      @"Enter an API endpoint and token before saving them to the keychain.", nil)];
-    [alert runModal];
-    return;
-  }
-
-  if (![[StrappyKeychain sharedKeychain] saveAPIEndpoint:apiEndpoint
-                                                   token:apiToken]) {
-    alert = [[[NSAlert alloc] init] autorelease];
-    [alert setMessageText:NSLocalizedString(@"Could not save API credentials", nil)];
-    [alert setInformativeText:NSLocalizedString(
-      @"The keychain refused the write.", nil)];
-    [alert runModal];
-    return;
-  }
-
-  [apiEndpointField_ setStringValue:apiEndpoint];
-  [apiTokenField_ setStringValue:apiToken];
-  [self refreshAPITokenStatusWithSaved:YES];
 }
 
 - (void)scanDatabases:(id)sender
@@ -2210,6 +2325,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
+  updatingModelWhitelist_ = YES;
   for (rowIndex = [selectedRows firstIndex];
        rowIndex != NSNotFound;
        rowIndex = [selectedRows indexGreaterThanIndex:rowIndex]) {
@@ -2228,9 +2344,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     modelId = StrappyStringForModelRow(model, @"id");
     error = nil;
     if (([modelId length] == 0U) ||
-        ![StrappySession setOpenRouterModelAllowed:shouldAllow
-                                forModelIdentifier:modelId
-                                             error:&error]) {
+        ![StrappySession setModelAllowed:shouldAllow
+                      forModelIdentifier:modelId
+                                   error:&error]) {
+      updatingModelWhitelist_ = NO;
       [self loadOpenRouterModels];
       [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
         error,
@@ -2239,6 +2356,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     }
   }
 
+  updatingModelWhitelist_ = NO;
   [self loadOpenRouterModels];
 }
 
@@ -2371,8 +2489,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     if ([identifier isEqualToString:@"model_name"]) {
       return StrappyModelDisplayNameForRow(model);
     }
+    if ([identifier isEqualToString:@"model_provider"]) {
+      return StrappyStringForModelRow(model, @"provider_name");
+    }
     if ([identifier isEqualToString:@"model_id"]) {
-      return StrappyStringForModelRow(model, @"id");
+      return StrappyStringForModelRow(model, @"wire_model_id");
     }
     if ([identifier isEqualToString:@"model_context"]) {
       return StrappyModelNumberString(model, @"context_length");
@@ -2478,10 +2599,13 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       if ([description length] > 0U) {
         return description;
       }
-      return StrappyStringForModelRow(model, @"id");
+      return StrappyStringForModelRow(model, @"wire_model_id");
+    }
+    if ([identifier isEqualToString:@"model_provider"]) {
+      return StrappyStringForModelRow(model, @"provider_id");
     }
     if ([identifier isEqualToString:@"model_id"]) {
-      return StrappyStringForModelRow(model, @"id");
+      return StrappyStringForModelRow(model, @"wire_model_id");
     }
     return @"";
   }
@@ -2629,10 +2753,12 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
     modelId = StrappyStringForModelRow(model, @"id");
     error = nil;
+    updatingModelWhitelist_ = YES;
     if (([modelId length] == 0U) ||
-        ![StrappySession setOpenRouterModelAllowed:checked
-                                forModelIdentifier:modelId
-                                             error:&error]) {
+        ![StrappySession setModelAllowed:checked
+                      forModelIdentifier:modelId
+                                   error:&error]) {
+      updatingModelWhitelist_ = NO;
       [modelTableView_ reloadData];
       [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
         error,
@@ -2640,6 +2766,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       return;
     }
 
+    updatingModelWhitelist_ = NO;
     [self loadOpenRouterModels];
     return;
   }
@@ -2860,13 +2987,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [contentPaneView_ release];
   [authenticationPaneView_ release];
   [sessionDefaultsController_ release];
-  [apiEndpointField_ release];
-  [apiTokenField_ release];
-  [apiTokenStatusLabel_ release];
   [modelSearchField_ release];
   [modelTableView_ release];
   [modelWhitelistView_ release];
-  [fetchModelsButton_ release];
+  [editModelsButton_ release];
+  [modelProviderEditor_ release];
   [modelProgressIndicator_ release];
   [modelStatusLabel_ release];
   [systemPromptsPaneView_ release];

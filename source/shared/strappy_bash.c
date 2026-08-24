@@ -4,6 +4,7 @@
 
 #include "strappy_bash.h"
 
+#include "strappy_cocoa.h"
 #include "strappy_core.h"
 #include "strappy_db.h"
 
@@ -22,12 +23,6 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-#if defined(__APPLE__)
-#include <mach/mach_time.h>
-#else
-#include <time.h>
-#endif
 
 #define STRAPPY_BASH_POLL_INTERVAL_MS 100LL
 #define STRAPPY_BASH_TERMINATE_GRACE_MS 500LL
@@ -340,44 +335,9 @@ static char *strappy_bash_resolve_shell(char **error_out)
   return path;
 }
 
-static long long strappy_bash_wall_clock_ms(void)
-{
-  struct timeval value;
-
-  if (gettimeofday(&value, NULL) != 0) {
-    return 0LL;
-  }
-  return ((long long)value.tv_sec * 1000LL) +
-    ((long long)value.tv_usec / 1000LL);
-}
-
 static long long strappy_bash_monotonic_ms(void)
 {
-#if defined(__APPLE__)
-  mach_timebase_info_data_t timebase;
-  uint64_t absolute;
-  long double milliseconds;
-
-  if (mach_timebase_info(&timebase) != KERN_SUCCESS ||
-      (timebase.denom == 0U)) {
-    return strappy_bash_wall_clock_ms();
-  }
-  absolute = mach_absolute_time();
-  milliseconds = ((long double)absolute * (long double)timebase.numer) /
-    ((long double)timebase.denom * 1000000.0L);
-  if (milliseconds >= (long double)LLONG_MAX) {
-    return LLONG_MAX;
-  }
-  return (long long)milliseconds;
-#else
-  struct timespec value;
-
-  if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) {
-    return strappy_bash_wall_clock_ms();
-  }
-  return ((long long)value.tv_sec * 1000LL) +
-    ((long long)value.tv_nsec / 1000000LL);
-#endif
+  return strappy_cocoa_monotonic_milliseconds();
 }
 
 static void strappy_bash_utf8_state_init(strappy_bash_utf8_state *state)

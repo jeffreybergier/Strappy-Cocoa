@@ -15,6 +15,7 @@ typedef struct strappy_webview_labels {
   const char *harness;
   const char *developer;
   const char *thinking;
+  const char *encrypted;
   const char *processing_tools;
   const char *processing_waiting[
     STRAPPY_WEBVIEW_PROCESSING_WAITING_LABEL_COUNT];
@@ -91,6 +92,7 @@ typedef struct strappy_webview_message {
   const char *request_endpoint;
   const char *text;
   const char *reasoning;
+  int reasoning_encrypted;
   const char *metadata_json;
   const char *render_state_json;
   const char *created_at;

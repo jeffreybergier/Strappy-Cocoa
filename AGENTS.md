@@ -20,6 +20,20 @@ Altivec iOS/macOS clean builds. The current harness targets are
 `database_query_harness`, `scanner_profile_harness`, `bash_harness`,
 `webview_harness`, `responses_harness` and `prompt_generator_harness`, run through
 `make -C source/linux clean test`.
+The default test suite is unconditionally offline even when the ignored,
+owner-only `.env.chatgpt.json` OAuth credential cache exists. Run the explicit
+`live-test` or `openai-web-search-live-test` target with
+`STRAPPY_ALLOW_LIVE_PROVIDER_TESTS=YES` only for final validation. The live
+check sends a short daily-news prompt to LUNA at low reasoning effort and
+requires native web-search actions, consulted sources, answer text, and URL
+citations. It must not print or persist response payloads or credential values.
+The separate `other-openrouter-live-test` target makes exactly one generic
+Responses request through the `other` provider using the ignored `.env`
+OpenRouter endpoint, token, and probe-only model selection. It has the same
+explicit live-test opt-in and secret-free output requirements.
+The sibling `openrouter-live-test` target uses the same bounded credentials and
+model but sends the app's OpenRouter-specific request profile. It also makes
+exactly one request and requires the explicit live-test opt-in.
 Use `make -C source/linux prompts` to write all assistant-set prompts with web
 search set to none, auto, native, Exa, and Parallel under
 `source/linux/build-linux/system-prompts`, or use

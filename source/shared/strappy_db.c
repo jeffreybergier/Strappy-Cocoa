@@ -251,6 +251,92 @@ int strappy_db_exec(sqlite3 *db,
   return 1;
 }
 
+static void strappy_db_set_reset_required_error(char **error_out)
+{
+  strappy_set_error(
+    error_out,
+    "This development database predates multi-account providers. Delete "
+    "strappy.sqlite and relaunch; no migration is performed.");
+}
+
+static int strappy_db_validate_schema_identity(sqlite3 *db, char **error_out)
+{
+  static const char expected[] =
+    "semantic-v1-provider-owned-models-no-seeded-accounts";
+  sqlite3_stmt *stmt;
+  const unsigned char *actual;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(
+    db,
+    "SELECT schema_name FROM schema_metadata WHERE id = 1;",
+    -1,
+    &stmt,
+    NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc == SQLITE_DONE) {
+    sqlite3_finalize(stmt);
+    strappy_db_set_reset_required_error(error_out);
+    return 0;
+  }
+  if (rc != SQLITE_ROW) {
+    strappy_set_formatted_error(error_out,
+                                "Could not validate database schema: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  actual = sqlite3_column_text(stmt, 0);
+  if ((actual == NULL) || (strcmp((const char *)actual, expected) != 0)) {
+    sqlite3_finalize(stmt);
+    strappy_db_set_reset_required_error(error_out);
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  return 1;
+}
+
+static int strappy_db_validate_existing_schema(sqlite3 *db, char **error_out)
+{
+  static const char *sql =
+    "SELECT "
+      "EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' "
+        "AND name = 'schema_metadata'), "
+      "EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' "
+        "AND name NOT LIKE 'sqlite_%');";
+  sqlite3_stmt *stmt;
+  int has_metadata;
+  int has_user_tables;
+  int rc;
+
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if (rc == SQLITE_OK) {
+    rc = sqlite3_step(stmt);
+  }
+  if (rc != SQLITE_ROW) {
+    strappy_set_formatted_error(error_out,
+                                "Could not inspect database schema: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    return 0;
+  }
+  has_metadata = sqlite3_column_int(stmt, 0) ? 1 : 0;
+  has_user_tables = sqlite3_column_int(stmt, 1) ? 1 : 0;
+  sqlite3_finalize(stmt);
+  if (has_metadata) {
+    return strappy_db_validate_schema_identity(db, error_out);
+  }
+  if (has_user_tables) {
+    strappy_db_set_reset_required_error(error_out);
+    return 0;
+  }
+  return 1;
+}
+
 void strappy_db_sql_buffer_destroy(strappy_db_sql_buffer *buffer)
 {
   if (buffer == NULL) {
@@ -296,10 +382,35 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     ");"
     "INSERT OR IGNORE INTO schema_metadata "
     "(id, schema_name, created_at_ms) VALUES "
-    "(1, 'semantic-v1', CAST(strftime('%s','now') AS INTEGER) * 1000);"
+    "(1, 'semantic-v1-provider-owned-models-no-seeded-accounts', "
+      "CAST(strftime('%s','now') AS INTEGER) * 1000);"
 
+    "CREATE TABLE IF NOT EXISTS provider_accounts ("
+    "id TEXT PRIMARY KEY CHECK(length(id) > 0),"
+    "provider_id TEXT NOT NULL CHECK(provider_id IN ('"
+      STRAPPY_PROVIDER_OPENROUTER "','"
+      STRAPPY_PROVIDER_OPENAI_CHATGPT "','"
+      STRAPPY_PROVIDER_OTHER "')) ,"
+    "display_name TEXT NOT NULL CHECK(length(display_name) > 0),"
+    "lifecycle_state TEXT NOT NULL DEFAULT 'active' "
+      "CHECK(lifecycle_state IN ('active','archived')) ,"
+    "responses_endpoint TEXT "
+      "CHECK(responses_endpoint IS NULL OR length(responses_endpoint) > 0),"
+    "max_output_tokens INTEGER "
+      "CHECK(max_output_tokens IS NULL OR max_output_tokens > 0),"
+    "created_at_ms INTEGER NOT NULL,"
+    "updated_at_ms INTEGER NOT NULL,"
+    "last_used_at_ms INTEGER"
+    ");"
+    "CREATE INDEX IF NOT EXISTS provider_accounts_provider_lifecycle_idx "
+      "ON provider_accounts(provider_id, lifecycle_state);"
     "CREATE TABLE IF NOT EXISTS models ("
     "id TEXT PRIMARY KEY,"
+    "provider_id TEXT NOT NULL CHECK(provider_id IN ('"
+      STRAPPY_PROVIDER_OPENROUTER "','"
+      STRAPPY_PROVIDER_OPENAI_CHATGPT "','"
+      STRAPPY_PROVIDER_OTHER "')) ,"
+    "wire_model_id TEXT NOT NULL CHECK(length(wire_model_id) > 0),"
     "canonical_slug TEXT,"
     "hugging_face_id TEXT,"
     "name TEXT NOT NULL,"
@@ -320,9 +431,12 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "details_url TEXT,"
     "catalog_active INTEGER NOT NULL DEFAULT 1 "
       "CHECK(catalog_active IN (0,1)),"
-    "last_seen_at_ms INTEGER NOT NULL"
+    "last_seen_at_ms INTEGER NOT NULL,"
+    "UNIQUE(provider_id, wire_model_id),"
+    "UNIQUE(id, provider_id)"
     ");"
-    "CREATE INDEX IF NOT EXISTS models_name_idx ON models(name, id);"
+    "CREATE INDEX IF NOT EXISTS models_name_idx "
+      "ON models(provider_id, name, id);"
     "CREATE TABLE IF NOT EXISTS model_prices ("
     "model_id TEXT NOT NULL,"
     "price_kind TEXT NOT NULL,"
@@ -337,18 +451,59 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "feature_value TEXT NOT NULL,"
     "PRIMARY KEY(model_id, feature_kind, feature_value),"
     "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
+    ");";
+
+  static const char schema_model_capabilities_sql[] =
+    "CREATE TABLE IF NOT EXISTS bundled_model_catalogs ("
+    "provider_id TEXT PRIMARY KEY,"
+    "schema_version INTEGER NOT NULL CHECK(schema_version = 1),"
+    "catalog_revision INTEGER NOT NULL CHECK(catalog_revision > 0),"
+    "catalog_source TEXT NOT NULL CHECK(length(catalog_source) > 0),"
+    "imported_at_ms INTEGER NOT NULL,"
+    "CHECK(provider_id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT "')"
+    ");"
+    "CREATE TABLE IF NOT EXISTS manual_model_overrides ("
+    "model_id TEXT PRIMARY KEY,"
+    "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS model_capabilities ("
+    "model_id TEXT PRIMARY KEY,"
+    "billing_kind TEXT NOT NULL CHECK(billing_kind IN "
+      "('metered_api','chatgpt_plan','unknown')) ,"
+    "reasoning_enabled INTEGER NOT NULL CHECK(reasoning_enabled IN (0,1)),"
+    "local_functions_enabled INTEGER NOT NULL "
+      "CHECK(local_functions_enabled IN (0,1)),"
+    "hosted_tools_enabled INTEGER NOT NULL "
+      "CHECK(hosted_tools_enabled IN (0,1)),"
+    "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS model_hosted_tools ("
+    "model_id TEXT NOT NULL,"
+    "tool_id TEXT NOT NULL CHECK(length(tool_id) > 0),"
+    "PRIMARY KEY(model_id, tool_id),"
+    "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
+    ");"
+    "CREATE TABLE IF NOT EXISTS model_reasoning_overrides ("
+    "model_id TEXT NOT NULL,"
+    "requested_level TEXT NOT NULL CHECK(length(requested_level) > 0),"
+    "wire_level TEXT NOT NULL CHECK(length(wire_level) > 0),"
+    "PRIMARY KEY(model_id, requested_level),"
+    "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
     ");"
     "CREATE TABLE IF NOT EXISTS model_preferences ("
-    "model_id TEXT PRIMARY KEY,"
+    "provider_id TEXT NOT NULL,"
+    "wire_model_id TEXT NOT NULL,"
     "allowed INTEGER NOT NULL DEFAULT 0 CHECK(allowed IN (0,1)),"
     "updated_at_ms INTEGER NOT NULL,"
-    "FOREIGN KEY(model_id) REFERENCES models(id) ON DELETE CASCADE"
+    "PRIMARY KEY(provider_id, wire_model_id)"
     ");"
     "CREATE TABLE IF NOT EXISTS app_preferences ("
     "id INTEGER PRIMARY KEY CHECK(id = 1),"
     "default_model_id TEXT,"
+    "default_provider_account_id TEXT,"
     "updated_at_ms INTEGER NOT NULL,"
-    "FOREIGN KEY(default_model_id) REFERENCES models(id)"
+    "FOREIGN KEY(default_model_id) REFERENCES models(id),"
+    "FOREIGN KEY(default_provider_account_id) REFERENCES provider_accounts(id)"
     ");"
     "INSERT OR IGNORE INTO app_preferences (id, updated_at_ms) VALUES "
       "(1, CAST(strftime('%s','now') AS INTEGER) * 1000);";
@@ -384,9 +539,11 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "id INTEGER PRIMARY KEY,"
     "name TEXT NOT NULL DEFAULT '',"
     "model_id TEXT,"
+    "provider_account_id TEXT,"
     "created_at_ms INTEGER NOT NULL,"
     "updated_at_ms INTEGER NOT NULL,"
-    "FOREIGN KEY(model_id) REFERENCES models(id)"
+    "FOREIGN KEY(model_id) REFERENCES models(id),"
+    "FOREIGN KEY(provider_account_id) REFERENCES provider_accounts(id)"
     ");"
     "CREATE INDEX IF NOT EXISTS sessions_updated_idx "
       "ON sessions(updated_at_ms DESC, id DESC);"
@@ -469,6 +626,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "round_index INTEGER NOT NULL CHECK(round_index >= 0),"
     "request_kind TEXT NOT NULL,"
     "model_id TEXT NOT NULL,"
+    "provider_account_id TEXT NOT NULL,"
     "instruction_revision_id INTEGER,"
     "toolset_revision_id INTEGER,"
     "input_from_sequence INTEGER NOT NULL DEFAULT 1 "
@@ -494,9 +652,11 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "completed_at_ms INTEGER,"
     "wall_duration_ms INTEGER CHECK(wall_duration_ms >= 0),"
     "UNIQUE(turn_id, round_index),"
+    "UNIQUE(id, provider_account_id),"
     "FOREIGN KEY(turn_id) REFERENCES turns(id) ON DELETE CASCADE,"
     "FOREIGN KEY(previous_request_id) REFERENCES model_requests(id),"
     "FOREIGN KEY(model_id) REFERENCES models(id),"
+    "FOREIGN KEY(provider_account_id) REFERENCES provider_accounts(id),"
     "FOREIGN KEY(instruction_revision_id) REFERENCES instruction_revisions(id),"
     "FOREIGN KEY(toolset_revision_id) REFERENCES toolset_revisions(id)"
     ");"
@@ -507,6 +667,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "CREATE TABLE IF NOT EXISTS http_attempts ("
     "id INTEGER PRIMARY KEY,"
     "request_id INTEGER NOT NULL,"
+    "provider_account_id TEXT NOT NULL,"
     "previous_attempt_id INTEGER,"
     "attempt_index INTEGER NOT NULL CHECK(attempt_index >= 0),"
     "state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN "
@@ -540,7 +701,8 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "rate_limit_tokens_remaining TEXT,"
     "rate_limit_tokens_reset TEXT,"
     "UNIQUE(request_id, attempt_index),"
-    "FOREIGN KEY(request_id) REFERENCES model_requests(id) ON DELETE CASCADE,"
+    "FOREIGN KEY(request_id, provider_account_id) "
+      "REFERENCES model_requests(id, provider_account_id) ON DELETE CASCADE,"
     "FOREIGN KEY(previous_attempt_id) REFERENCES http_attempts(id)"
     ");"
     "CREATE INDEX IF NOT EXISTS http_attempts_request_idx "
@@ -890,6 +1052,7 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
     "PRAGMA user_version = 1;";
   static const char *const schema_sql[] = {
     schema_models_sql,
+    schema_model_capabilities_sql,
     schema_sessions_sql,
     schema_requests_sql,
     schema_attempts_sql,
@@ -902,6 +1065,9 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
   };
   size_t schema_index;
 
+  if (!strappy_db_validate_existing_schema(db, error_out)) {
+    return 0;
+  }
   for (schema_index = 0U;
        schema_index < (sizeof(schema_sql) / sizeof(schema_sql[0]));
        schema_index++) {
@@ -912,10 +1078,67 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       return 0;
     }
   }
+  {
+    sqlite3_stmt *column_stmt;
+    int column_rc;
+    int has_max_output_tokens;
+
+    column_stmt = NULL;
+    has_max_output_tokens = 0;
+    column_rc = sqlite3_prepare_v2(
+      db, "PRAGMA table_info(provider_accounts);", -1, &column_stmt, NULL);
+    if (column_rc == SQLITE_OK) {
+      column_rc = sqlite3_step(column_stmt);
+    }
+    while (column_rc == SQLITE_ROW) {
+      const unsigned char *column_name;
+
+      column_name = sqlite3_column_text(column_stmt, 1);
+      if ((column_name != NULL) &&
+          (strcmp((const char *)column_name, "max_output_tokens") == 0)) {
+        has_max_output_tokens = 1;
+      }
+      column_rc = sqlite3_step(column_stmt);
+    }
+    sqlite3_finalize(column_stmt);
+    if (column_rc != SQLITE_DONE) {
+      strappy_set_formatted_error(error_out,
+                                  "Could not inspect provider accounts: %s",
+                                  sqlite3_errmsg(db));
+      return 0;
+    }
+    if (!has_max_output_tokens &&
+        !strappy_db_exec(
+          db,
+          "ALTER TABLE provider_accounts ADD COLUMN max_output_tokens "
+            "INTEGER CHECK(max_output_tokens IS NULL OR "
+              "max_output_tokens > 0);",
+          "Could not add provider account output limit",
+          error_out)) {
+      return 0;
+    }
+  }
+  if (!strappy_db_validate_schema_identity(db, error_out)) {
+    return 0;
+  }
   if (!strappy_db_exec(db,
                        STRAPPY_DB_INSERT_BUILTIN_DEFAULT_MODEL_SQL,
                        "Could not create built-in default model",
                        error_out)) {
+    return 0;
+  }
+  if (!strappy_db_exec(
+        db,
+        "UPDATE app_preferences SET "
+        "default_model_id=COALESCE(default_model_id," STRAPPY_DB_DEFAULT_MODEL_SQL "),"
+        "default_provider_account_id=COALESCE(default_provider_account_id,"
+          "(SELECT a.id FROM provider_accounts a JOIN models m "
+            "ON m.provider_id=a.provider_id WHERE m.id="
+            STRAPPY_DB_DEFAULT_MODEL_SQL " AND a.lifecycle_state='active' "
+            "ORDER BY a.last_used_at_ms DESC,a.created_at_ms,a.id LIMIT 1)) "
+        "WHERE id=1;",
+        "Could not initialize model and account defaults",
+        error_out)) {
     return 0;
   }
   return strappy_db_exec(db,

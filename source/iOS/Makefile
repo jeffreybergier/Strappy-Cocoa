@@ -1,6 +1,8 @@
 # Altivec Intelligence - Strappy (iPhone)
 APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
+          StrappyAuthentication.m \
+          StrappyAccountTableViewController.m \
           StrappyAppearance.m \
           SessionListViewController.m PreferencesTableViewController.m \
           MessageListViewController.m PromptSendViewController.m \
@@ -11,6 +13,7 @@ SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
           StrappyPreferencesStatusToolbarView.m \
           StrappyPreferencesWhitelistTableViewController.m \
           StrappyPreferencesModelWhitelistTableViewController.m \
+          StrappyModelProvidersTableViewController.m \
           StrappyPreferencesDatabaseWhitelistTableViewController.m \
           StrappyPreferencesDatabaseStudyViewController.m \
           StrappyPreferencesSystemPromptsTableViewController.m \
@@ -20,8 +23,9 @@ INFO_PLIST = Info.plist
 SHARED_DIR = ../shared
 SYSTEM_PROMPT_RESOURCE = $(SHARED_DIR)/Resources/SystemPrompt.json
 ASSISTANT_SET_RESOURCE = $(SHARED_DIR)/Resources/AssistantSets.json
+BUNDLED_MODELS_RESOURCE = $(SHARED_DIR)/Resources/BundledModels.json
 FONTAWESOME_GENERATOR = $(SHARED_DIR)/tools/generate_fontawesome_webview_map.py
-FONTAWESOME_FONT_DIR ?= /altivec/libs/cocoa/build-phone/Resources/Fonts
+FONTAWESOME_FONT_DIR ?= $(ALTIVECCOCOA_DIR)/Resources/Fonts
 FONTAWESOME_ICONS_RESOURCE = $(SHARED_DIR)/Resources/FontAwesomeIcons.json
 FONTAWESOME_WEBVIEW_MAP = $(SHARED_DIR)/strappy_fontawesome_icons.inc
 FONTAWESOME_GENERATED = $(FONTAWESOME_WEBVIEW_MAP)
@@ -29,25 +33,25 @@ FONTAWESOME_FONT_FILES = \
                      $(FONTAWESOME_FONT_DIR)/FA7-Solid-900.otf \
                      $(FONTAWESOME_FONT_DIR)/FA7-Regular-400.otf \
                      $(FONTAWESOME_FONT_DIR)/FA7-Brands-400.otf
-GUIDANCE_RESOURCES = $(SYSTEM_PROMPT_RESOURCE) \
-                     $(ASSISTANT_SET_RESOURCE) \
-                     $(SHARED_DIR)/Resources/GuidanceTools.json \
-                     $(SHARED_DIR)/Resources/GuidanceSkills.json \
-                     $(SHARED_DIR)/Resources/GuidanceDatabase.json \
-                     $(FONTAWESOME_ICONS_RESOURCE)
+SHARED_RESOURCES = $(SYSTEM_PROMPT_RESOURCE) \
+                   $(ASSISTANT_SET_RESOURCE) \
+                   $(BUNDLED_MODELS_RESOURCE) \
+                   $(SHARED_DIR)/Resources/GuidanceTools.json \
+                   $(SHARED_DIR)/Resources/GuidanceSkills.json \
+                   $(SHARED_DIR)/Resources/GuidanceDatabase.json \
+                   $(FONTAWESOME_ICONS_RESOURCE)
 ALTIVECCORE_REQUIRED = 1
 ALTIVECCOCOA_REQUIRED = 1
 SOURCE_DIRS = $(SHARED_DIR)
 vpath %.m $(SHARED_DIR)
 EXTRA_FLAGS = -I$(SHARED_DIR)
-EXTRA_SOURCES = XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_config.c strappy_client.c strappy_db.c strappy_db_catalog.c strappy_db_sessions.c strappy_db_responses.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_responses.c strappy_webview.c
+EXTRA_SOURCES = XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_config.c strappy_client.c strappy_sse.c strappy_identity.c strappy_openai_oauth.c strappy_db.c strappy_db_catalog.c strappy_db_sessions.c strappy_db_responses.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_responses.c strappy_webview.c
 PHONE_SOURCE_FLAGS = -fobjc-arc
-PHONE_EXTRA_SOURCE_FLAGS = -Wno-conversion -Wno-sign-conversion -Wno-float-conversion -Wno-strict-prototypes -Wno-newline-eof
 LIBS_IPHONE = -framework Security -framework QuartzCore -weak_framework WebKit
 PHONE_LDID_SIGN ?= 1
 PHONE_LDID_ENTITLEMENTS ?= Entitlements.plist
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
-EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying prompt guidance resources"; for resource in $(GUIDANCE_RESOURCES); do cp "$$resource" "$@/"; done
+EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying shared resources"; for resource in $(SHARED_RESOURCES); do cp "$$resource" "$@/"; done
 
 DEB_PACKAGE_ID ?= com.altivecintelligence.strappy
 # Keep package metadata aligned with the plist versions managed by the release
@@ -68,15 +72,16 @@ PHONE_DEB_ROOTFUL = $(BUILD_DIR)/$(APP_NAME)-rootful.deb
 PHONE_DEB_ROOTLESS = $(BUILD_DIR)/$(APP_NAME)-rootless.deb
 PHONE_DEBS = $(PHONE_DEB_ROOTFUL) $(PHONE_DEB_ROOTLESS)
 
-$(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
-	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
-
 VALIDATE_PATHS = . $(SHARED_DIR)
 
 # The common Phone engine also exposes IPA packaging targets. Keep that engine
 # private so Strappy's public build targets only produce Debian packages.
 ifeq ($(STRAPPY_PHONE_INTERNAL_BUILD),1)
-include /altivec/altivec_common_phone.mk
+ALTIVEC_ROOT ?= /altivec
+include $(ALTIVEC_ROOT)/altivec_common_phone.mk
+
+$(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
+	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
 
 .DEFAULT_GOAL := __deb
 

@@ -65,6 +65,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
     NSParameterAssert(cacert);
     [StrappySession bootstrapProcessWithCACertPath:cacert];
   }
+  (void)[StrappySession initializeSessionStoreWithError:NULL];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(strappySessionPromptDidStart:)
@@ -108,6 +109,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)showPreferencesWindow:(id)sender
 {
   (void)sender;
+  (void)[StrappySession prepareProviderCredentialsWithError:NULL];
   if (_preferencesWindowController == nil) {
     _preferencesWindowController = [[PreferencesWindowController alloc] init];
   }

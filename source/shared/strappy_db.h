@@ -19,6 +19,7 @@ typedef struct strappy_session_record {
   char *response;
   char *model;
   char *model_name;
+  char *provider_account_id;
   char *assistant_set_id;
   char *created_at;
   char *last_activity_at;
@@ -47,6 +48,7 @@ enum {
   STRAPPY_SESSION_OPTION_BASH = 1U << 4,
   STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL = 1U << 5,
   STRAPPY_SESSION_OPTION_WORKING_DIRECTORY = 1U << 6,
+  STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT = 1U << 7,
   STRAPPY_SESSION_OPTION_ROUND_LIMIT = 1U << 8,
   STRAPPY_SESSION_OPTION_ANSWER_QUALITY = 1U << 9,
   STRAPPY_SESSION_OPTION_ALL =
@@ -57,12 +59,14 @@ enum {
     STRAPPY_SESSION_OPTION_BASH |
     STRAPPY_SESSION_OPTION_LIMIT_TO_ONE_TOOL |
     STRAPPY_SESSION_OPTION_WORKING_DIRECTORY |
+    STRAPPY_SESSION_OPTION_PROVIDER_ACCOUNT |
     STRAPPY_SESSION_OPTION_ROUND_LIMIT |
     STRAPPY_SESSION_OPTION_ANSWER_QUALITY
 };
 
 typedef struct strappy_session_options {
   char *model_id;
+  char *provider_account_id;
   char *assistant_set_id;
   char *working_directory;
   strappy_web_provider web_provider;
@@ -111,6 +115,7 @@ typedef struct strappy_session_message_record {
   char *render_state_json;
   char *message_json;
   char *reasoning;
+  int reasoning_encrypted;
   char *message_key;
   char *target_message_key;
   char *direction;
@@ -142,6 +147,8 @@ typedef struct strappy_session_message_record_list {
 typedef struct strappy_response_call_begin_input {
   long long session_id;
   long long previous_call_id;
+  const char *provider_account_id;
+  const char *model_id;
   const char *prompt_group_key;
   const char *request_kind;
   long round_index;
@@ -298,8 +305,17 @@ typedef struct strappy_database_display_name_record_list {
   size_t count;
 } strappy_database_display_name_record_list;
 
-typedef struct strappy_openrouter_model_record {
+typedef struct strappy_model_record {
   char *model_id;
+  char *provider_account_id;
+  char *provider_id;
+  char *provider_account_name;
+  char *wire_model_id;
+  char *billing_kind;
+  int reasoning_enabled;
+  int local_functions_enabled;
+  int image_input_enabled;
+  int hosted_tools_enabled;
   char *canonical_slug;
   char *hugging_face_id;
   char *name;
@@ -333,12 +349,64 @@ typedef struct strappy_openrouter_model_record {
   char *fetched_at;
   int selected;
   int allowed;
-} strappy_openrouter_model_record;
+} strappy_model_record;
 
-typedef struct strappy_openrouter_model_record_list {
-  strappy_openrouter_model_record *records;
+typedef struct strappy_model_record_list {
+  strappy_model_record *records;
   size_t count;
-} strappy_openrouter_model_record_list;
+} strappy_model_record_list;
+
+/* Source compatibility while Cocoa call sites move to the generic names. */
+typedef strappy_model_record strappy_openrouter_model_record;
+typedef strappy_model_record_list strappy_openrouter_model_record_list;
+
+typedef struct strappy_model_route_record {
+  char *model_id;
+  char *provider_account_id;
+  char *provider_id;
+  char *responses_endpoint;
+  char *wire_model_id;
+  char *billing_kind;
+  long long max_output_tokens;
+  int reasoning_enabled;
+  int local_functions_enabled;
+  int hosted_tools_enabled;
+} strappy_model_route_record;
+
+#define STRAPPY_PROVIDER_ACCOUNT_ACTIVE "active"
+#define STRAPPY_PROVIDER_ACCOUNT_ARCHIVED "archived"
+
+typedef struct strappy_provider_account_record {
+  char *account_id;
+  char *provider_id;
+  char *display_name;
+  char *lifecycle_state;
+  char *responses_endpoint;
+  long long max_output_tokens;
+  long long created_at_ms;
+  long long updated_at_ms;
+  long long last_used_at_ms;
+  int has_last_used_at_ms;
+} strappy_provider_account_record;
+
+typedef struct strappy_provider_account_record_list {
+  strappy_provider_account_record *records;
+  size_t count;
+} strappy_provider_account_record_list;
+
+typedef struct strappy_manual_model_input {
+  const char *wire_model_id;
+  const char *display_name;
+  long long context_window_tokens;
+  long long max_output_tokens;
+  int reasoning_enabled;
+  int local_functions_enabled;
+  int image_input_enabled;
+  const char *pricing_prompt;
+  const char *pricing_completion;
+  const char *pricing_input_cache_read;
+  const char *pricing_input_cache_write;
+} strappy_manual_model_input;
 
 void strappy_session_record_init(strappy_session_record *record);
 void strappy_session_record_destroy(strappy_session_record *record);
@@ -364,12 +432,65 @@ void strappy_database_display_name_record_list_init(
   strappy_database_display_name_record_list *list);
 void strappy_database_display_name_record_list_destroy(
   strappy_database_display_name_record_list *list);
+void strappy_model_record_init(strappy_model_record *record);
+void strappy_model_record_destroy(strappy_model_record *record);
+void strappy_model_record_list_init(strappy_model_record_list *list);
+void strappy_model_record_list_destroy(strappy_model_record_list *list);
+void strappy_model_route_record_init(strappy_model_route_record *record);
+void strappy_model_route_record_destroy(strappy_model_route_record *record);
+void strappy_provider_account_record_init(
+  strappy_provider_account_record *record);
+void strappy_provider_account_record_destroy(
+  strappy_provider_account_record *record);
+void strappy_provider_account_record_list_init(
+  strappy_provider_account_record_list *list);
+void strappy_provider_account_record_list_destroy(
+  strappy_provider_account_record_list *list);
 void strappy_openrouter_model_record_init(strappy_openrouter_model_record *record);
 void strappy_openrouter_model_record_destroy(strappy_openrouter_model_record *record);
 void strappy_openrouter_model_record_list_init(strappy_openrouter_model_record_list *list);
 void strappy_openrouter_model_record_list_destroy(strappy_openrouter_model_record_list *list);
 
 int strappy_db_initialize(const char *db_path, char **error_out);
+int strappy_db_create_provider_account(const char *db_path,
+                                       const char *provider_id,
+                                       const char *display_name,
+                                       const char *responses_endpoint,
+                                       char **account_id_out,
+                                       char **error_out);
+int strappy_db_restore_provider_account(const char *db_path,
+                                        const char *account_id,
+                                        const char *provider_id,
+                                        const char *display_name,
+                                        const char *responses_endpoint,
+                                        char **error_out);
+int strappy_db_list_provider_accounts(
+  const char *db_path,
+  const char *provider_id,
+  int include_archived,
+  strappy_provider_account_record_list *list,
+  char **error_out);
+int strappy_db_get_provider_account(const char *db_path,
+                                    const char *account_id,
+                                    strappy_provider_account_record *record,
+                                    char **error_out);
+int strappy_db_update_provider_account(const char *db_path,
+                                       const char *account_id,
+                                       const char *display_name,
+                                       const char *responses_endpoint,
+                                       long long max_output_tokens,
+                                       char **error_out);
+int strappy_db_archive_provider_account(const char *db_path,
+                                        const char *account_id,
+                                        char **error_out);
+int strappy_db_mark_provider_account_used(const char *db_path,
+                                          const char *account_id,
+                                          long long used_at_ms,
+                                          char **error_out);
+int strappy_db_get_designated_provider_account(const char *db_path,
+                                               const char *provider_id,
+                                               char **account_id_out,
+                                               char **error_out);
 int strappy_db_save_discovered_databases(
   const char *db_path,
   const strappy_discovered_database_input *records,
@@ -606,6 +727,76 @@ int strappy_db_exclude_prompt_group_from_context(
 int strappy_db_save_openrouter_models_json(const char *db_path,
                                            const char *json,
                                            char **error_out);
+int strappy_db_save_account_models_json(const char *db_path,
+                                        const char *provider_account_id,
+                                        const char *json,
+                                        char **error_out);
+int strappy_db_import_bundled_models_json(const char *db_path,
+                                          const char *json,
+                                          char **error_out);
+int strappy_db_import_bundled_models_json_for_account(
+  const char *db_path,
+  const char *provider_account_id,
+  const char *json,
+  char **error_out);
+int strappy_db_create_manual_model(const char *db_path,
+                                   const char *provider_id,
+                                   const strappy_manual_model_input *input,
+                                   char **model_id_out,
+                                   char **error_out);
+int strappy_db_update_manual_model(const char *db_path,
+                                   const char *provider_id,
+                                   const strappy_manual_model_input *input,
+                                   char **error_out);
+int strappy_db_archive_manual_model(const char *db_path,
+                                    const char *provider_id,
+                                    const char *wire_model_id,
+                                    char **error_out);
+int strappy_db_list_models_matching(
+  const char *db_path,
+  const char *search_text,
+  strappy_model_record_list *list,
+  char **error_out);
+int strappy_db_list_models_for_configured_providers(
+  const char *db_path,
+  strappy_model_record_list *list,
+  char **error_out);
+int strappy_db_list_models_for_account(
+  const char *db_path,
+  const char *provider_account_id,
+  const char *search_text,
+  int allowed_only,
+  strappy_model_record_list *list,
+  char **error_out);
+int strappy_db_get_account_model_id(const char *db_path,
+                                    const char *provider_account_id,
+                                    const char *wire_model_id,
+                                    char **model_id_out,
+                                    char **error_out);
+int strappy_db_list_models(const char *db_path,
+                           strappy_model_record_list *list,
+                           char **error_out);
+int strappy_db_list_allowed_models(const char *db_path,
+                                   strappy_model_record_list *list,
+                                   char **error_out);
+int strappy_db_set_model_allowed(const char *db_path,
+                                 const char *model_id,
+                                 int allowed,
+                                 char **error_out);
+int strappy_db_set_default_model(const char *db_path,
+                                 const char *model_id,
+                                 char **error_out);
+int strappy_db_get_default_model(const char *db_path,
+                                 char **model_id_out,
+                                 char **error_out);
+int strappy_db_set_default_account_model(const char *db_path,
+                                         const char *provider_account_id,
+                                         const char *model_id,
+                                         char **error_out);
+int strappy_db_get_default_account_model(const char *db_path,
+                                         char **provider_account_id_out,
+                                         char **model_id_out,
+                                         char **error_out);
 int strappy_db_list_openrouter_models_matching(
   const char *db_path,
   const char *search_text,
@@ -637,6 +828,11 @@ int strappy_db_get_session_model(const char *db_path,
                                  long long session_id,
                                  char **model_id_out,
                                  char **error_out);
+int strappy_db_get_session_model_route(
+  const char *db_path,
+  long long session_id,
+  strappy_model_route_record *route,
+  char **error_out);
 
 #ifdef __cplusplus
 }

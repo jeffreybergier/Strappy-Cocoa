@@ -5,6 +5,7 @@
 @class StrappyPreferencesDatabaseWhitelistView;
 @class StrappyPreferencesDatabaseStudyView;
 @class StrappyPreferencesModelWhitelistView;
+@class StrappyModelProviderEditor;
 @class StrappyPreferencesSystemPromptsView;
 @class StrappySessionOptionsViewController;
 
@@ -14,13 +15,11 @@
   NSView              *contentPaneView_;
   StrappyPreferencesAuthenticationView *authenticationPaneView_;
   StrappySessionOptionsViewController *sessionDefaultsController_;
-  NSTextField         *apiEndpointField_;
-  NSSecureTextField   *apiTokenField_;
-  NSTextField         *apiTokenStatusLabel_;
   NSSearchField       *modelSearchField_;
   NSTableView         *modelTableView_;
   StrappyPreferencesModelWhitelistView *modelWhitelistView_;
-  NSButton            *fetchModelsButton_;
+  NSButton            *editModelsButton_;
+  StrappyModelProviderEditor *modelProviderEditor_;
   NSProgressIndicator *modelProgressIndicator_;
   NSTextField         *modelStatusLabel_;
   StrappyPreferencesSystemPromptsView *systemPromptsPaneView_;
@@ -47,10 +46,16 @@
   NSString            *expandedDatabaseStudyIdentifier_;
   BOOL                 scanning_;
   BOOL                 refreshingModels_;
+  BOOL                 noAvailableModelAccounts_;
+  BOOL                 modelCatalogDirty_;
+  BOOL                 databaseCatalogDirty_;
+  BOOL                 databaseStudyDirty_;
+  BOOL                 updatingModelWhitelist_;
 }
 
 - (id)init;
 - (void)scanDatabases:(id)sender;
 - (void)refreshModels:(id)sender;
+- (void)editModelProviders:(id)sender;
 
 @end

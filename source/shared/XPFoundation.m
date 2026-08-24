@@ -18,6 +18,120 @@
 
 @end
 
+@implementation NSPropertyListSerialization (XPFoundation)
+
++ (NSData *)XP_dataWithPropertyList:(id)propertyList
+                              format:(NSPropertyListFormat)format
+{
+  SEL selector;
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  XPUInteger options;
+  NSError *error;
+  NSData *result;
+
+  selector = @selector(dataWithPropertyList:format:options:error:);
+  if ([(id)self respondsToSelector:selector]) {
+    signature = [(id)self methodSignatureForSelector:selector];
+    if ((signature != nil) && ([signature numberOfArguments] == 6U)) {
+      options = 0U;
+      error = nil;
+      result = nil;
+      invocation = [NSInvocation invocationWithMethodSignature:signature];
+      [invocation setTarget:self];
+      [invocation setSelector:selector];
+      [invocation setArgument:&propertyList atIndex:2];
+      [invocation setArgument:&format atIndex:3];
+      [invocation setArgument:&options atIndex:4];
+      [invocation setArgument:&error atIndex:5];
+      [invocation invoke];
+      [invocation getReturnValue:&result];
+      return result;
+    }
+  }
+
+  selector = @selector(dataFromPropertyList:format:errorDescription:);
+  signature = [(id)self methodSignatureForSelector:selector];
+  if ((signature != nil) && ([signature numberOfArguments] == 5U)) {
+    NSString *errorDescription;
+
+    errorDescription = nil;
+    result = nil;
+    invocation = [NSInvocation invocationWithMethodSignature:signature];
+    [invocation setTarget:self];
+    [invocation setSelector:selector];
+    [invocation setArgument:&propertyList atIndex:2];
+    [invocation setArgument:&format atIndex:3];
+    [invocation setArgument:&errorDescription atIndex:4];
+    [invocation invoke];
+    [invocation getReturnValue:&result];
+    [errorDescription release];
+    return result;
+  }
+
+  return nil;
+}
+
++ (id)XP_propertyListWithData:(NSData *)data
+                       options:(XPUInteger)options
+                        format:(NSPropertyListFormat *)format
+{
+  SEL selector;
+  NSMethodSignature *signature;
+  NSInvocation *invocation;
+  NSError *error;
+  id result;
+
+  selector = @selector(propertyListWithData:options:format:error:);
+  if ([(id)self respondsToSelector:selector]) {
+    signature = [(id)self methodSignatureForSelector:selector];
+    if ((signature != nil) && ([signature numberOfArguments] == 6U)) {
+      NSPropertyListFormat *formatArgument;
+
+      error = nil;
+      result = nil;
+      formatArgument = format;
+      invocation = [NSInvocation invocationWithMethodSignature:signature];
+      [invocation setTarget:self];
+      [invocation setSelector:selector];
+      [invocation setArgument:&data atIndex:2];
+      [invocation setArgument:&options atIndex:3];
+      [invocation setArgument:&formatArgument atIndex:4];
+      [invocation setArgument:&error atIndex:5];
+      [invocation invoke];
+      [invocation getReturnValue:&result];
+      return result;
+    }
+  }
+
+  selector =
+    @selector(propertyListFromData:mutabilityOption:format:errorDescription:);
+  signature = [(id)self methodSignatureForSelector:selector];
+  if ((signature != nil) && ([signature numberOfArguments] == 6U)) {
+    NSPropertyListFormat *formatArgument;
+    NSString *errorDescription;
+
+    errorDescription = nil;
+    result = nil;
+    formatArgument = format;
+    invocation = [NSInvocation invocationWithMethodSignature:signature];
+    [invocation setTarget:self];
+    [invocation setSelector:selector];
+    [invocation setArgument:&data atIndex:2];
+    [invocation setArgument:&options atIndex:3];
+    [invocation setArgument:&formatArgument atIndex:4];
+    [invocation setArgument:&errorDescription atIndex:5];
+    [invocation invoke];
+    [invocation getReturnValue:&result];
+    [errorDescription release];
+    return result;
+  }
+
+  return nil;
+}
+
+@end
+
 @implementation NSThread (XPFoundation)
 
 + (BOOL)XP_isMainThread

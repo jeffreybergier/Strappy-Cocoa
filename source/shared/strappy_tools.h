@@ -2,6 +2,7 @@
 #define STRAPPY_TOOLS_H
 
 #include "strappy_config.h"
+#include "strappy_provider.h"
 
 #include <stddef.h>
 
@@ -29,6 +30,8 @@ extern "C" {
 #define STRAPPY_TOOL_FONTAWESOME_CONFIRM "fontawesome_confirm"
 #define STRAPPY_TOOL_OPENROUTER_WEB_SEARCH "openrouter:web_search"
 #define STRAPPY_TOOL_OPENROUTER_WEB_FETCH "openrouter:web_fetch"
+#define STRAPPY_TOOL_WEB_SEARCH "web_search"
+#define STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL "web_search_call"
 
 typedef int (*strappy_tools_continue_callback)(void *user_data);
 
@@ -50,10 +53,24 @@ char *strappy_tools_responses_request_json_filtered(
   size_t allowed_name_count,
   strappy_web_provider web_provider,
   char **error_out);
+char *strappy_tools_responses_request_json_filtered_for_provider(
+  const char *resource_dir,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
+  strappy_provider_kind provider,
+  strappy_web_provider web_provider,
+  char **error_out);
 char *strappy_tools_prompt_markdown_filtered(
   const char *resource_dir,
   const char * const *allowed_names,
   size_t allowed_name_count,
+  strappy_web_provider web_provider,
+  char **error_out);
+char *strappy_tools_prompt_markdown_filtered_for_provider(
+  const char *resource_dir,
+  const char * const *allowed_names,
+  size_t allowed_name_count,
+  strappy_provider_kind provider,
   strappy_web_provider web_provider,
   char **error_out);
 char *strappy_tools_tool_guidance_string(const char *resource_dir,

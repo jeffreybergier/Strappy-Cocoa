@@ -7,6 +7,7 @@ extern NSString * const StrappySessionStreamEventNotification;
 extern NSString * const StrappySessionModelCatalogRefreshDidStartNotification;
 extern NSString * const StrappySessionModelCatalogRefreshDidFinishNotification;
 extern NSString * const StrappySessionModelCatalogDidChangeNotification;
+extern NSString * const StrappyProviderAccountsDidChangeNotification;
 extern NSString * const StrappySessionChangeKindKey;
 extern NSString * const StrappySessionChangeKindActivity;
 extern NSString * const StrappySessionChangeKindName;
@@ -28,6 +29,16 @@ typedef enum StrappyWebViewPalette {
   StrappyWebViewPaletteNeutral
 } StrappyWebViewPalette;
 
+@protocol StrappyChatGPTAuthorizationObserver <NSObject>
+- (BOOL)strappyChatGPTAuthorizationShouldCancelWithContext:(id)context;
+- (void)strappyChatGPTAuthorizationDidReceiveVerificationURL:
+          (NSString *)verificationURL
+                                                       userCode:
+          (NSString *)userCode
+                                                        context:
+          (id)context;
+@end
+
 enum {
   StrappySessionOptionModel = 1U << 0,
   StrappySessionOptionAssistantSet = 1U << 1,
@@ -36,6 +47,7 @@ enum {
   StrappySessionOptionBash = 1U << 4,
   StrappySessionOptionLimitToOneTool = 1U << 5,
   StrappySessionOptionWorkingDirectory = 1U << 6,
+  StrappySessionOptionProviderAccount = 1U << 7,
   StrappySessionOptionRoundLimit = 1U << 8,
   StrappySessionOptionAnswerQuality = 1U << 9,
   StrappySessionOptionAll =
@@ -46,6 +58,7 @@ enum {
     StrappySessionOptionBash |
     StrappySessionOptionLimitToOneTool |
     StrappySessionOptionWorkingDirectory |
+    StrappySessionOptionProviderAccount |
     StrappySessionOptionRoundLimit |
     StrappySessionOptionAnswerQuality
 };
@@ -53,6 +66,7 @@ enum {
 @interface StrappySessionOptions : NSObject <NSCopying> {
  @private
   NSString *modelIdentifier_;
+  NSString *providerAccountIdentifier_;
   NSString *assistantSetIdentifier_;
   NSString *webProvider_;
   NSString *workingDirectory_;
@@ -71,8 +85,19 @@ enum {
                limitToOneTool:(BOOL)limitToOneTool
                    roundLimit:(NSUInteger)roundLimit
              workingDirectory:(NSString *)workingDirectory;
+- (id)initWithModelIdentifier:(NSString *)modelIdentifier
+    providerAccountIdentifier:(NSString *)providerAccountIdentifier
+       assistantSetIdentifier:(NSString *)assistantSetIdentifier
+                  webProvider:(NSString *)webProvider
+             webSearchEnabled:(BOOL)webSearchEnabled
+                  bashEnabled:(BOOL)bashEnabled
+               limitToOneTool:(BOOL)limitToOneTool
+                   roundLimit:(NSUInteger)roundLimit
+             workingDirectory:(NSString *)workingDirectory;
 - (NSString *)modelIdentifier;
 - (void)setModelIdentifier:(NSString *)modelIdentifier;
+- (NSString *)providerAccountIdentifier;
+- (void)setProviderAccountIdentifier:(NSString *)providerAccountIdentifier;
 - (NSString *)assistantSetIdentifier;
 - (void)setAssistantSetIdentifier:(NSString *)assistantSetIdentifier;
 - (NSString *)webProvider;
@@ -106,6 +131,51 @@ enum {
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
++ (BOOL)prepareProviderCredentialsWithError:(NSError **)error;
++ (BOOL)isChatGPTProviderEnabled;
++ (long long)currentTimestampMilliseconds;
++ (NSString *)performChatGPTDeviceAuthorizationForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                observer:(id<StrappyChatGPTAuthorizationObserver>)observer
+                context:(id)context
+                error:(NSError **)error;
++ (NSString *)refreshChatGPTCredentialsForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                expectedAccountIdentifier:(NSString *)expectedAccountIdentifier
+                observer:(id<StrappyChatGPTAuthorizationObserver>)observer
+                context:(id)context
+                error:(NSError **)error;
++ (NSString *)designatedProviderAccountIdentifierForProviderIdentifier:
+                (NSString *)providerIdentifier
+                                                               error:
+                (NSError **)error;
++ (NSArray *)providerCatalog;
++ (NSArray *)providerAccountCatalogWithError:(NSError **)error;
++ (NSArray *)verifiedProviderAccountCatalogWithError:(NSError **)error;
++ (BOOL)parseOptionalPositiveIntegerText:(NSString *)text
+                                   value:(long long *)value;
++ (NSString *)pricePerTokenForPricePerMillionText:(NSString *)text
+                                             valid:(BOOL *)valid;
++ (NSDictionary *)createProviderAccountForProviderIdentifier:
+                    (NSString *)providerIdentifier
+                                                        error:
+                    (NSError **)error;
++ (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                            displayName:(NSString *)displayName
+                      responsesEndpoint:(NSString *)responsesEndpoint
+                        maxOutputTokens:(long long)maxOutputTokens
+                                  error:(NSError **)error;
++ (NSString *)bearerTokenForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                                                  error:(NSError **)error;
++ (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                            displayName:(NSString *)displayName
+                      responsesEndpoint:(NSString *)responsesEndpoint
+                        maxOutputTokens:(long long)maxOutputTokens
+                            bearerToken:(NSString *)bearerToken
+                                  error:(NSError **)error;
++ (BOOL)archiveProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                                    error:(NSError **)error;
 + (StrappySession *)createSessionWithError:(NSError **)error;
 + (NSArray *)codingWorkingDirectoryPaths;
 + (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier
@@ -121,6 +191,15 @@ enum {
     (NSNumber *)sessionIdentifier error:(NSError **)error;
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier
                                                error:(NSError **)error;
++ (NSArray *)modelCatalogMatchingSearchText:(NSString *)searchText
+                                       error:(NSError **)error;
++ (NSArray *)modelCatalogWithError:(NSError **)error;
++ (NSArray *)configuredProviderModelCatalogWithError:(NSError **)error;
++ (NSArray *)allowedModelCatalogWithError:(NSError **)error;
++ (NSArray *)bundledModelCatalogForProviderIdentifier:
+               (NSString *)providerIdentifier
+                                                 error:
+               (NSError **)error;
 + (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
                                                 error:(NSError **)error;
 + (NSArray *)openRouterModelCatalogWithError:(NSError **)error;
@@ -130,6 +209,9 @@ enum {
                                   webSearchEnabled:(BOOL)webSearchEnabled
                                              error:(NSError **)error;
 + (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error;
++ (NSString *)defaultModelIdentifierWithError:(NSError **)error;
++ (BOOL)setDefaultModelIdentifier:(NSString *)modelIdentifier
+                             error:(NSError **)error;
 + (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                       error:(NSError **)error;
 + (StrappySessionOptions *)defaultSessionOptionsWithError:(NSError **)error;
@@ -139,6 +221,67 @@ enum {
 + (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
                 forModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error;
++ (BOOL)setModelAllowed:(BOOL)allowed
+     forModelIdentifier:(NSString *)modelIdentifier
+                  error:(NSError **)error;
++ (NSString *)createManualModelForProviderIdentifier:
+                (NSString *)providerIdentifier
+                                                wireModelID:
+                (NSString *)wireModelID
+                                                displayName:
+                (NSString *)displayName
+                                         contextWindowTokens:
+                (long long)contextWindowTokens
+                                             maxOutputTokens:
+                (long long)maxOutputTokens
+                                           reasoningEnabled:
+                (BOOL)reasoningEnabled
+                                          imageInputEnabled:
+                (BOOL)imageInputEnabled
+                                      localFunctionsEnabled:
+                (BOOL)localFunctionsEnabled
+                                          inputPricePerToken:
+                (NSString *)inputPricePerToken
+                                         outputPricePerToken:
+                (NSString *)outputPricePerToken
+                                      cacheReadPricePerToken:
+                (NSString *)cacheReadPricePerToken
+                                     cacheWritePricePerToken:
+                (NSString *)cacheWritePricePerToken
+                                                       error:
+                (NSError **)error;
++ (BOOL)updateManualModelForProviderIdentifier:
+            (NSString *)providerIdentifier
+                                            wireModelID:
+            (NSString *)wireModelID
+                                            displayName:
+            (NSString *)displayName
+                                     contextWindowTokens:
+            (long long)contextWindowTokens
+                                         maxOutputTokens:
+            (long long)maxOutputTokens
+                                       reasoningEnabled:
+            (BOOL)reasoningEnabled
+                                      imageInputEnabled:
+            (BOOL)imageInputEnabled
+                                  localFunctionsEnabled:
+            (BOOL)localFunctionsEnabled
+                                      inputPricePerToken:
+            (NSString *)inputPricePerToken
+                                     outputPricePerToken:
+            (NSString *)outputPricePerToken
+                                  cacheReadPricePerToken:
+            (NSString *)cacheReadPricePerToken
+                                 cacheWritePricePerToken:
+            (NSString *)cacheWritePricePerToken
+                                                   error:
+            (NSError **)error;
++ (BOOL)archiveManualModelForProviderIdentifier:
+            (NSString *)providerIdentifier
+                                             wireModelID:
+            (NSString *)wireModelID
+                                                    error:
+            (NSError **)error;
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
 + (NSArray *)databaseStudyRowsWithError:(NSError **)error;
 + (BOOL)deleteDatabaseStudyValuesForDatabaseIdentifier:

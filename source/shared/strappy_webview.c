@@ -110,6 +110,7 @@ typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_HARNESS,
   STRAPPY_WEBVIEW_LABEL_DEVELOPER,
   STRAPPY_WEBVIEW_LABEL_THINKING,
+  STRAPPY_WEBVIEW_LABEL_ENCRYPTED,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_SERVING,
   STRAPPY_WEBVIEW_LABEL_PROCESSING_WAITING_HYDRATING,
@@ -161,6 +162,7 @@ static const char * const g_strappy_webview_label_keys[
   "Harness",
   "Harness",
   "Thinking",
+  "Encrypted",
   "[fa:gears] Grinding",
   "[fa:bell-concierge] Serving",
   "[fa:martini-glass] Hydrating",
@@ -171,7 +173,7 @@ static const char * const g_strappy_webview_label_keys[
   "[fa:crown] Reigning",
   "Autoscroll on",
   "Autoscroll off",
-  "Metadata",
+  "Metadata:",
   "No HTTP response",
   "Tool",
   "Tool Request",
@@ -223,6 +225,7 @@ static void strappy_webview_assign_localized_labels(
   labels->harness = values[STRAPPY_WEBVIEW_LABEL_HARNESS];
   labels->developer = values[STRAPPY_WEBVIEW_LABEL_DEVELOPER];
   labels->thinking = values[STRAPPY_WEBVIEW_LABEL_THINKING];
+  labels->encrypted = values[STRAPPY_WEBVIEW_LABEL_ENCRYPTED];
   labels->processing_tools =
     values[STRAPPY_WEBVIEW_LABEL_PROCESSING_TOOLS];
   for (index = 0U;
@@ -979,6 +982,17 @@ static const char *strappy_webview_thinking_label(
   return "Thinking";
 }
 
+static const char *strappy_webview_encrypted_label(
+  const strappy_webview_labels *labels)
+{
+  if ((labels != NULL) &&
+      (labels->encrypted != NULL) &&
+      (labels->encrypted[0] != '\0')) {
+    return labels->encrypted;
+  }
+  return "Encrypted";
+}
+
 static const char *strappy_webview_processing_waiting_label(
   const strappy_webview_labels *labels,
   size_t index)
@@ -1036,7 +1050,7 @@ static const char *strappy_webview_response_metadata_label(
       (labels->response_metadata[0] != '\0')) {
     return labels->response_metadata;
   }
-  return "Metadata";
+  return "Metadata:";
 }
 
 static const char *strappy_webview_no_http_response_label(
@@ -1659,6 +1673,39 @@ static char *strappy_webview_transform_promoted_value(
   return strappy_webview_buffer_finish(&buffer);
 }
 
+static cJSON *strappy_webview_native_web_search_promoted_value(cJSON *item)
+{
+  cJSON *action;
+  cJSON *value;
+
+  if (!cJSON_IsObject(item)) {
+    return NULL;
+  }
+  action = cJSON_GetObjectItemCaseSensitive(item, "action");
+  if (!cJSON_IsObject(action)) {
+    return NULL;
+  }
+  value = cJSON_GetObjectItemCaseSensitive(action, "query");
+  if (cJSON_IsString(value) && (value->valuestring != NULL) &&
+      (value->valuestring[0] != '\0')) {
+    return value;
+  }
+  value = cJSON_GetObjectItemCaseSensitive(action, "queries");
+  if (cJSON_IsArray(value) && (cJSON_GetArraySize(value) > 0)) {
+    value = cJSON_GetArrayItem(value, 0);
+    if (cJSON_IsString(value) && (value->valuestring != NULL) &&
+        (value->valuestring[0] != '\0')) {
+      return value;
+    }
+  }
+  value = cJSON_GetObjectItemCaseSensitive(action, "url");
+  if (cJSON_IsString(value) && (value->valuestring != NULL) &&
+      (value->valuestring[0] != '\0')) {
+    return value;
+  }
+  return NULL;
+}
+
 static char *strappy_webview_tool_display_title(
   const strappy_webview_message *message,
   cJSON *display_registry,
@@ -1721,6 +1768,10 @@ static char *strappy_webview_tool_display_title(
   if (cJSON_IsArray(path) && (cJSON_GetArraySize(path) > 0)) {
     item = strappy_webview_response_item_object(message);
     value = strappy_webview_json_path_value(item, path);
+    if ((value == NULL) &&
+        (strcmp(tool_key, STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL) == 0)) {
+      value = strappy_webview_native_web_search_promoted_value(item);
+    }
   } else if ((promoted_argument != NULL) &&
              cJSON_IsString(promoted_argument) &&
              (promoted_argument->valuestring != NULL)) {
@@ -2087,6 +2138,11 @@ static int strappy_webview_append_response_metadata_html(
   size_t database_display_name_count,
   const strappy_webview_labels *labels)
 {
+  cJSON *root;
+  cJSON *model;
+  const char *model_text;
+  int ok;
+
   if ((!strappy_webview_is_api_call_role(role) &&
        !strappy_webview_is_api_error_role(role)) ||
       (metadata_json == NULL) ||
@@ -2094,37 +2150,48 @@ static int strappy_webview_append_response_metadata_html(
     return 1;
   }
 
-  return strappy_webview_buffer_append_cstring(
-           buffer,
-           "<div class=\"response-metadata response-metadata-collapsed\" "
-           "data-metadata=\"") &&
-         strappy_webview_append_database_display_text_html(
-           buffer,
-           metadata_json,
-           database_display_names,
-           database_display_name_count,
-           1) &&
-         strappy_webview_buffer_append_cstring(
-           buffer,
-           "\"><div class=\"response-metadata-label disclosure-title\" "
-           "onclick=\"return toggleResponseMetadata(this)\">"
-           "<a class=\"response-metadata-toggle\" href=\"#\" "
-           "aria-expanded=\"false\"><span "
-           "class=\"response-metadata-disclosure\">") &&
-         strappy_webview_buffer_append_cstring(
-           buffer,
-           strappy_webview_disclosure_icon_html(1)) &&
-         strappy_webview_buffer_append_cstring(
-           buffer,
-           "</span></a><span "
-           "class=\"response-metadata-error-slot\"></span>") &&
-         strappy_webview_append_html_escaped(
-           buffer,
-           strappy_webview_response_metadata_label(labels)) &&
-         strappy_webview_buffer_append_cstring(
-           buffer,
-           ": OpenRouter</div><div class=\"response-metadata-body\"></div>"
-           "</div>");
+  root = cJSON_Parse(metadata_json);
+  model = (root != NULL) ?
+    cJSON_GetObjectItemCaseSensitive(root, "model") : NULL;
+  model_text = (cJSON_IsString(model) && (model->valuestring != NULL) &&
+                (model->valuestring[0] != '\0')) ? model->valuestring : NULL;
+
+  ok = strappy_webview_buffer_append_cstring(
+         buffer,
+         "<div class=\"response-metadata response-metadata-collapsed\" "
+         "data-metadata=\"") &&
+       strappy_webview_append_database_display_text_html(
+         buffer,
+         metadata_json,
+         database_display_names,
+         database_display_name_count,
+         1) &&
+       strappy_webview_buffer_append_cstring(
+         buffer,
+         "\"><div class=\"response-metadata-label disclosure-title\" "
+         "onclick=\"return toggleResponseMetadata(this)\">"
+         "<a class=\"response-metadata-toggle\" href=\"#\" "
+         "aria-expanded=\"false\"><span "
+         "class=\"response-metadata-disclosure\">") &&
+       strappy_webview_buffer_append_cstring(
+         buffer,
+         strappy_webview_disclosure_icon_html(1)) &&
+       strappy_webview_buffer_append_cstring(
+         buffer,
+         "</span></a><span "
+         "class=\"response-metadata-error-slot\"></span>") &&
+       strappy_webview_append_html_escaped(
+         buffer,
+         strappy_webview_response_metadata_label(labels));
+  if (ok && (model_text != NULL)) {
+    ok = strappy_webview_buffer_append_cstring(buffer, " ") &&
+         strappy_webview_append_html_escaped(buffer, model_text);
+  }
+  ok = ok && strappy_webview_buffer_append_cstring(
+    buffer,
+    "</div><div class=\"response-metadata-body\"></div></div>");
+  cJSON_Delete(root);
+  return ok;
 }
 
 static int strappy_webview_append_tool_column_html(
@@ -2974,7 +3041,6 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function formatResponseMetadata(root){var lines=[];var usage;var gen;",
     "if(!isObj(root))return jsonText(root);",
     "addMetaLine(lines,'Response ID',firstMetadataValue(root.id,root.response_id));",
-    "addMetaLine(lines,'Model',root.model);",
     "addMetaLine(lines,'Created',firstMetadataValue(root.created_at,root.created));",
     "addMetaLine(lines,'Response status',root.status);",
     "if(isObj(root.incomplete_details))addMetaLine(lines,'Incomplete reason',root.incomplete_details.reason);",
@@ -4033,6 +4099,9 @@ static char *strappy_webview_message_html_with_display_registry(
   role = ((message != NULL) && (message->role != NULL) &&
           (message->role[0] != '\0')) ? message->role : "assistant";
   text = (message != NULL) ? strappy_webview_string_or_empty(message->text) : "";
+  if ((message != NULL) && message->reasoning_encrypted) {
+    text = strappy_webview_encrypted_label(labels);
+  }
   reasoning = (message != NULL) ?
     strappy_webview_string_or_empty(message->reasoning) : "";
   created_at = (message != NULL) ?

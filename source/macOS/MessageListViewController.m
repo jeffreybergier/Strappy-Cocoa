@@ -150,6 +150,7 @@ static BOOL StrappyContextRoundActionValues(
 - (NSString *)writeCurrentHTML;
 - (void)layoutWebViewAndPromptBar;
 - (void)clearRequestState;
+- (void)showOptionsErrorMessage:(NSString *)message title:(NSString *)title;
 - (BOOL)updateSessionOptions:(StrappySessionOptions *)options
                changedFields:(StrappySessionOptionMask)changedFields;
 @end
@@ -388,7 +389,7 @@ static BOOL StrappyContextRoundActionValues(
 {
   NSArray *models;
 
-  models = [StrappySession allowedOpenRouterModelCatalogWithError:nil];
+  models = [StrappySession allowedModelCatalogWithError:nil];
   return (models != nil) ? models : [NSArray array];
 }
 
@@ -427,9 +428,9 @@ static BOOL StrappyContextRoundActionValues(
     if ([errorMessage length] == 0U) {
       errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
     }
-    [statusText_ release];
-    statusText_ = [errorMessage retain];
-    [self reloadContent];
+    [self showOptionsErrorMessage:errorMessage
+                            title:NSLocalizedString(
+                              @"Failed to Save Changes", nil)];
     return NO;
   }
   [options setModelIdentifier:modelIdentifier];
@@ -461,14 +462,35 @@ static BOOL StrappyContextRoundActionValues(
     if ([errorMessage length] == 0U) {
       errorMessage = NSLocalizedString(@"Your changes could not be saved.", nil);
     }
-    [statusText_ release];
-    statusText_ = [errorMessage retain];
+    [self showOptionsErrorMessage:errorMessage
+                            title:NSLocalizedString(
+                              @"Failed to Save Changes", nil)];
     return NO;
   }
 
   [statusText_ release];
   statusText_ = nil;
   return YES;
+}
+
+- (void)showOptionsErrorMessage:(NSString *)message title:(NSString *)title
+{
+  NSAlert *alert;
+  NSWindow *window;
+
+  window = [[self view] window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
+  alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:title];
+  [alert setInformativeText:message];
+  [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:nil
+                      didEndSelector:NULL
+                         contextInfo:NULL];
 }
 
 + (NSArray *)handledURLSchemes

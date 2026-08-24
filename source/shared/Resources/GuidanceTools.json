@@ -15,6 +15,18 @@
   },
   "server_tools": [
     {
+      "type": "web_search",
+      "description": "Search current public information on the web.",
+      "feature": "web_search",
+      "x-strappy-display": {
+        "label": "Web Search",
+        "promoted_path": [
+          "action",
+          "query"
+        ]
+      }
+    },
+    {
       "type": "openrouter:web_search",
       "description": "Search current public information on the web.",
       "feature": "web_search",

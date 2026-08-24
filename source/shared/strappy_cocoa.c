@@ -1,21 +1,62 @@
+#if !defined(__APPLE__)
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "strappy_cocoa.h"
 
+#include "strappy_calendar.h"
 #include "strappy_core.h"
 
 #ifdef __APPLE__
 #include <CoreFoundation/CoreFoundation.h>
+#include <mach/mach_time.h>
 #else
 #include <time.h>
 #endif
 
 #include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 
-#define STRAPPY_COCOA_UNIX_MIN_SECONDS (-62167219200LL)
-#define STRAPPY_COCOA_UNIX_MAX_SECONDS 253402300799LL
 #define STRAPPY_COCOA_APPLE_EPOCH_OFFSET 978307200LL
+#define STRAPPY_COCOA_MAX_INFO_PLIST_BYTES (1024U * 1024U)
+
+long long strappy_cocoa_monotonic_milliseconds(void)
+{
+#ifdef __APPLE__
+  mach_timebase_info_data_t timebase;
+  uint64_t absolute;
+  long double milliseconds;
+
+  if ((mach_timebase_info(&timebase) == KERN_SUCCESS) &&
+      (timebase.denom != 0U)) {
+    absolute = mach_absolute_time();
+    milliseconds = ((long double)absolute * (long double)timebase.numer) /
+      ((long double)timebase.denom * 1000000.0L);
+    return (milliseconds >= (long double)LLONG_MAX) ?
+      LLONG_MAX : (long long)milliseconds;
+  }
+#else
+  struct timespec value;
+
+  if (clock_gettime(CLOCK_MONOTONIC, &value) == 0) {
+    return ((long long)value.tv_sec * 1000LL) +
+      ((long long)value.tv_nsec / 1000000LL);
+  }
+#endif
+  {
+    struct timeval value;
+
+    if (gettimeofday(&value, NULL) != 0) {
+      return 0LL;
+    }
+    return ((long long)value.tv_sec * 1000LL) +
+      ((long long)value.tv_usec / 1000LL);
+  }
+}
 
 static int strappy_cocoa_string_has_value(const char *value)
 {
@@ -370,8 +411,8 @@ static int strappy_cocoa_parse_timestamp_value(
     return 0;
   }
 
-  if ((unix_seconds < STRAPPY_COCOA_UNIX_MIN_SECONDS) ||
-      (unix_seconds > STRAPPY_COCOA_UNIX_MAX_SECONDS)) {
+  if ((unix_seconds < STRAPPY_CALENDAR_UNIX_MIN_SECONDS) ||
+      (unix_seconds > STRAPPY_CALENDAR_UNIX_MAX_SECONDS)) {
     strappy_set_error(error_out,
                       "Timestamp output must be between years 0000 and 9999.");
     return 0;
@@ -408,70 +449,12 @@ static int strappy_cocoa_parse_fixed_digits(const char **cursor_in_out,
   return 1;
 }
 
-static int strappy_cocoa_is_leap_year(int year)
-{
-  if ((year % 4) != 0) {
-    return 0;
-  }
-  if ((year % 100) != 0) {
-    return 1;
-  }
-  return ((year % 400) == 0) ? 1 : 0;
-}
-
-static int strappy_cocoa_days_in_month(int year, int month)
-{
-  static const int days_by_month[] = {
-    31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
-  };
-
-  if ((month < 1) || (month > 12)) {
-    return 0;
-  }
-
-  if ((month == 2) && strappy_cocoa_is_leap_year(year)) {
-    return 29;
-  }
-
-  return days_by_month[month - 1];
-}
-
-static long long strappy_cocoa_days_from_civil(int year,
-                                               unsigned int month,
-                                               unsigned int day)
-{
-  long long adjusted_year;
-  long long era;
-  int adjusted_month;
-  unsigned long long year_of_era;
-  unsigned long long day_of_year;
-  unsigned long long day_of_era;
-
-  adjusted_year = (long long)year;
-  if (month <= 2U) {
-    adjusted_year--;
-  }
-  era = (adjusted_year >= 0LL) ? (adjusted_year / 400LL)
-                               : ((adjusted_year - 399LL) / 400LL);
-  year_of_era = (unsigned long long)(adjusted_year - (era * 400LL));
-  adjusted_month = (int)month + ((month > 2U) ? -3 : 9);
-  day_of_year =
-    ((153ULL * (unsigned long long)adjusted_month + 2ULL) /
-     5ULL) +
-    (unsigned long long)day - 1ULL;
-  day_of_era = (year_of_era * 365ULL) + (year_of_era / 4ULL) -
-               (year_of_era / 100ULL) + day_of_year;
-  return (era * 146097LL) + (long long)day_of_era - 719468LL;
-}
-
 static int strappy_cocoa_parse_iso8601_value(const char *iso8601,
                                              long long *unix_seconds_out,
                                              int *nanoseconds_out,
                                              char **error_out)
 {
   const char *cursor;
-  long long days;
-  long long day_seconds;
   long long unix_seconds;
   int year;
   int month;
@@ -510,12 +493,6 @@ static int strappy_cocoa_parse_iso8601_value(const char *iso8601,
   if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &day)) {
     strappy_set_error(error_out,
                       "ISO8601 datetime must start with YYYY-MM-DD.");
-    return 0;
-  }
-
-  if ((month < 1) || (month > 12) || (day < 1) ||
-      (day > strappy_cocoa_days_in_month(year, month))) {
-    strappy_set_error(error_out, "ISO8601 date is invalid.");
     return 0;
   }
 
@@ -627,21 +604,20 @@ static int strappy_cocoa_parse_iso8601_value(const char *iso8601,
     }
   }
 
-  days = strappy_cocoa_days_from_civil(year,
-                                       (unsigned int)month,
-                                       (unsigned int)day);
-  day_seconds = (days * 86400LL) + ((long long)hour * 3600LL) +
-                ((long long)minute * 60LL) + (long long)second;
-  if (!strappy_cocoa_add_long_long(day_seconds,
-                                   -((long long)offset_seconds),
-                                   &unix_seconds)) {
-    strappy_set_error(error_out,
-                      "ISO8601 datetime is outside the supported range.");
+  if (!strappy_calendar_unix_seconds_from_components(year,
+                                                      month,
+                                                      day,
+                                                      hour,
+                                                      minute,
+                                                      second,
+                                                      offset_seconds,
+                                                      &unix_seconds,
+                                                      error_out)) {
     return 0;
   }
 
-  if ((unix_seconds < STRAPPY_COCOA_UNIX_MIN_SECONDS) ||
-      (unix_seconds > STRAPPY_COCOA_UNIX_MAX_SECONDS)) {
+  if ((unix_seconds < STRAPPY_CALENDAR_UNIX_MIN_SECONDS) ||
+      (unix_seconds > STRAPPY_CALENDAR_UNIX_MAX_SECONDS)) {
     strappy_set_error(error_out,
                       "ISO8601 datetime must be between years 0000 and 9999.");
     return 0;
@@ -772,59 +748,6 @@ static char *strappy_cocoa_copy_timestamp_value_from_parts(
   return strappy_string_duplicate(buffer);
 }
 
-static char *strappy_cocoa_copy_with_fraction(const char *base_iso8601,
-                                              int nanoseconds,
-                                              char **error_out)
-{
-  char fraction[10];
-  char *result;
-  size_t base_length;
-  int fraction_length;
-
-  if ((base_iso8601 == NULL) ||
-      (nanoseconds < 0) ||
-      (nanoseconds >= 1000000000)) {
-    strappy_set_error(error_out, "ISO8601 timestamp request is invalid.");
-    return NULL;
-  }
-
-  if (nanoseconds == 0) {
-    return strappy_string_duplicate(base_iso8601);
-  }
-
-  base_length = strlen(base_iso8601);
-  if ((base_length == 0U) || (base_iso8601[base_length - 1U] != 'Z')) {
-    strappy_set_error(error_out, "ISO8601 timestamp base is invalid.");
-    return NULL;
-  }
-
-  snprintf(fraction, sizeof(fraction), "%09d", nanoseconds);
-  fraction_length = 9;
-  while ((fraction_length > 0) &&
-         (fraction[fraction_length - 1] == '0')) {
-    fraction_length--;
-  }
-  fraction[fraction_length] = '\0';
-
-  if (base_length > (((size_t)-1) - (size_t)fraction_length - 2U)) {
-    strappy_set_error(error_out, "ISO8601 timestamp is too large.");
-    return NULL;
-  }
-
-  result = (char *)malloc(base_length + (size_t)fraction_length + 2U);
-  if (result == NULL) {
-    strappy_set_error(error_out, "Could not allocate ISO8601 timestamp.");
-    return NULL;
-  }
-
-  memcpy(result, base_iso8601, base_length - 1U);
-  result[base_length - 1U] = '.';
-  memcpy(result + base_length, fraction, (size_t)fraction_length);
-  result[base_length + (size_t)fraction_length] = 'Z';
-  result[base_length + (size_t)fraction_length + 1U] = '\0';
-  return result;
-}
-
 #ifdef __APPLE__
 static char *strappy_cocoa_copy_cf_string_utf8(CFStringRef string,
                                                char **error_out)
@@ -862,6 +785,30 @@ static char *strappy_cocoa_copy_cf_string_utf8(CFStringRef string,
   }
 
   return result;
+}
+
+char *strappy_cocoa_copy_app_version(char **error_out)
+{
+  CFBundleRef bundle;
+  CFTypeRef version;
+
+  bundle = CFBundleGetMainBundle();
+  if (bundle == NULL) {
+    strappy_set_error(error_out, "Could not load the main application bundle.");
+    return NULL;
+  }
+  version = CFBundleGetValueForInfoDictionaryKey(
+    bundle,
+    CFSTR("CFBundleShortVersionString"));
+  if ((version == NULL) ||
+      (CFGetTypeID(version) != CFStringGetTypeID()) ||
+      (CFStringGetLength((CFStringRef)version) == 0)) {
+    strappy_set_error(
+      error_out,
+      "The main application Info.plist has no CFBundleShortVersionString.");
+    return NULL;
+  }
+  return strappy_cocoa_copy_cf_string_utf8((CFStringRef)version, error_out);
 }
 
 char *strappy_cocoa_copy_localized_string(const char *key,
@@ -1033,16 +980,13 @@ int strappy_cocoa_copy_container_info(const char *container_path,
   CFDictionaryRef profile_info;
   CFDictionaryRef validation_info;
   CFPropertyListRef property_list;
-  CFDataRef data;
   CFURLRef url;
-  CFStringRef property_error;
   char *bundle_path;
   char *creator;
   char *identifier;
   char *metadata_path;
   size_t container_length;
   size_t metadata_length;
-  SInt32 resource_error;
 
   if ((identifier_out == NULL) || (creator_out == NULL) ||
       (bundle_path_out == NULL)) {
@@ -1082,33 +1026,63 @@ int strappy_cocoa_copy_container_info(const char *container_path,
   if (url == NULL) {
     return 1;
   }
-  data = NULL;
-  resource_error = 0;
-#if defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
-  if (!CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault,
-                                                 url,
-                                                 &data,
-                                                 NULL,
-                                                 NULL,
-                                                 &resource_error)) {
-    CFRelease(url);
-    return 1;
+#if (defined(MAC_OS_X_VERSION_MAX_ALLOWED) && \
+     MAC_OS_X_VERSION_MAX_ALLOWED >= 1060) || \
+    defined(__IPHONE_OS_VERSION_MAX_ALLOWED)
+  {
+    CFErrorRef property_error;
+    CFPropertyListFormat property_format;
+    CFReadStreamRef stream;
+
+    stream = CFReadStreamCreateWithFile(kCFAllocatorDefault, url);
+    if ((stream == NULL) || !CFReadStreamOpen(stream)) {
+      if (stream != NULL) {
+        CFRelease(stream);
+      }
+      CFRelease(url);
+      return 1;
+    }
+    property_error = NULL;
+    property_list = CFPropertyListCreateWithStream(kCFAllocatorDefault,
+                                                    stream,
+                                                    0,
+                                                    kCFPropertyListImmutable,
+                                                    &property_format,
+                                                    &property_error);
+    CFReadStreamClose(stream);
+    CFRelease(stream);
+    if (property_error != NULL) {
+      CFRelease(property_error);
+    }
   }
-  property_error = NULL;
-  property_list = CFPropertyListCreateFromXMLData(kCFAllocatorDefault,
-                                                   data,
-                                                   kCFPropertyListImmutable,
-                                                   &property_error);
-#if defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-  if (property_error != NULL) {
-    CFRelease(property_error);
+#else
+  {
+    CFDataRef data;
+    CFStringRef property_error;
+    SInt32 resource_error;
+
+    data = NULL;
+    resource_error = 0;
+    if (!CFURLCreateDataAndPropertiesFromResource(kCFAllocatorDefault,
+                                                   url,
+                                                   &data,
+                                                   NULL,
+                                                   NULL,
+                                                   &resource_error)) {
+      CFRelease(url);
+      return 1;
+    }
+    property_error = NULL;
+    property_list = CFPropertyListCreateFromXMLData(kCFAllocatorDefault,
+                                                     data,
+                                                     kCFPropertyListImmutable,
+                                                     &property_error);
+    if (property_error != NULL) {
+      CFRelease(property_error);
+    }
+    CFRelease(data);
   }
-  CFRelease(data);
+#endif
   CFRelease(url);
   if ((property_list == NULL) ||
       (CFGetTypeID(property_list) != CFDictionaryGetTypeID())) {
@@ -1164,74 +1138,122 @@ int strappy_cocoa_copy_container_info(const char *container_path,
   return 1;
 }
 
-static char *strappy_cocoa_copy_base_iso8601_timestamp(
-  long long unix_seconds,
+#else
+static char *strappy_cocoa_copy_file_contents(const char *path,
+                                               char **error_out)
+{
+  FILE *file;
+  char *contents;
+  long file_length;
+  size_t length;
+
+  file = fopen(path, "rb");
+  if (file == NULL) {
+    strappy_set_formatted_error(error_out,
+                                "Could not open Info.plist at %s.",
+                                path);
+    return NULL;
+  }
+  if ((fseek(file, 0L, SEEK_END) != 0) ||
+      ((file_length = ftell(file)) < 0L) ||
+      ((unsigned long)file_length >
+       (unsigned long)STRAPPY_COCOA_MAX_INFO_PLIST_BYTES) ||
+      (fseek(file, 0L, SEEK_SET) != 0)) {
+    fclose(file);
+    strappy_set_error(error_out, "Could not measure the application Info.plist.");
+    return NULL;
+  }
+
+  length = (size_t)file_length;
+  contents = (char *)malloc(length + 1U);
+  if (contents == NULL) {
+    fclose(file);
+    strappy_set_error(error_out, "Could not allocate the application Info.plist.");
+    return NULL;
+  }
+  if ((length > 0U) && (fread(contents, 1U, length, file) != length)) {
+    free(contents);
+    fclose(file);
+    strappy_set_error(error_out, "Could not read the application Info.plist.");
+    return NULL;
+  }
+  contents[length] = '\0';
+  if (fclose(file) != 0) {
+    free(contents);
+    strappy_set_error(error_out, "Could not close the application Info.plist.");
+    return NULL;
+  }
+  return contents;
+}
+
+static char *strappy_cocoa_copy_source_info_plist_version(
+  const char *path,
   char **error_out)
 {
-  CFDateRef date;
-  CFDateFormatterRef formatter;
-  CFLocaleRef locale;
-  CFTimeZoneRef time_zone;
-  CFStringRef timestamp;
-  char *result;
-  CFAbsoluteTime absolute_time;
+  static const char version_key[] =
+    "<key>CFBundleShortVersionString</key>";
+  static const char string_start[] = "<string>";
+  static const char string_end[] = "</string>";
+  char *contents;
+  char *cursor;
+  char *end;
+  char *version;
 
-  absolute_time =
-    (CFAbsoluteTime)((double)unix_seconds -
-                     kCFAbsoluteTimeIntervalSince1970);
-  date = CFDateCreate(kCFAllocatorDefault, absolute_time);
-  if (date == NULL) {
-    strappy_set_error(error_out, "Could not create CoreFoundation date.");
+  contents = strappy_cocoa_copy_file_contents(path, error_out);
+  if (contents == NULL) {
+    return NULL;
+  }
+  cursor = strstr(contents, version_key);
+  if (cursor != NULL) {
+    cursor += sizeof(version_key) - 1U;
+    while ((*cursor == ' ') || (*cursor == '\t') ||
+           (*cursor == '\r') || (*cursor == '\n')) {
+      cursor++;
+    }
+  }
+  if ((cursor == NULL) ||
+      (strncmp(cursor, string_start, sizeof(string_start) - 1U) != 0)) {
+    free(contents);
+    strappy_set_error(
+      error_out,
+      "The application Info.plist has no CFBundleShortVersionString.");
+    return NULL;
+  }
+  cursor += sizeof(string_start) - 1U;
+  end = strstr(cursor, string_end);
+  if ((end == NULL) || (end == cursor)) {
+    free(contents);
+    strappy_set_error(
+      error_out,
+      "The application Info.plist has an invalid "
+      "CFBundleShortVersionString.");
     return NULL;
   }
 
-  locale = CFLocaleCreate(kCFAllocatorDefault, CFSTR("en_US_POSIX"));
-  if (locale == NULL) {
-    CFRelease(date);
-    strappy_set_error(error_out, "Could not create CoreFoundation locale.");
-    return NULL;
+  version = strappy_string_duplicate_length(cursor,
+                                             (size_t)(end - cursor));
+  free(contents);
+  if (version == NULL) {
+    strappy_set_error(error_out, "Could not allocate the application version.");
   }
-
-  formatter = CFDateFormatterCreate(kCFAllocatorDefault,
-                                    locale,
-                                    kCFDateFormatterNoStyle,
-                                    kCFDateFormatterNoStyle);
-  CFRelease(locale);
-  if (formatter == NULL) {
-    CFRelease(date);
-    strappy_set_error(error_out, "Could not create CoreFoundation formatter.");
-    return NULL;
-  }
-
-  time_zone =
-    CFTimeZoneCreateWithName(kCFAllocatorDefault, CFSTR("UTC"), 0);
-  if (time_zone == NULL) {
-    CFRelease(formatter);
-    CFRelease(date);
-    strappy_set_error(error_out, "Could not create CoreFoundation UTC zone.");
-    return NULL;
-  }
-
-  CFDateFormatterSetProperty(formatter,
-                             kCFDateFormatterTimeZone,
-                             time_zone);
-  CFRelease(time_zone);
-  CFDateFormatterSetFormat(formatter,
-                           CFSTR("yyyy-MM-dd'T'HH:mm:ss'Z'"));
-
-  timestamp = CFDateFormatterCreateStringWithDate(kCFAllocatorDefault,
-                                                  formatter,
-                                                  date);
-  result = strappy_cocoa_copy_cf_string_utf8(timestamp, error_out);
-
-  if (timestamp != NULL) {
-    CFRelease(timestamp);
-  }
-  CFRelease(formatter);
-  CFRelease(date);
-  return result;
+  return version;
 }
-#else
+
+char *strappy_cocoa_copy_app_version(char **error_out)
+{
+  const char *info_plist_path;
+
+  info_plist_path = getenv("STRAPPY_INFO_PLIST_PATH");
+  if (!strappy_cocoa_string_has_value(info_plist_path)) {
+    strappy_set_error(
+      error_out,
+      "STRAPPY_INFO_PLIST_PATH is required outside an application bundle.");
+    return NULL;
+  }
+  return strappy_cocoa_copy_source_info_plist_version(info_plist_path,
+                                                       error_out);
+}
+
 char *strappy_cocoa_copy_localized_string(const char *key,
                                            char **error_out)
 {
@@ -1281,60 +1303,7 @@ int strappy_cocoa_copy_container_info(const char *container_path,
   return 1;
 }
 
-static char *strappy_cocoa_copy_base_iso8601_timestamp(
-  long long unix_seconds,
-  char **error_out)
-{
-  char buffer[32];
-  struct tm *utc_time;
-  time_t timestamp;
-
-  timestamp = (time_t)unix_seconds;
-  if ((long long)timestamp != unix_seconds) {
-    strappy_set_error(error_out,
-                      "Timestamp does not fit in this platform's time_t.");
-    return NULL;
-  }
-
-  utc_time = gmtime(&timestamp);
-  if (utc_time == NULL) {
-    strappy_set_error(error_out, "Could not convert timestamp to UTC.");
-    return NULL;
-  }
-
-  if (strftime(buffer,
-               sizeof(buffer),
-               "%Y-%m-%dT%H:%M:%SZ",
-               utc_time) == 0U) {
-    strappy_set_error(error_out, "Could not format UTC timestamp.");
-    return NULL;
-  }
-
-  return strappy_string_duplicate(buffer);
-}
 #endif
-
-char *strappy_cocoa_copy_iso8601_timestamp(long long unix_seconds,
-                                           int nanoseconds,
-                                           char **error_out)
-{
-  char *base;
-  char *result;
-
-  if ((nanoseconds < 0) || (nanoseconds >= 1000000000)) {
-    strappy_set_error(error_out, "Timestamp nanoseconds are invalid.");
-    return NULL;
-  }
-
-  base = strappy_cocoa_copy_base_iso8601_timestamp(unix_seconds, error_out);
-  if (base == NULL) {
-    return NULL;
-  }
-
-  result = strappy_cocoa_copy_with_fraction(base, nanoseconds, error_out);
-  free(base);
-  return result;
-}
 
 char *strappy_cocoa_copy_iso8601_timestamp_value(
   const char *timestamp,
@@ -1354,9 +1323,9 @@ char *strappy_cocoa_copy_iso8601_timestamp_value(
     return NULL;
   }
 
-  return strappy_cocoa_copy_iso8601_timestamp(unix_seconds,
-                                              nanoseconds,
-                                              error_out);
+  return strappy_calendar_copy_iso8601_timestamp(unix_seconds,
+                                                 nanoseconds,
+                                                 error_out);
 }
 
 char *strappy_cocoa_copy_timestamp_value_from_iso8601(

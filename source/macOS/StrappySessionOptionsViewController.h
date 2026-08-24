@@ -14,9 +14,11 @@
   NSBox *toolsBox_;
   NSBox *limitsBox_;
   NSBox *searchProviderBox_;
+  NSTextField *accountLabel_;
   NSTextField *modelLabel_;
   NSTextField *assistantLabel_;
   NSTextField *searchProviderLabel_;
+  NSPopUpButton *accountPopUpButton_;
   NSPopUpButton *modelPopUpButton_;
   NSSegmentedControl *assistantSegmentedControl_;
   NSArray *assistantSegmentIdentifiers_;
@@ -32,10 +34,13 @@
   NSPopUpButton *searchProviderPopUpButton_;
   StrappySession *session_;
   StrappySessionOptions *defaultOptions_;
-  NSString *statusText_;
+  NSArray *accountRows_;
+  NSArray *modelRows_;
   BOOL editsSessionDefaults_;
   BOOL layingOut_;
   BOOL reloading_;
+  BOOL catalogsDirty_;
+  BOOL savingOptions_;
 }
 
 - (id)init;

@@ -60,6 +60,73 @@ const sandbox = {
 vm.createContext(sandbox);
 vm.runInContext(pageScript, sandbox, { filename: 'generated-webview.js' });
 
+function nativeWebSearchRow(actionJSON) {
+  const bubble = {
+    className: 'bubble',
+    innerHTML: '',
+    getElementsByTagName() { return []; }
+  };
+  const role = {
+    className: 'role',
+    style: {},
+    getElementsByTagName() { return []; }
+  };
+  return {
+    className: 'row api_item',
+    bubble,
+    role,
+    getAttribute(name) {
+      if (name === 'data-kind') return 'web_search_call';
+      if (name === 'data-tool-response-item') return '1';
+      if (name === 'data-tool-label') return 'Tool';
+      if (name === 'data-tool-display-title') {
+        return 'Web Search \u00b7 Tokyo daily news';
+      }
+      if (name === 'data-response-item-action-json') return actionJSON;
+      if (name === 'data-response-item-status') return 'completed';
+      return null;
+    },
+    getElementsByTagName() {
+      return [role, bubble];
+    }
+  };
+}
+
+const nativeSearchRow = nativeWebSearchRow(JSON.stringify({
+  type: 'search',
+  queries: ['Tokyo daily news', 'site:nhk.or.jp Tokyo news'],
+  sources: [{ type: 'url', url: 'https://example.com/tokyo' }]
+}));
+expect(sandbox.isAPIServerToolRow(nativeSearchRow),
+       'A native web_search_call was not recognized as a server-tool row.');
+const nativeSearchItem = sandbox.responseItemObject(nativeSearchRow);
+const nativeSearchDisplay = sandbox.responseItemDisplayObject(nativeSearchItem);
+expect(nativeSearchItem.type === 'web_search_call' &&
+       nativeSearchDisplay.type === 'search' &&
+       nativeSearchDisplay.queries.length === 2 &&
+       nativeSearchDisplay.sources.length === 1 &&
+       nativeSearchDisplay.sources[0].url === 'https://example.com/tokyo',
+       'The native search action did not reach the expandable card intact.');
+sandbox.renderAPIServerToolRows([nativeSearchRow]);
+expect(sandbox.hasClass(nativeSearchRow, 'api_server_tool') &&
+       sandbox.hasClass(nativeSearchRow.bubble, 'api-tool-card') &&
+       sandbox.hasClass(nativeSearchRow.bubble, 'tool-card') &&
+       nativeSearchRow.bubble.innerHTML.includes('tool-card-toggle') &&
+       nativeSearchRow.bubble.innerHTML.includes('tool-card-body') &&
+       nativeSearchRow.role.style.display === 'none',
+       'The native search result was not rendered as an expandable tool row.');
+
+const nativeOpenRow = nativeWebSearchRow(JSON.stringify({
+  type: 'open_page',
+  url: 'https://example.com/tokyo-article'
+}));
+const nativeOpenDisplay = sandbox.responseItemDisplayObject(
+  sandbox.responseItemObject(nativeOpenRow)
+);
+expect(nativeOpenDisplay.type === 'open_page' &&
+       nativeOpenDisplay.url === 'https://example.com/tokyo-article',
+       'The native open-page action did not reach the expandable card intact.');
+
 function responseAttemptRow(attempt, responseLabel, attemptLabel) {
   return {
     getAttribute(name) {

@@ -126,6 +126,61 @@ int strappy_session_initialize_store(const char *db_path,
   return strappy_db_initialize(db_path, error_out);
 }
 
+int strappy_session_list_models_matching(
+  const char *db_path,
+  const char *search_text,
+  strappy_model_record_list *list,
+  char **error_out)
+{
+  return strappy_db_list_models_matching(db_path,
+                                         search_text,
+                                         list,
+                                         error_out);
+}
+
+int strappy_session_list_models_for_configured_providers(
+  const char *db_path,
+  strappy_model_record_list *list,
+  char **error_out)
+{
+  return strappy_db_list_models_for_configured_providers(db_path,
+                                                          list,
+                                                          error_out);
+}
+
+int strappy_session_list_allowed_models(
+  const char *db_path,
+  strappy_model_record_list *list,
+  char **error_out)
+{
+  return strappy_db_list_allowed_models(db_path, list, error_out);
+}
+
+int strappy_session_get_default_model(const char *db_path,
+                                      char **model_id_out,
+                                      char **error_out)
+{
+  return strappy_db_get_default_model(db_path, model_id_out, error_out);
+}
+
+int strappy_session_set_default_model(const char *db_path,
+                                      const char *model_id,
+                                      char **error_out)
+{
+  return strappy_db_set_default_model(db_path, model_id, error_out);
+}
+
+int strappy_session_set_model_allowed(const char *db_path,
+                                      const char *model_id,
+                                      int allowed,
+                                      char **error_out)
+{
+  return strappy_db_set_model_allowed(db_path,
+                                      model_id,
+                                      allowed,
+                                      error_out);
+}
+
 int strappy_session_list_openrouter_models_matching(
   const char *db_path,
   const char *search_text,
@@ -133,9 +188,9 @@ int strappy_session_list_openrouter_models_matching(
   char **error_out)
 {
   return strappy_db_list_openrouter_models_matching(db_path,
-                                                   search_text,
-                                                   list,
-                                                   error_out);
+                                                    search_text,
+                                                    list,
+                                                    error_out);
 }
 
 int strappy_session_list_allowed_openrouter_models(
@@ -150,18 +205,16 @@ int strappy_session_get_default_openrouter_model(const char *db_path,
                                                  char **model_id_out,
                                                  char **error_out)
 {
-  return strappy_db_get_default_openrouter_model(db_path,
-                                                model_id_out,
-                                                error_out);
+  return strappy_session_get_default_model(db_path,
+                                           model_id_out,
+                                           error_out);
 }
 
 int strappy_session_set_default_openrouter_model(const char *db_path,
                                                  const char *model_id,
                                                  char **error_out)
 {
-  return strappy_db_set_default_openrouter_model(db_path,
-                                                model_id,
-                                                error_out);
+  return strappy_session_set_default_model(db_path, model_id, error_out);
 }
 
 int strappy_session_set_openrouter_model_allowed(const char *db_path,
@@ -169,10 +222,10 @@ int strappy_session_set_openrouter_model_allowed(const char *db_path,
                                                  int allowed,
                                                  char **error_out)
 {
-  return strappy_db_set_openrouter_model_allowed(db_path,
-                                                model_id,
-                                                allowed,
-                                                error_out);
+  return strappy_session_set_model_allowed(db_path,
+                                           model_id,
+                                           allowed,
+                                           error_out);
 }
 
 int strappy_session_refresh_openrouter_user_models(
@@ -830,6 +883,7 @@ static void strappy_session_webview_message_from_record(
   message->request_endpoint = record->request_endpoint;
   message->text = record->content;
   message->reasoning = record->reasoning;
+  message->reasoning_encrypted = record->reasoning_encrypted;
   message->metadata_json = record->metadata_json;
   message->render_state_json = record->render_state_json;
   message->created_at = record->created_at;

@@ -732,10 +732,6 @@ static UITextField *XPUIKitFindTextField(UIView *view)
 
 - (void)deliverTitle:(NSString *)title body:(NSString *)body
 {
-#ifdef __clang__
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#endif
   UILocalNotification *notification;
 
   notification = [[UILocalNotification alloc] init];
@@ -754,9 +750,6 @@ static UITextField *XPUIKitFindTextField(UIView *view)
    */
   [[UIApplication sharedApplication]
     presentLocalNotificationNow:notification];
-#ifdef __clang__
-#pragma clang diagnostic pop
-#endif
 }
 
 @end

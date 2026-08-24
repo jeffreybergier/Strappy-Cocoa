@@ -299,6 +299,7 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
 - (NSString *)trimmedPromptText;
 - (void)updateControls;
 - (void)updateExpansion;
+- (NSArray *)currentProviderAccounts;
 - (NSArray *)currentAllowedModels;
 - (NSArray *)currentAssistantSets;
 - (BOOL)updateSessionOptions:(StrappySessionOptions *)options
@@ -729,6 +730,15 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
   }
 
   [self performSend:sender];
+}
+
+- (NSArray *)currentProviderAccounts
+{
+  NSArray *accounts;
+
+  accounts = [StrappySession providerAccountCatalogWithError:nil];
+  return [accounts isKindOfClass:[NSArray class]] ?
+    accounts : [NSArray array];
 }
 
 - (NSArray *)currentAllowedModels

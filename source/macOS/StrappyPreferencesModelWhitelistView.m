@@ -3,7 +3,7 @@
 #import "XPAppKit.h"
 
 static const CGFloat kStrappyModelControlHeight = 24.0;
-static const CGFloat kStrappyModelFetchButtonWidth = 72.0;
+static const CGFloat kStrappyModelEditButtonWidth = 72.0;
 
 static NSString *StrappyModelWhitelistStringForRow(NSDictionary *row,
                                                    NSString *key)
@@ -47,7 +47,7 @@ static NSString *StrappyModelWhitelistDisplayNameForRow(NSDictionary *row)
   if ([name length] > 0U) {
     return name;
   }
-  return StrappyModelWhitelistStringForRow(row, @"id");
+  return StrappyModelWhitelistStringForRow(row, @"wire_model_id");
 }
 
 static NSComparisonResult StrappyWhitelistCompareStrings(NSString *left,
@@ -108,38 +108,40 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 
 - (CGFloat)topAccessoryTrailingControlWidth
 {
-  return kStrappyModelFetchButtonWidth;
+  return kStrappyModelEditButtonWidth;
 }
 
 - (void)configureTopAccessoryView:(NSView *)view target:(id)target
 {
   NSRect bounds;
   CGFloat controlY;
-  CGFloat fetchX;
+  CGFloat editX;
 
   bounds = [view bounds];
   controlY = NSMaxY(bounds) - kStrappyModelControlHeight;
-  fetchX = NSWidth(bounds) - kStrappyModelFetchButtonWidth;
+  editX = NSWidth(bounds) - kStrappyModelEditButtonWidth;
 
-  fetchButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(
-    fetchX,
+  editButton_ = [[NSButton alloc] initWithFrame:NSMakeRect(
+    editX,
     controlY,
-    kStrappyModelFetchButtonWidth,
+    kStrappyModelEditButtonWidth,
     kStrappyModelControlHeight)];
-  [fetchButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
-  [fetchButton_ setBezelStyle:XPBezelStyleRounded];
-  [fetchButton_ setButtonType:XPButtonTypeMomentaryLight];
-  [fetchButton_ setTitle:NSLocalizedString(@"Fetch", nil)];
-  [fetchButton_ setToolTip:
-    NSLocalizedString(@"Fetch the latest OpenRouter model list.", nil)];
-  [fetchButton_ setTarget:target];
-  [fetchButton_ setAction:@selector(refreshModels:)];
-  [view addSubview:fetchButton_];
+  [editButton_ setAutoresizingMask:NSViewMinXMargin | NSViewMinYMargin];
+  [editButton_ setBezelStyle:XPBezelStyleRounded];
+  [editButton_ setButtonType:XPButtonTypeMomentaryLight];
+  [editButton_ setTitle:NSLocalizedString(@"Fetch", nil)];
+  [editButton_ setToolTip:
+    NSLocalizedString(@"Fetch or edit the model catalogs for each provider.",
+                      nil)];
+  [editButton_ setTarget:target];
+  [editButton_ setAction:@selector(editModelProviders:)];
+  [view addSubview:editButton_];
 }
 
 - (void)addTableColumnsToTableView:(NSTableView *)tableView
 {
   NSTableColumn *allowedColumn;
+  NSTableColumn *providerColumn;
   NSTableColumn *nameColumn;
   NSTableColumn *idColumn;
   NSTableColumn *contextColumn;
@@ -165,6 +167,20 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   [allowedCell setAlignment:XPTextAlignmentCenter];
   [allowedColumn setDataCell:allowedCell];
   [tableView addTableColumn:allowedColumn];
+
+  providerColumn =
+    [[[NSTableColumn alloc] initWithIdentifier:@"model_provider"] autorelease];
+  [[providerColumn headerCell] setStringValue:NSLocalizedString(@"Provider", nil)];
+  [providerColumn setWidth:112.0];
+  [providerColumn setMinWidth:90.0];
+  [providerColumn setEditable:NO];
+  [providerColumn setSortDescriptorPrototype:
+    [[[NSSortDescriptor alloc] initWithKey:@"model_provider"
+                                 ascending:YES] autorelease]];
+  textCell = [[[NSTextFieldCell alloc] initTextCell:@""] autorelease];
+  [textCell setLineBreakMode:NSLineBreakByTruncatingTail];
+  [providerColumn setDataCell:textCell];
+  [tableView addTableColumn:providerColumn];
 
   nameColumn = [[[NSTableColumn alloc] initWithIdentifier:@"model_name"] autorelease];
   [[nameColumn headerCell] setStringValue:NSLocalizedString(@"Model", nil)];
@@ -239,26 +255,30 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   [tableView addTableColumn:completionColumn];
 
   [tableView setSortDescriptors:[NSArray arrayWithObjects:
-    [[[NSSortDescriptor alloc] initWithKey:@"model_id"
+    [[[NSSortDescriptor alloc] initWithKey:@"model_provider"
                                  ascending:YES] autorelease],
+    [[[NSSortDescriptor alloc] initWithKey:@"model_allowed"
+                                 ascending:NO] autorelease],
     nil]];
 }
 
 - (NSSortDescriptor *)requiredSortDescriptor
 {
-  return [[[NSSortDescriptor alloc] initWithKey:@"model_allowed"
-                                      ascending:NO] autorelease];
+  return [[[NSSortDescriptor alloc] initWithKey:@"model_provider"
+                                      ascending:YES] autorelease];
 }
 
 - (NSSortDescriptor *)defaultPrimarySortDescriptor
 {
-  return [[[NSSortDescriptor alloc] initWithKey:@"model_id"
-                                      ascending:YES] autorelease];
+  return [[[NSSortDescriptor alloc] initWithKey:@"model_allowed"
+                                      ascending:NO] autorelease];
 }
 
 - (NSArray *)fallbackSortDescriptors
 {
   return [NSArray arrayWithObjects:
+    [[[NSSortDescriptor alloc] initWithKey:@"model_id"
+                                 ascending:YES] autorelease],
     [[[NSSortDescriptor alloc] initWithKey:@"model_completion_price"
                                  ascending:YES] autorelease],
     [[[NSSortDescriptor alloc] initWithKey:@"model_prompt_price"
@@ -274,6 +294,7 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
 - (BOOL)sortKeyIsKnown:(NSString *)key
 {
   return ([key isEqualToString:@"model_allowed"] ||
+          [key isEqualToString:@"model_provider"] ||
           [key isEqualToString:@"model_name"] ||
           [key isEqualToString:@"model_id"] ||
           [key isEqualToString:@"model_context"] ||
@@ -290,6 +311,11 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
       StrappyModelWhitelistRowIsAllowed(left) ? 1LL : 0LL,
       StrappyModelWhitelistRowIsAllowed(right) ? 1LL : 0LL);
   }
+  if ([key isEqualToString:@"model_provider"]) {
+    return StrappyWhitelistCompareStrings(
+      StrappyModelWhitelistStringForRow(left, @"provider_name"),
+      StrappyModelWhitelistStringForRow(right, @"provider_name"));
+  }
   if ([key isEqualToString:@"model_name"]) {
     return StrappyWhitelistCompareStrings(
       StrappyModelWhitelistDisplayNameForRow(left),
@@ -297,8 +323,8 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   }
   if ([key isEqualToString:@"model_id"]) {
     return StrappyWhitelistCompareStrings(
-      StrappyModelWhitelistStringForRow(left, @"id"),
-      StrappyModelWhitelistStringForRow(right, @"id"));
+      StrappyModelWhitelistStringForRow(left, @"wire_model_id"),
+      StrappyModelWhitelistStringForRow(right, @"wire_model_id"));
   }
   if ([key isEqualToString:@"model_context"]) {
     NSNumber *leftValue;
@@ -323,14 +349,14 @@ static NSComparisonResult StrappyWhitelistCompareDouble(double left, double righ
   return NSOrderedSame;
 }
 
-- (NSButton *)fetchButton
+- (NSButton *)editButton
 {
-  return fetchButton_;
+  return editButton_;
 }
 
 - (void)dealloc
 {
-  [fetchButton_ release];
+  [editButton_ release];
   [super dealloc];
 }
 

@@ -4,6 +4,7 @@
 #include <cJSON.h>
 #include <errno.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
 #include <sqlite3.h>
 #include <stdio.h>
@@ -23,6 +24,7 @@
 #include "../shared/strappy_config.h"
 #include "../shared/strappy_core.h"
 #include "../shared/strappy_db.h"
+#include "../shared/strappy_identity.h"
 #include "../shared/strappy_prompt.h"
 #include "../shared/strappy_quality_policy.h"
 #include "../shared/strappy_responses.h"
@@ -866,6 +868,64 @@ static int harness_test_request_surfaces(void)
   if (!ok) {
     return harness_fail("Disabled web tools leaked into a Responses request.");
   }
+
+  error = NULL;
+  tools_json = strappy_tools_responses_request_json_filtered_for_provider(
+    "../shared/Resources",
+    NULL,
+    0U,
+    STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT,
+    STRAPPY_WEB_PROVIDER_AUTO,
+    &error);
+  if (tools_json == NULL) {
+    fprintf(stderr,
+            "Could not build ChatGPT Responses tools: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    return 0;
+  }
+  tools = cJSON_Parse(tools_json);
+  free(tools_json);
+  ok = cJSON_IsArray(tools) &&
+    harness_has_tool_type(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH);
+  cJSON_Delete(tools);
+  free(error);
+  if (!ok) {
+    return harness_fail("ChatGPT web-search schema was not provider-native.");
+  }
+
+  error = NULL;
+  tools_json = strappy_tools_responses_request_json_filtered_for_provider(
+    "../shared/Resources",
+    NULL,
+    0U,
+    STRAPPY_PROVIDER_KIND_OTHER,
+    STRAPPY_WEB_PROVIDER_AUTO,
+    &error);
+  if (tools_json == NULL) {
+    fprintf(stderr,
+            "Could not build generic Responses tools: %s\n",
+            (error != NULL) ? error : "unknown");
+    free(error);
+    return 0;
+  }
+  tools = cJSON_Parse(tools_json);
+  free(tools_json);
+  ok = cJSON_IsArray(tools) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_DATETIME_TO_ISO8601) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    harness_tools_hide_local_display_metadata(tools);
+  cJSON_Delete(tools);
+  free(error);
+  if (!ok) {
+    return harness_fail(
+      "Generic Responses tools included unsupported hosted extras.");
+  }
   return 1;
 }
 
@@ -1492,6 +1552,10 @@ static int harness_direct_timeline_cursor_matches(
 
 #define HARNESS_HTTP_MAX_REQUEST_BYTES (4U * 1024U * 1024U)
 
+/* Set immediately before fork so each local fixture server receives its own
+ * immutable expectation. Never set this to a live credential. */
+static const char *harness_expected_authorization = NULL;
+
 typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_ANSWER_QUALITY = 1,
   HARNESS_RESPONSES_SERVER_SERVER_TOOL = 2,
@@ -1510,8 +1574,48 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_PREFLIGHT_FIRST_PROMPT_ONLY = 15,
   HARNESS_RESPONSES_SERVER_ISOLATED_PROMPTS = 16,
   HARNESS_RESPONSES_SERVER_ROUND_LIMIT = 17,
-  HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED = 18
+  HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED = 18,
+  HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH = 19,
+  HARNESS_RESPONSES_SERVER_OTHER_GENERIC = 20
 } harness_responses_server_scenario;
+
+static int harness_headers_have_exact_authorization(
+  const char *headers,
+  size_t headers_length,
+  const char *expected)
+{
+  const char *cursor;
+  const char *headers_end;
+
+  if (expected == NULL) {
+    return 1;
+  }
+  cursor = headers;
+  headers_end = headers + headers_length;
+  while (cursor < headers_end) {
+    const char *line_end;
+    static const char field[] = "Authorization:";
+
+    line_end = strstr(cursor, "\r\n");
+    if ((line_end == NULL) || (line_end > headers_end)) {
+      line_end = headers_end;
+    }
+    if (((size_t)(line_end - cursor) >= (sizeof(field) - 1U)) &&
+        (strncasecmp(cursor, field, sizeof(field) - 1U) == 0)) {
+      const char *value;
+
+      value = cursor + sizeof(field) - 1U;
+      while ((value < line_end) && ((*value == ' ') || (*value == '\t'))) {
+        value++;
+      }
+      return (expected[0] != '\0') &&
+        ((size_t)(line_end - value) == strlen(expected)) &&
+        (memcmp(value, expected, strlen(expected)) == 0);
+    }
+    cursor = (line_end < headers_end) ? line_end + 2 : headers_end;
+  }
+  return expected[0] == '\0';
+}
 
 static int harness_send_all(int socket_fd,
                             const char *data,
@@ -1580,6 +1684,67 @@ static int harness_content_length(const char *headers,
   return 0;
 }
 
+static int harness_has_expected_user_agent(const char *headers,
+                                           size_t headers_length)
+{
+  static const char field_name[] = "User-Agent:";
+  const char *cursor;
+  const char *headers_end;
+  char *error;
+  char *expected;
+  size_t expected_length;
+  int found;
+
+  if (headers == NULL) {
+    return 0;
+  }
+  error = NULL;
+  expected = strappy_identity_copy_user_agent(&error);
+  if (expected == NULL) {
+    fprintf(stderr,
+            "Could not build expected user agent: %s\n",
+            (error != NULL) ? error : "Unknown identity error.");
+    free(error);
+    return 0;
+  }
+  free(error);
+  expected_length = strlen(expected);
+  cursor = headers;
+  headers_end = headers + headers_length;
+  found = 0;
+  while (cursor < headers_end) {
+    const char *line_end;
+    const char *value;
+    size_t line_length;
+    size_t value_length;
+
+    line_end = strstr(cursor, "\r\n");
+    if ((line_end == NULL) || (line_end > headers_end)) {
+      line_end = headers_end;
+    }
+    line_length = (size_t)(line_end - cursor);
+    if ((line_length >= (sizeof(field_name) - 1U)) &&
+        (strncasecmp(cursor,
+                     field_name,
+                     sizeof(field_name) - 1U) == 0)) {
+      value = cursor + sizeof(field_name) - 1U;
+      while ((value < line_end) && ((*value == ' ') || (*value == '\t'))) {
+        value++;
+      }
+      value_length = (size_t)(line_end - value);
+      found = (value_length == expected_length) &&
+        (memcmp(value, expected, expected_length) == 0);
+      break;
+    }
+    if (line_end == headers_end) {
+      break;
+    }
+    cursor = line_end + 2;
+  }
+  free(expected);
+  return found;
+}
+
 static char *harness_read_request_body(int socket_fd)
 {
   char *request;
@@ -1616,7 +1781,12 @@ static char *harness_read_request_body(int socket_fd)
         if ((strncmp(request, "POST /responses HTTP/", 21U) != 0) ||
             !harness_content_length(request,
                                     headers_length,
-                                    &body_length)) {
+                                    &body_length) ||
+            !harness_has_expected_user_agent(request, headers_length) ||
+            !harness_headers_have_exact_authorization(
+              request,
+              headers_length,
+              harness_expected_authorization)) {
           free(request);
           return NULL;
         }
@@ -1708,6 +1878,20 @@ static const char *harness_message_text(cJSON *item)
   text = cJSON_GetObjectItem(part, "text");
   return (cJSON_IsString(text) && (text->valuestring != NULL)) ?
     text->valuestring : NULL;
+}
+
+static int harness_message_part_type_is(cJSON *item,
+                                        const char *expected_type)
+{
+  cJSON *content;
+  cJSON *part;
+  cJSON *type;
+
+  content = cJSON_GetObjectItem(item, "content");
+  part = cJSON_GetArrayItem(content, 0);
+  type = cJSON_GetObjectItem(part, "type");
+  return cJSON_IsString(type) && (type->valuestring != NULL) &&
+    (strcmp(type->valuestring, expected_type) == 0);
 }
 
 static const char *harness_object_string(cJSON *parent, const char *key)
@@ -2094,6 +2278,8 @@ static int harness_preflight_input_is_valid(cJSON *input,
   skills_call = cJSON_GetArrayItem(input, 3);
   database_call = cJSON_GetArrayItem(input, 4);
   return harness_message_role_is(cJSON_GetArrayItem(input, 1), "assistant") &&
+    harness_message_part_type_is(cJSON_GetArrayItem(input, 0), "input_text") &&
+    harness_message_part_type_is(cJSON_GetArrayItem(input, 1), "output_text") &&
     (assistant_text != NULL) &&
     (strcmp(assistant_text, HARNESS_PERSONAL_PREFLIGHT_ASSISTANT_TEXT) == 0) &&
     harness_preflight_call_is_valid(memory_call,
@@ -3173,6 +3359,7 @@ static int harness_run_answer_quality_server(int listener_fd)
   root = cJSON_Parse(body);
   free(body);
   ok = cJSON_IsObject(root) &&
+    (cJSON_GetObjectItem(root, "max_output_tokens") == NULL) &&
     harness_request_base_is_valid(root,
                                   "Report answer quality",
                                   &session_key,
@@ -3215,6 +3402,7 @@ static int harness_run_answer_quality_disabled_server(int listener_fd)
   char *session_key;
   char *prompt_group;
   cJSON *root;
+  cJSON *max_output_tokens;
   int client_fd;
   int ok;
 
@@ -3226,7 +3414,11 @@ static int harness_run_answer_quality_disabled_server(int listener_fd)
   }
   root = cJSON_Parse(body);
   free(body);
+  max_output_tokens = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "max_output_tokens") : NULL;
   ok = cJSON_IsObject(root) &&
+    cJSON_IsNumber(max_output_tokens) &&
+    (max_output_tokens->valuedouble == 14286.0) &&
     harness_request_base_is_valid_with_answer_quality(
       root,
       "Skip answer quality",
@@ -3682,6 +3874,53 @@ static int harness_run_valid_web_reference_server(int listener_fd)
   ok = cJSON_IsObject(root) &&
     harness_request_base_is_valid(root,
                                   "Use a cited server tool",
+                                  &session_key,
+                                  &prompt_group) &&
+    harness_send_json_response(client_fd, 200L, first_response);
+  cJSON_Delete(root);
+  close(client_fd);
+  free(session_key);
+  free(prompt_group);
+  return ok;
+}
+
+static int harness_run_native_web_search_server(int listener_fd)
+{
+  static const char *first_response =
+    "{\"id\":\"resp-native-web-search\",\"object\":\"response\","
+    "\"created_at\":1700000005,\"model\":\"test/model\","
+    "\"status\":\"completed\",\"output\":[{"
+    "\"type\":\"web_search_call\",\"id\":\"ws-native\","
+    "\"status\":\"completed\",\"action\":{\"type\":\"search\","
+    "\"queries\":[\"current test\"],\"sources\":[{\"type\":\"url\","
+    "\"url\":\"https://example.com/article\"}]}},{"
+    "\"type\":\"message\",\"id\":\"msg-native-web-search\","
+    "\"role\":\"assistant\",\"status\":\"completed\","
+    "\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Citation-backed answer.\",\"annotations\":[{"
+    "\"type\":\"url_citation\",\"start_index\":0,\"end_index\":6,"
+    "\"title\":\"Example [Source]\","
+    "\"url\":\"https://example.com/article\"}]}]}],"
+    "\"usage\":{\"input_tokens\":4,\"output_tokens\":5,"
+    "\"total_tokens\":9}}";
+  char *body;
+  char *session_key;
+  char *prompt_group;
+  cJSON *root;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  session_key = NULL;
+  prompt_group = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  ok = cJSON_IsObject(root) &&
+    harness_request_base_is_valid(root,
+                                  "Use native web search",
                                   &session_key,
                                   &prompt_group) &&
     harness_send_json_response(client_fd, 200L, first_response);
@@ -4234,6 +4473,123 @@ static int harness_run_retry_after_server(int listener_fd)
   return ok;
 }
 
+static int harness_run_other_generic_server(int listener_fd)
+{
+  static const char *function_response =
+    "{\"id\":\"resp-other-function\",\"object\":\"response\","
+    "\"created_at\":1700000000,\"model\":\"manual\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"function_call\","
+    "\"id\":\"fc-other\",\"call_id\":\"call-other-rename\","
+    "\"name\":\"session_rename\","
+    "\"arguments\":\"{\\\"name\\\":\\\"Generic Fixture\\\"}\","
+    "\"status\":\"completed\"}],"
+    "\"usage\":{\"input_tokens\":2,\"output_tokens\":1,"
+    "\"total_tokens\":3}}";
+  static const char *response =
+    "{\"id\":\"resp-other\",\"object\":\"response\","
+    "\"created_at\":1700000000,\"model\":\"manual\","
+    "\"status\":\"completed\",\"output\":[{\"type\":\"message\","
+    "\"id\":\"msg-other\",\"role\":\"assistant\","
+    "\"status\":\"completed\",\"content\":[{\"type\":\"output_text\","
+    "\"text\":\"Generic response.\",\"annotations\":[]}]}],"
+    "\"usage\":{\"input_tokens\":3,\"output_tokens\":2,"
+    "\"total_tokens\":5}}";
+  char *body;
+  cJSON *root;
+  cJSON *model;
+  cJSON *stream;
+  cJSON *store;
+  cJSON *tools;
+  cJSON *reasoning;
+  cJSON *summary;
+  cJSON *input;
+  cJSON *item;
+  int client_fd;
+  int exercise_local_function;
+  int found_function_output;
+  int ok;
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  model = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "model") : NULL;
+  stream = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "stream") : NULL;
+  store = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "store") : NULL;
+  tools = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "tools") : NULL;
+  reasoning = cJSON_IsObject(root) ?
+    cJSON_GetObjectItem(root, "reasoning") : NULL;
+  summary = cJSON_IsObject(reasoning) ?
+    cJSON_GetObjectItem(reasoning, "summary") : NULL;
+  exercise_local_function = (harness_expected_authorization != NULL) &&
+    (harness_expected_authorization[0] != '\0');
+  ok = cJSON_IsString(model) && (model->valuestring != NULL) &&
+    ((strcmp(model->valuestring, "manual") == 0) ||
+     (strcmp(model->valuestring, "manual-no-reasoning") == 0)) &&
+    cJSON_IsFalse(stream) && cJSON_IsFalse(store) &&
+    (cJSON_GetObjectItem(root, "session_id") == NULL) &&
+    (cJSON_GetObjectItem(root, "metadata") == NULL) &&
+    (cJSON_GetObjectItem(root, "include") == NULL) &&
+    (((strcmp(model->valuestring, "manual") == 0) &&
+      cJSON_IsObject(reasoning) && cJSON_IsString(summary) &&
+      (summary->valuestring != NULL) &&
+      (strcmp(summary->valuestring, "auto") == 0) &&
+      (cJSON_GetObjectItem(reasoning, "enabled") == NULL) &&
+      (cJSON_GetObjectItem(reasoning, "effort") == NULL)) ||
+     ((strcmp(model->valuestring, "manual-no-reasoning") == 0) &&
+      (reasoning == NULL))) &&
+    (cJSON_GetObjectItem(root, "text") == NULL) &&
+    cJSON_IsArray(tools) &&
+    harness_has_tool_name(tools, STRAPPY_TOOL_SESSION_RENAME) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) &&
+    !harness_has_tool_type(tools, STRAPPY_TOOL_OPENROUTER_WEB_FETCH) &&
+    harness_send_json_response(
+      client_fd,
+      200L,
+      exercise_local_function ? function_response : response);
+  cJSON_Delete(root);
+  close(client_fd);
+  if (!ok || !exercise_local_function) {
+    return ok;
+  }
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  root = cJSON_Parse(body);
+  free(body);
+  input = cJSON_IsObject(root) ? cJSON_GetObjectItem(root, "input") : NULL;
+  found_function_output = 0;
+  for (item = cJSON_IsArray(input) ? input->child : NULL;
+       item != NULL;
+       item = item->next) {
+    cJSON *type;
+    cJSON *call_id;
+
+    type = cJSON_IsObject(item) ? cJSON_GetObjectItem(item, "type") : NULL;
+    call_id = cJSON_IsObject(item) ?
+      cJSON_GetObjectItem(item, "call_id") : NULL;
+    if (cJSON_IsString(type) && (type->valuestring != NULL) &&
+        (strcmp(type->valuestring, "function_call_output") == 0) &&
+        cJSON_IsString(call_id) && (call_id->valuestring != NULL) &&
+        (strcmp(call_id->valuestring, "call-other-rename") == 0)) {
+      found_function_output = 1;
+    }
+  }
+  ok = cJSON_IsObject(root) && found_function_output &&
+    (cJSON_GetObjectItem(root, "session_id") == NULL) &&
+    (cJSON_GetObjectItem(root, "metadata") == NULL) &&
+    (cJSON_GetObjectItem(root, "include") == NULL) &&
+    harness_send_json_response(client_fd, 200L, response);
+  cJSON_Delete(root);
+  close(client_fd);
+  return ok;
+}
+
 static int harness_run_slow_server(int listener_fd)
 {
   struct timeval timeout;
@@ -4357,6 +4713,10 @@ static int harness_start_server(harness_responses_server_scenario scenario,
     } else if (scenario ==
                HARNESS_RESPONSES_SERVER_WEB_REFERENCE_VALID) {
       ok = harness_run_valid_web_reference_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH) {
+      ok = harness_run_native_web_search_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_OTHER_GENERIC) {
+      ok = harness_run_other_generic_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_FUNCTION_TOOL) {
       ok = harness_run_function_tool_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_ROUND_LIMIT) {
@@ -4416,7 +4776,14 @@ static int harness_create_session_database_with_answer_quality(
   int ok;
 
   unlink(path);
-  if (!strappy_db_create_session(path, session_id_out, error_out)) {
+  if (!strappy_db_restore_provider_account(
+        path,
+        STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+        STRAPPY_PROVIDER_OPENROUTER,
+        STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+        NULL,
+        error_out) ||
+      !strappy_db_create_session(path, session_id_out, error_out)) {
     return 0;
   }
   if (!answer_quality_enabled) {
@@ -4630,11 +4997,27 @@ static int harness_test_answer_quality_disabled(void)
                                     session_id,
                                     &options,
                                     &error) &&
-    !options.answer_quality_enabled &&
-    harness_start_server(HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED,
-                         endpoint,
-                         sizeof(endpoint),
-                         &server_pid);
+    !options.answer_quality_enabled;
+  db = NULL;
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = sqlite3_exec(
+      db,
+      "UPDATE provider_accounts SET max_output_tokens=14286 "
+      "WHERE provider_id='openrouter';",
+      NULL, NULL, NULL) == SQLITE_OK;
+  } else if (ok) {
+    ok = 0;
+  }
+  if (db != NULL) {
+    sqlite3_close(db);
+    db = NULL;
+  }
+  if (ok) {
+    ok = harness_start_server(HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED,
+                              endpoint,
+                              sizeof(endpoint),
+                              &server_pid);
+  }
   if (!ok) {
     fprintf(stderr,
             "Could not prepare answer-quality-disabled integration test: "
@@ -5304,7 +5687,7 @@ static int harness_test_preflight_runs_only_on_first_prompt(void)
                         "SELECT COUNT(*) FROM conversation_items i "
                         "JOIN message_items m ON m.item_id=i.id "
                         "JOIN item_text_parts p ON p.item_id=i.id WHERE "
-                        "m.role='assistant' AND p.part_type='input_text' AND "
+                        "m.role='assistant' AND p.part_type='output_text' AND "
                         "p.text='" HARNESS_WORLD_PREFLIGHT_ASSISTANT_TEXT "' "
                         "AND i.introduced_request_id IS NOT NULL AND "
                         "i.source_attempt_id IS NULL;",
@@ -6050,6 +6433,144 @@ static int harness_test_valid_web_reference_passes_content_check(void)
   if (!ok) {
     fprintf(stderr,
             "Valid web-reference quality check failed: %s\n",
+            (error != NULL) ? error : "request or ledger mismatch");
+  }
+  free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_native_web_search_persists_citations(void)
+{
+  char path[] = "/tmp/strappy-responses-native-web-search-XXXXXX";
+  char endpoint[128];
+  char *error;
+  char *result;
+  sqlite3 *db;
+  strappy_response_item_raw_record_list context;
+  strappy_session_message_record_list timeline;
+  long long session_id;
+  long long value;
+  size_t index;
+  pid_t server_pid;
+  int context_has_search;
+  int timeline_has_search;
+  int timeline_has_citation;
+  int fd;
+  int server_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create native web-search harness database.");
+  }
+  close(fd);
+  error = NULL;
+  session_id = 0LL;
+  if (!harness_create_session_database(path, &session_id, &error) ||
+      !strappy_db_update_session_web_provider(path,
+                                              session_id,
+                                              STRAPPY_WEB_PROVIDER_AUTO,
+                                              &error) ||
+      !harness_start_server(HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    fprintf(stderr,
+            "Could not prepare native web-search integration test: %s\n",
+            (error != NULL) ? error : "server setup failed");
+    free(error);
+    unlink(path);
+    return 0;
+  }
+
+  result = strappy_responses_send_prompt_for_session_and_store(
+    "Use native web search",
+    "/dev/null",
+    endpoint,
+    "test-token",
+    "../shared/Resources",
+    path,
+    session_id,
+    &error);
+  server_ok = harness_wait_for_server(server_pid, result == NULL);
+  ok = (result != NULL) &&
+    (strcmp(result, "Citation-backed answer.") == 0) && server_ok;
+  free(result);
+  if (ok && (sqlite3_open(path, &db) == SQLITE_OK)) {
+    ok = harness_query_int(db,
+                           "SELECT COUNT(*) FROM conversation_items WHERE "
+                           "kind='openrouter:web_search' AND "
+                           "include_in_context=1;",
+                           &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM item_citations WHERE "
+                        "citation_type='url_citation' AND "
+                        "url='https://example.com/article';",
+                        &value) && (value == 1LL) &&
+      harness_query_int(db,
+                        "SELECT COUNT(*) FROM answer_quality_checks WHERE "
+                        "check_key='web_reference' AND status='passed';",
+                        &value) && (value == 1LL);
+    sqlite3_close(db);
+  } else if (ok) {
+    ok = 0;
+  }
+
+  strappy_response_item_raw_record_list_init(&context);
+  strappy_session_message_record_list_init(&timeline);
+  context_has_search = 0;
+  timeline_has_search = 0;
+  timeline_has_citation = 0;
+  if (ok) {
+    ok = strappy_db_list_canonical_response_items(path,
+                                                  session_id,
+                                                  &context,
+                                                  &error) &&
+      strappy_db_list_response_timeline(path,
+                                        session_id,
+                                        &timeline,
+                                        &error);
+  }
+  for (index = 0U; ok && (index < context.count); index++) {
+    if ((context.records[index].raw_json != NULL) &&
+        (strstr(context.records[index].raw_json,
+                "\"type\":\"web_search_call\"") != NULL) &&
+        (strstr(context.records[index].raw_json,
+                "\"queries\":[\"current test\"]") != NULL)) {
+      context_has_search = 1;
+    }
+  }
+  for (index = 0U; ok && (index < timeline.count); index++) {
+    if ((timeline.records[index].role != NULL) &&
+        (strcmp(timeline.records[index].role, "api_item") == 0) &&
+        (timeline.records[index].kind != NULL) &&
+        (strcmp(timeline.records[index].kind,
+                STRAPPY_RESPONSE_ITEM_WEB_SEARCH_CALL) == 0) &&
+        (timeline.records[index].response_item_action_json != NULL) &&
+        (strstr(timeline.records[index].response_item_action_json,
+                "\"queries\":[\"current test\"]") != NULL) &&
+        (strstr(timeline.records[index].response_item_action_json,
+                "https://example.com/article") != NULL)) {
+      timeline_has_search = 1;
+    }
+    if ((timeline.records[index].role != NULL) &&
+        (strcmp(timeline.records[index].role, "assistant") == 0) &&
+        (timeline.records[index].content != NULL) &&
+        (strstr(timeline.records[index].content, "Sources:") != NULL) &&
+        (strstr(timeline.records[index].content,
+                "[Example \\[Source\\]](<https://example.com/article>)") !=
+         NULL)) {
+      timeline_has_citation = 1;
+    }
+  }
+  ok = ok && context_has_search && timeline_has_search &&
+    timeline_has_citation;
+  strappy_response_item_raw_record_list_destroy(&context);
+  strappy_session_message_record_list_destroy(&timeline);
+  if (!ok) {
+    fprintf(stderr,
+            "Native web-search persistence check failed: %s\n",
             (error != NULL) ? error : "request or ledger mismatch");
   }
   free(error);
@@ -7294,7 +7815,8 @@ static int harness_verify_call_columns(sqlite3 *db,
     sqlite3_finalize(stmt);
     return 0;
   }
-  ok = strcmp((const char *)sqlite3_column_text(stmt, 0), "test/model") == 0 &&
+  ok = strcmp((const char *)sqlite3_column_text(stmt, 0),
+              STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER) == 0 &&
     sqlite3_column_int(stmt, 1) == 0 &&
     strcmp((const char *)sqlite3_column_text(stmt, 2), "System") == 0 &&
     strcmp((const char *)sqlite3_column_text(stmt, 3), "resp-test") == 0 &&
@@ -7484,7 +8006,8 @@ static int harness_append_usage_metrics_call(
   char **error_out)
 {
   static const char *request_json =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"instructions\":\"System\",\"input\":[]}";
   strappy_response_call_begin_input begin;
   strappy_response_call_finish_input finish;
@@ -7493,6 +8016,8 @@ static int harness_append_usage_metrics_call(
   memset(&begin, 0, sizeof(begin));
   begin.session_id = session_id;
   begin.previous_call_id = previous_call_id;
+  begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+  begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
   begin.prompt_group_key = prompt_group_key;
   begin.request_kind = request_kind;
   begin.round_index = round_index;
@@ -7560,7 +8085,8 @@ static int harness_test_cumulative_session_metrics(void)
     "\"model\":\"test/model\",\"output\":[],"
     "\"usage\":{\"cost\":0.0005}}";
   static const char *pending_request =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"instructions\":\"System\",\"input\":[{\"type\":\"message\","
     "\"role\":\"user\",\"content\":[{\"type\":\"input_text\","
     "\"text\":\"Pending metrics\"}]}]}";
@@ -7597,7 +8123,14 @@ static int harness_test_cumulative_session_metrics(void)
   strappy_response_timeline_cursor_init(&range_cursor);
   strappy_session_message_record_list_init(&timeline);
   strappy_session_message_record_list_init(&ranged_timeline);
-  ok = strappy_db_create_session(path, &session_id, &error) &&
+  ok = strappy_db_restore_provider_account(
+         path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+         STRAPPY_PROVIDER_OPENROUTER,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+         NULL,
+         &error) &&
+    strappy_db_create_session(path, &session_id, &error) &&
     harness_append_usage_metrics_call(path,
                                    session_id,
                                    previous_call_id,
@@ -7672,6 +8205,8 @@ static int harness_test_cumulative_session_metrics(void)
     memset(&pending_begin, 0, sizeof(pending_begin));
     pending_begin.session_id = session_id;
     pending_begin.previous_call_id = previous_call_id;
+    pending_begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+    pending_begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
     pending_begin.prompt_group_key = "group-three";
     pending_begin.request_kind = "user";
     pending_begin.round_index = 0L;
@@ -7809,7 +8344,8 @@ static int harness_verify_invalid_structured_text_webview_recovery(
   char **error_out)
 {
   static const char *continuation_request_json =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"instructions\":\"System\",\"input\":[{"
     "\"type\":\"function_call_output\",\"call_id\":\"call-test\","
     "\"output\":{\"value\":\"safe\"}}],\"max_output_tokens\":100,"
@@ -7892,6 +8428,8 @@ static int harness_verify_invalid_structured_text_webview_recovery(
 
   memset(&continuation, 0, sizeof(continuation));
   continuation.session_id = session_id;
+  continuation.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+  continuation.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
   continuation.prompt_group_key = "group-test";
   continuation.request_kind = "tool_continuation";
   continuation.round_index = 1L;
@@ -7984,7 +8522,8 @@ cleanup:
 static int harness_test_ledger(void)
 {
   static const char *request_json =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"instructions\":\"System\",\"input\":[{\"type\":\"message\","
     "\"role\":\"user\",\"content\":[{\"type\":\"input_text\","
     "\"text\":\"Hello\"}]}],\"max_output_tokens\":100,"
@@ -8008,6 +8547,9 @@ static int harness_test_ledger(void)
     "\"status\":\"completed\",\"encrypted_content\":\"encrypted\","
     "\"format\":\"test-v1\",\"signature\":\"sig-test\","
     "\"summary\":[{\"type\":\"summary_text\",\"text\":\"Plan\"}]},"
+    "{\"type\":\"reasoning\",\"id\":\"rs-encrypted\","
+    "\"status\":\"completed\",\"encrypted_content\":\"opaque\","
+    "\"format\":\"encrypted-v1\"},"
     "{\"type\":\"function_call\",\"id\":\"fc-test\","
     "\"call_id\":\"call-test\",\"name\":\"database_list\","
     "\"namespace\":\"local\",\"arguments\":\"{}\","
@@ -8058,7 +8600,14 @@ static int harness_test_ledger(void)
   model_request_id = 0LL;
   strappy_response_item_raw_record_list_init(&context);
   strappy_session_message_record_list_init(&timeline);
-  ok = strappy_db_create_session(path, &session_id, &error);
+  ok = strappy_db_restore_provider_account(
+         path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+         STRAPPY_PROVIDER_OPENROUTER,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+         NULL,
+         &error) &&
+    strappy_db_create_session(path, &session_id, &error);
   if (!ok) {
     fprintf(stderr, "Could not create harness session: %s\n", error);
     free(error);
@@ -8068,6 +8617,8 @@ static int harness_test_ledger(void)
 
   memset(&begin, 0, sizeof(begin));
   begin.session_id = session_id;
+  begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+  begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
   begin.prompt_group_key = "group-test";
   begin.request_kind = "user";
   begin.round_index = 0L;
@@ -8140,7 +8691,7 @@ static int harness_test_ledger(void)
   ok = harness_verify_call_columns(db, request_json, response_json) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM conversation_items;",
-                      &value) && (value == 6LL) &&
+                      &value) && (value == 7LL) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM item_text_parts;",
                       &value) && (value == 3LL) &&
@@ -8157,6 +8708,11 @@ static int harness_test_ledger(void)
                       "SELECT COUNT(*) FROM reasoning_items WHERE "
                       "provider_format='test-v1' AND "
                       "provider_signature='sig-test';",
+                      &value) && (value == 1LL) &&
+    harness_query_int(db,
+                      "SELECT COUNT(*) FROM reasoning_items WHERE "
+                      "encrypted_content='opaque' AND "
+                      "provider_format='encrypted-v1';",
                       &value) && (value == 1LL) &&
     harness_query_int(db,
                       "SELECT COUNT(*) FROM web_searches w "
@@ -8185,7 +8741,7 @@ static int harness_test_ledger(void)
                                                 session_id,
                                                 &context,
                                                 &error) &&
-    (context.count == 6U);
+    (context.count == 7U);
   strappy_response_item_raw_record_list_destroy(&context);
   if (!ok) {
     fprintf(stderr, "Canonical Responses items failed: %s\n", error);
@@ -8199,7 +8755,7 @@ static int harness_test_ledger(void)
                                          &timeline,
                                          &error) &&
     harness_verify_timeline_hierarchy(&timeline, 0) &&
-    (timeline.count == 7U) &&
+    (timeline.count == 8U) &&
     (strcmp(timeline.records[0].role, "user") == 0) &&
     (strcmp(timeline.records[0].direction, "request") == 0) &&
     timeline.records[0].can_include_in_context &&
@@ -8225,7 +8781,8 @@ static int harness_test_ledger(void)
             "\"id\":\"resp-test\"") != NULL) &&
     (strstr(timeline.records[1].metadata_json, "\"usage\"") != NULL) &&
     (strstr(timeline.records[1].metadata_json, "http_status") == NULL) &&
-    (strstr(timeline.records[1].content, "Model: test/model") != NULL) &&
+    (strstr(timeline.records[1].content,
+            "Model: " STRAPPY_CONFIG_DEFAULT_API_MODEL) != NULL) &&
     (strstr(timeline.records[1].content,
             "Request: POST https://openrouter.ai/api/v1/responses") != NULL) &&
     (strstr(timeline.records[1].content, "HTTP 200") == NULL) &&
@@ -8234,33 +8791,37 @@ static int harness_test_ledger(void)
     timeline.records[2].can_include_in_context &&
     (strcmp(timeline.records[2].direction, "response") == 0) &&
     (timeline.records[2].http_attempt_id == call_id) &&
-    (strcmp(timeline.records[3].role, "api_function_call") == 0) &&
+    (strcmp(timeline.records[3].role, "api_reasoning") == 0) &&
     timeline.records[3].can_include_in_context &&
     (strcmp(timeline.records[3].direction, "response") == 0) &&
-    (strcmp(timeline.records[4].role, "api_item") == 0) &&
+    timeline.records[3].reasoning_encrypted &&
+    (strcmp(timeline.records[4].role, "api_function_call") == 0) &&
     timeline.records[4].can_include_in_context &&
-    (strcmp(timeline.records[4].kind,
-            STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) &&
-    (strcmp(timeline.records[4].response_item_action_json,
-            "{\"type\":\"search\",\"query\":\"Strappy Cocoa\","
-            "\"sources\":[{\"type\":\"url\","
-            "\"url\":\"https://example.com/search\"}]}") == 0) &&
+    (strcmp(timeline.records[4].direction, "response") == 0) &&
     (strcmp(timeline.records[5].role, "api_item") == 0) &&
     timeline.records[5].can_include_in_context &&
     (strcmp(timeline.records[5].kind,
-            STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) &&
-    (strcmp(timeline.records[5].response_item_url,
-            "https://example.com/article") == 0) &&
-    (strcmp(timeline.records[5].response_item_title,
-            "Example Article") == 0) &&
-    (strcmp(timeline.records[5].response_item_status, "completed") == 0) &&
-    (strcmp(timeline.records[5].response_item_http_status, "200") == 0) &&
-    (strstr(timeline.records[5].response_item_title,
-            "Fetched page body") == NULL) &&
-    (strcmp(timeline.records[6].role, "assistant") == 0) &&
+            STRAPPY_TOOL_OPENROUTER_WEB_SEARCH) == 0) &&
+    (strcmp(timeline.records[5].response_item_action_json,
+            "{\"type\":\"search\",\"query\":\"Strappy Cocoa\","
+            "\"sources\":[{\"type\":\"url\","
+            "\"url\":\"https://example.com/search\"}]}") == 0) &&
+    (strcmp(timeline.records[6].role, "api_item") == 0) &&
     timeline.records[6].can_include_in_context &&
-    (strcmp(timeline.records[6].direction, "response") == 0) &&
-    (strcmp(timeline.records[6].content, "Done") == 0);
+    (strcmp(timeline.records[6].kind,
+            STRAPPY_TOOL_OPENROUTER_WEB_FETCH) == 0) &&
+    (strcmp(timeline.records[6].response_item_url,
+            "https://example.com/article") == 0) &&
+    (strcmp(timeline.records[6].response_item_title,
+            "Example Article") == 0) &&
+    (strcmp(timeline.records[6].response_item_status, "completed") == 0) &&
+    (strcmp(timeline.records[6].response_item_http_status, "200") == 0) &&
+    (strstr(timeline.records[6].response_item_title,
+            "Fetched page body") == NULL) &&
+    (strcmp(timeline.records[7].role, "assistant") == 0) &&
+    timeline.records[7].can_include_in_context &&
+    (strcmp(timeline.records[7].direction, "response") == 0) &&
+    (strcmp(timeline.records[7].content, "Done") == 0);
   if (!ok) {
     size_t timeline_index;
 
@@ -8302,7 +8863,7 @@ static int harness_test_ledger(void)
                                       session_id,
                                       model_request_id,
                                       0U,
-                                      6U,
+                                      7U,
                                       0U,
                                       &error) &&
     strappy_session_update_model_request_include_in_context(path,
@@ -8313,9 +8874,9 @@ static int harness_test_ledger(void)
     harness_context_selection_matches(path,
                                       session_id,
                                       model_request_id,
-                                      6U,
-                                      6U,
-                                      6U,
+                                      7U,
+                                      7U,
+                                      7U,
                                       &error);
   if (!ok) {
     fprintf(stderr,
@@ -8441,7 +9002,14 @@ static int harness_test_working_directory_selection(void)
   working_directory = NULL;
   error = NULL;
   session_id = 0LL;
-  ok = strappy_session_create_with_working_directory(database_path,
+  ok = strappy_db_restore_provider_account(
+         database_path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+         STRAPPY_PROVIDER_OPENROUTER,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+         NULL,
+         &error) &&
+    strappy_session_create_with_working_directory(database_path,
                                                      developer_path,
                                                      &session_id,
                                                      &error) &&
@@ -8538,7 +9106,8 @@ static int harness_test_session_webview_rendering(void)
     "Second stored WebView message from "
     "strappy_session_webview_Contacts &amp; Notes.sqlite; keep db_2 raw";
   static const char *request_json =
-    "{\"model\":\"test/model\",\"stream\":false,\"store\":false,"
+    "{\"model\":\"" STRAPPY_CONFIG_DEFAULT_API_MODEL
+    "\",\"stream\":false,\"store\":false,"
     "\"input\":[{\"type\":\"message\",\"role\":\"user\","
     "\"content\":[{\"type\":\"input_text\","
     "\"text\":\"First stored WebView message\"}]}]}";
@@ -8625,6 +9194,13 @@ static int harness_test_session_webview_rendering(void)
   strappy_response_timeline_cursor_init(&request_cursor);
   strappy_session_message_record_list_init(&range);
   ok = strappy_webview_configure_localized_labels(&error) &&
+       strappy_db_restore_provider_account(
+         path,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+         STRAPPY_PROVIDER_OPENROUTER,
+         STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+         NULL,
+         &error) &&
        strappy_db_create_session(path, &session_id, &error) &&
        harness_create_approved_preflight_database(path,
                                                   database_path,
@@ -8699,6 +9275,8 @@ static int harness_test_session_webview_rendering(void)
 
   memset(&begin, 0, sizeof(begin));
   begin.session_id = session_id;
+  begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+  begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
   begin.prompt_group_key = "webview-group";
   begin.request_kind = "user";
   begin.round_index = 0L;
@@ -8979,6 +9557,334 @@ cleanup:
   return ok;
 }
 
+typedef struct harness_other_credentials {
+  const char *authenticated_account_id;
+  const char *unauthenticated_account_id;
+  pthread_mutex_t mutex;
+  int authenticated_snapshots;
+  int unauthenticated_snapshots;
+  int invalid_snapshots;
+} harness_other_credentials;
+
+typedef struct harness_other_request {
+  const char *db_path;
+  long long session_id;
+  const char *prompt;
+  char *result;
+  char *error;
+} harness_other_request;
+
+static int harness_other_credentials_callback(
+  const char *provider_id,
+  const char *provider_account_id,
+  int force_refresh,
+  char **bearer_token_out,
+  char **upstream_account_id_out,
+  void *user_data,
+  char **error_out)
+{
+  static const char token[] = "phase6-auth-token-not-live";
+  harness_other_credentials *credentials;
+  int valid;
+
+  (void)error_out;
+  credentials = (harness_other_credentials *)user_data;
+  if ((bearer_token_out == NULL) || (upstream_account_id_out == NULL) ||
+      (credentials == NULL)) {
+    return 0;
+  }
+  *bearer_token_out = NULL;
+  *upstream_account_id_out = NULL;
+  valid = (provider_id != NULL) &&
+    (strcmp(provider_id, STRAPPY_PROVIDER_OTHER) == 0) && !force_refresh;
+  pthread_mutex_lock(&credentials->mutex);
+  if (valid && (provider_account_id != NULL) &&
+      (strcmp(provider_account_id,
+              credentials->authenticated_account_id) == 0)) {
+    credentials->authenticated_snapshots++;
+    *bearer_token_out = strdup(token);
+    valid = *bearer_token_out != NULL;
+  } else if (valid && (provider_account_id != NULL) &&
+             (strcmp(provider_account_id,
+                     credentials->unauthenticated_account_id) == 0)) {
+    credentials->unauthenticated_snapshots++;
+  } else {
+    credentials->invalid_snapshots++;
+    valid = 0;
+  }
+  pthread_mutex_unlock(&credentials->mutex);
+  return valid;
+}
+
+static void *harness_run_other_request_thread(void *context)
+{
+  harness_other_request *request;
+
+  request = (harness_other_request *)context;
+  request->result =
+    strappy_responses_send_prompt_for_session_and_store(
+      request->prompt,
+      "/dev/null",
+      NULL,
+      NULL,
+      "../shared/Resources",
+      request->db_path,
+      request->session_id,
+      &request->error);
+  return NULL;
+}
+
+static int harness_file_contains_text(const char *path, const char *needle)
+{
+  FILE *file;
+  char *bytes;
+  long length;
+  size_t index;
+  size_t needle_length;
+  int close_ok;
+  int found;
+
+  file = fopen(path, "rb");
+  if (file == NULL) {
+    return 0;
+  }
+  if ((fseek(file, 0L, SEEK_END) != 0) ||
+      ((length = ftell(file)) < 0L) ||
+      (fseek(file, 0L, SEEK_SET) != 0)) {
+    fclose(file);
+    return 0;
+  }
+  bytes = (char *)malloc((size_t)length + 1U);
+  if (bytes == NULL) {
+    fclose(file);
+    return 0;
+  }
+  found = fread(bytes, 1U, (size_t)length, file) == (size_t)length;
+  close_ok = fclose(file) == 0;
+  needle_length = strlen(needle);
+  found = found && close_ok && (needle_length <= (size_t)length);
+  for (index = 0U;
+       found && (index + needle_length <= (size_t)length);
+       index++) {
+    if (memcmp(bytes + index, needle, needle_length) == 0) {
+      free(bytes);
+      return 1;
+    }
+  }
+  free(bytes);
+  return 0;
+}
+
+static int harness_test_other_provider_accounts(void)
+{
+  static const char token[] = "phase6-auth-token-not-live";
+  char path[] = "/tmp/strappy-responses-other-XXXXXX";
+  char endpoint_one[128];
+  char endpoint_two[128];
+  char wal_path[sizeof(path) + 8U];
+  char *account_one;
+  char *account_two;
+  char *model_one;
+  char *model_two;
+  char *error;
+  strappy_manual_model_input model_input;
+  strappy_model_route_record route;
+  harness_other_credentials credentials;
+  harness_other_request request_one;
+  harness_other_request request_two;
+  pthread_t thread_one;
+  pthread_t thread_two;
+  pid_t server_one;
+  pid_t server_two;
+  long long session_one;
+  long long session_two;
+  int fd;
+  int first_started;
+  int second_started;
+  int first_joined;
+  int second_joined;
+  int server_one_ok;
+  int server_two_ok;
+  int ok;
+
+  fd = mkstemp(path);
+  if (fd < 0) {
+    return harness_fail("Could not create generic-provider test database.");
+  }
+  close(fd);
+  account_one = NULL;
+  account_two = NULL;
+  model_one = NULL;
+  model_two = NULL;
+  error = NULL;
+  session_one = 0LL;
+  session_two = 0LL;
+  server_one = (pid_t)-1;
+  server_two = (pid_t)-1;
+  first_started = 0;
+  second_started = 0;
+  first_joined = 0;
+  second_joined = 0;
+  server_one_ok = 0;
+  server_two_ok = 0;
+  wal_path[0] = '\0';
+  strappy_model_route_record_init(&route);
+  memset(&credentials, 0, sizeof(credentials));
+  memset(&request_one, 0, sizeof(request_one));
+  memset(&request_two, 0, sizeof(request_two));
+  pthread_mutex_init(&credentials.mutex, NULL);
+
+  harness_expected_authorization = "Bearer phase6-auth-token-not-live";
+  ok = harness_start_server(HARNESS_RESPONSES_SERVER_OTHER_GENERIC,
+                            endpoint_one,
+                            sizeof(endpoint_one),
+                            &server_one);
+  harness_expected_authorization = "";
+  if (ok) {
+    ok = harness_start_server(HARNESS_RESPONSES_SERVER_OTHER_GENERIC,
+                              endpoint_two,
+                              sizeof(endpoint_two),
+                              &server_two);
+  }
+  harness_expected_authorization = NULL;
+  memset(&model_input, 0, sizeof(model_input));
+  model_input.wire_model_id = "manual";
+  model_input.display_name = "Manual";
+  model_input.context_window_tokens = 8192LL;
+  model_input.max_output_tokens = 1024LL;
+  model_input.reasoning_enabled = 1;
+  model_input.local_functions_enabled = 1;
+  ok = ok && strappy_db_initialize(path, &error) &&
+    strappy_db_create_provider_account(
+      path,"other","Authenticated",endpoint_one,&account_one,&error) &&
+    strappy_db_create_provider_account(
+      path,"other","Unauthenticated",endpoint_two,&account_two,&error) &&
+    strappy_db_create_manual_model(
+      path,"other",&model_input,&model_one,&error);
+  model_input.wire_model_id = "manual-no-reasoning";
+  model_input.display_name = "Manual Without Reasoning";
+  model_input.reasoning_enabled = 0;
+  ok = ok &&
+    strappy_db_create_manual_model(
+      path,"other",&model_input,&model_two,&error) &&
+    strappy_db_set_model_allowed(path,model_one,1,&error) &&
+    strappy_db_set_model_allowed(path,model_two,1,&error) &&
+    strappy_db_set_default_account_model(path,account_one,model_one,&error) &&
+    strappy_db_create_session(path,&session_one,&error) &&
+    strappy_db_set_default_account_model(path,account_two,model_two,&error) &&
+    strappy_db_create_session(path,&session_two,&error);
+  if (!ok) {
+    fprintf(stderr,
+            "Could not prepare generic-provider fixtures: %s\n",
+            (error != NULL) ? error : "unknown");
+    goto cleanup;
+  }
+
+  credentials.authenticated_account_id = account_one;
+  credentials.unauthenticated_account_id = account_two;
+  strappy_responses_set_provider_credentials_callback(
+    harness_other_credentials_callback,
+    &credentials);
+  request_one.db_path = path;
+  request_one.session_id = session_one;
+  request_one.prompt = "Authenticated generic request";
+  request_two.db_path = path;
+  request_two.session_id = session_two;
+  request_two.prompt = "Unauthenticated generic request";
+  first_started = pthread_create(
+    &thread_one,NULL,harness_run_other_request_thread,&request_one) == 0;
+  second_started = first_started && (pthread_create(
+    &thread_two,NULL,harness_run_other_request_thread,&request_two) == 0);
+  if (first_started) {
+    first_joined = pthread_join(thread_one, NULL) == 0;
+  }
+  if (second_started) {
+    second_joined = pthread_join(thread_two, NULL) == 0;
+  }
+  strappy_responses_set_provider_credentials_callback(NULL, NULL);
+  server_one_ok = harness_wait_for_server(
+    server_one,
+    request_one.result == NULL);
+  server_one = (pid_t)-1;
+  server_two_ok = harness_wait_for_server(
+    server_two,
+    request_two.result == NULL);
+  server_two = (pid_t)-1;
+  ok = first_started && second_started && first_joined && second_joined &&
+    (request_one.result != NULL) &&
+    (strcmp(request_one.result,"Generic response.") == 0) &&
+    (request_two.result != NULL) &&
+    (strcmp(request_two.result,"Generic response.") == 0) &&
+    (request_one.error == NULL) && (request_two.error == NULL) &&
+    (credentials.authenticated_snapshots == 1) &&
+    (credentials.unauthenticated_snapshots == 1) &&
+    (credentials.invalid_snapshots == 0) &&
+    server_one_ok && server_two_ok;
+  if (!ok) {
+    fprintf(stderr,"Generic-provider simultaneous requests failed.\n");
+    goto cleanup;
+  }
+
+  snprintf(wal_path, sizeof(wal_path), "%s-wal", path);
+  /* Reopening proves account/model/session state survives process-style
+   * teardown; archiving must preserve history while blocking new routing. */
+  ok = !harness_file_contains_text(path, token) &&
+    !harness_file_contains_text(wal_path, token) &&
+    strappy_db_initialize(path,&error) &&
+    strappy_db_archive_provider_account(path,account_one,&error);
+  if (ok) {
+    ok = !strappy_db_get_session_model_route(
+           path,session_one,&route,&error) && (error != NULL) &&
+      (strstr(error,"active") != NULL) &&
+      (strstr(error,"Authenticated") == NULL);
+  }
+  strappy_free_string(error);
+  error = NULL;
+  if (ok) {
+    sqlite3 *db;
+    long long value;
+
+    db = NULL;
+    ok = (sqlite3_open(path,&db) == SQLITE_OK) &&
+      harness_query_int(db,
+        "SELECT COUNT(*) FROM model_requests r JOIN turns t ON t.id=r.turn_id "
+        "JOIN sessions s ON s.id=t.session_id WHERE r.provider_account_id IN "
+        "(SELECT id FROM provider_accounts WHERE provider_id='other');",
+        &value) && (value >= 2LL) &&
+      harness_query_int(db,
+        "SELECT COUNT(*) FROM api_usage WHERE cost_nano_usd IS NOT NULL;",
+        &value) && (value == 0LL);
+    if (db != NULL) {
+      sqlite3_close(db);
+    }
+  }
+
+cleanup:
+  strappy_responses_set_provider_credentials_callback(NULL, NULL);
+  if (server_one > 0) {
+    (void)harness_wait_for_server(server_one, 1);
+  }
+  if (server_two > 0) {
+    (void)harness_wait_for_server(server_two, 1);
+  }
+  pthread_mutex_destroy(&credentials.mutex);
+  strappy_model_route_record_destroy(&route);
+  free(request_one.result);
+  free(request_one.error);
+  free(request_two.result);
+  free(request_two.error);
+  free(account_one);
+  free(account_two);
+  free(model_one);
+  free(model_two);
+  free(error);
+  if (wal_path[0] != '\0') {
+    unlink(wal_path);
+  }
+  unlink(path);
+  return ok;
+}
+
 int main(void)
 {
   if (harness_test_unicode_emoji_scan() &&
@@ -8995,6 +9901,7 @@ int main(void)
       harness_test_empty_answer_after_tools_quality_report() &&
       harness_test_web_search_requires_markdown_reference() &&
       harness_test_valid_web_reference_passes_content_check() &&
+      harness_test_native_web_search_persists_citations() &&
       harness_test_function_tool_continuation() &&
       harness_test_round_limit() &&
       harness_test_file_mutation_continuation() &&
@@ -9004,6 +9911,7 @@ int main(void)
       harness_test_retry_attempt_ledger() &&
       harness_test_active_request_cancellation() &&
       harness_test_retry_after_clamp_and_cancellation() &&
+      harness_test_other_provider_accounts() &&
       harness_test_session_webview_rendering()) {
     printf("responses_harness passed.\n");
     return 0;

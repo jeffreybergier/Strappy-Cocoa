@@ -2,12 +2,36 @@
 
 #import "StrappyKeychain.h"
 #import "strappy_core.h"
+#import "strappy_model_catalog.h"
+#import "strappy_openai_oauth.h"
 #import "strappy_prompt.h"
+#import "strappy_provider.h"
+#import "strappy_responses.h"
 #import "strappy_session.h"
 #import "strappy_study.h"
 #import "XPFoundation.h"
+#import "cJSON.h"
 
+#include <stdlib.h>
 #include <string.h>
+
+typedef struct StrappyChatGPTAuthorizationCancellationContext {
+  id<StrappyChatGPTAuthorizationObserver> observer;
+  id context;
+} StrappyChatGPTAuthorizationCancellationContext;
+
+static int StrappyChatGPTAuthorizationShouldCancel(void *userData)
+{
+  StrappyChatGPTAuthorizationCancellationContext *context;
+
+  context = (StrappyChatGPTAuthorizationCancellationContext *)userData;
+  if ((context == NULL) || (context->observer == nil)) {
+    return 1;
+  }
+  return [context->observer
+    strappyChatGPTAuthorizationShouldCancelWithContext:context->context] ?
+    1 : 0;
+}
 
 static NSString *StrappyStageWebViewFonts(void)
 {
@@ -99,6 +123,8 @@ NSString * const StrappySessionModelCatalogRefreshDidFinishNotification =
   @"StrappySessionModelCatalogRefreshDidFinishNotification";
 NSString * const StrappySessionModelCatalogDidChangeNotification =
   @"StrappySessionModelCatalogDidChangeNotification";
+NSString * const StrappyProviderAccountsDidChangeNotification =
+  @"StrappyProviderAccountsDidChangeNotification";
 NSString * const StrappySessionChangeKindKey = @"change_kind";
 NSString * const StrappySessionChangeKindActivity = @"activity";
 NSString * const StrappySessionChangeKindName = @"name";
@@ -117,6 +143,175 @@ const NSUInteger StrappySessionMaximumLimit =
 
 static NSMutableDictionary *StrappySessionInFlightSessions = nil;
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
+
+static int StrappySessionCopyChatGPTCredentials(
+  const char *providerID,
+  const char *providerAccountID,
+  int forceRefresh,
+  char **accessTokenOut,
+  char **accountIdentifierOut,
+  void *userData,
+  char **errorOut)
+{
+  static const long long refreshLeewayMilliseconds = 5LL * 60LL * 1000LL;
+  StrappyKeychain *keychain;
+  NSString *accessToken;
+  NSString *refreshToken;
+  NSString *accountIdentifier;
+  long long expiresAtMilliseconds;
+  long long nowMilliseconds;
+  BOOL credentialReady;
+  int ok;
+
+  (void)userData;
+  if ((providerID == NULL) || (providerID[0] == '\0') ||
+      (providerAccountID == NULL) || (providerAccountID[0] == '\0') ||
+      (accessTokenOut == NULL) || (accountIdentifierOut == NULL)) {
+    strappy_set_error(errorOut, "Account credential inputs are missing.");
+    return 0;
+  }
+  *accessTokenOut = NULL;
+  *accountIdentifierOut = NULL;
+  keychain = [StrappyKeychain sharedKeychain];
+  accessToken = nil;
+  refreshToken = nil;
+  accountIdentifier = nil;
+  expiresAtMilliseconds = 0LL;
+  ok = 0;
+
+  if (strcmp(providerID, STRAPPY_PROVIDER_OPENAI_CHATGPT) != 0) {
+    NSString *providerIdentifier;
+    NSString *providerAccountIdentifier;
+    NSString *bearerToken;
+    NSObject *credentialLock;
+
+    providerIdentifier = [NSString stringWithUTF8String:providerID];
+    providerAccountIdentifier = [NSString stringWithUTF8String:
+      providerAccountID];
+    bearerToken = nil;
+    credentialLock = [keychain
+      credentialLockForProviderIdentifier:providerIdentifier
+      providerAccountIdentifier:providerAccountIdentifier];
+    @synchronized(credentialLock) {
+      BOOL loaded;
+
+      loaded = [keychain loadBearerToken:&bearerToken
+                   forProviderIdentifier:providerIdentifier
+               providerAccountIdentifier:providerAccountIdentifier];
+      if (loaded) {
+        *accessTokenOut = strappy_string_duplicate([bearerToken UTF8String]);
+        if (*accessTokenOut != NULL) {
+          return 1;
+        }
+      }
+    }
+    strappy_set_error(errorOut, "The selected account has no bearer credential.");
+    return 0;
+  }
+
+  {
+    NSString *providerAccountIdentifier;
+    NSObject *credentialLock;
+
+    providerAccountIdentifier = [NSString stringWithUTF8String:
+      providerAccountID];
+    credentialLock = [keychain
+      credentialLockForProviderIdentifier:@"openai_chatgpt"
+      providerAccountIdentifier:providerAccountIdentifier];
+  @synchronized(credentialLock) {
+    BOOL loaded;
+
+    loaded = [keychain loadChatGPTAccessToken:&accessToken
+                                  refreshToken:&refreshToken
+                             accountIdentifier:&accountIdentifier
+                          expiresAtMilliseconds:&expiresAtMilliseconds
+                     providerAccountIdentifier:providerAccountIdentifier];
+    if (!loaded &&
+        [keychain
+          migrateLegacyChatGPTCredentialToProviderAccountIdentifier:
+            providerAccountIdentifier]) {
+      loaded = [keychain loadChatGPTAccessToken:&accessToken
+                                    refreshToken:&refreshToken
+                               accountIdentifier:&accountIdentifier
+                            expiresAtMilliseconds:&expiresAtMilliseconds
+                       providerAccountIdentifier:providerAccountIdentifier];
+    }
+    if (!loaded) {
+      strappy_set_error(errorOut, "Sign in to ChatGPT before sending a prompt.");
+    } else {
+      credentialReady = YES;
+      nowMilliseconds = strappy_unix_milliseconds();
+      if (forceRefresh || (nowMilliseconds <= 0LL) ||
+          ((expiresAtMilliseconds - nowMilliseconds) <=
+           refreshLeewayMilliseconds)) {
+        strappy_openai_oauth_configuration configuration;
+        strappy_openai_oauth_credentials credentials;
+        NSString *nextAccessToken;
+        NSString *nextRefreshToken;
+        NSString *nextAccountIdentifier;
+
+        strappy_openai_oauth_default_configuration(&configuration);
+        strappy_openai_oauth_credentials_init(&credentials);
+        credentialReady = NO;
+        if (strappy_openai_oauth_refresh_credentials(
+              &configuration,
+              [refreshToken UTF8String],
+              &credentials,
+              NULL,
+              NULL,
+              errorOut)) {
+          nextAccessToken = [NSString stringWithUTF8String:
+            credentials.access_token];
+          nextRefreshToken = [NSString stringWithUTF8String:
+            credentials.refresh_token];
+          nextAccountIdentifier = [NSString stringWithUTF8String:
+            credentials.account_id];
+          if ((nextAccessToken == nil) || (nextRefreshToken == nil) ||
+              (nextAccountIdentifier == nil) ||
+              ![nextAccountIdentifier isEqualToString:accountIdentifier]) {
+            strappy_set_error(
+              errorOut,
+              "Refreshed ChatGPT credentials changed account identity.");
+          } else if (![keychain
+                       saveChatGPTAccessToken:nextAccessToken
+                       refreshToken:nextRefreshToken
+                       accountIdentifier:nextAccountIdentifier
+                       expiresAtMilliseconds:
+                         credentials.expires_at_milliseconds
+                  providerAccountIdentifier:providerAccountIdentifier]) {
+            strappy_set_error(
+              errorOut,
+              "The Keychain refused the refreshed ChatGPT credential.");
+          } else {
+            accessToken = nextAccessToken;
+            refreshToken = nextRefreshToken;
+            accountIdentifier = nextAccountIdentifier;
+            expiresAtMilliseconds = credentials.expires_at_milliseconds;
+            credentialReady = YES;
+          }
+        }
+        strappy_openai_oauth_credentials_destroy(&credentials);
+      }
+      if (credentialReady && ((errorOut == NULL) || (*errorOut == NULL))) {
+        *accessTokenOut = strappy_string_duplicate([accessToken UTF8String]);
+        *accountIdentifierOut =
+          strappy_string_duplicate([accountIdentifier UTF8String]);
+        if ((*accessTokenOut == NULL) || (*accountIdentifierOut == NULL)) {
+          strappy_secure_free_string(*accessTokenOut);
+          strappy_secure_free_string(*accountIdentifierOut);
+          *accessTokenOut = NULL;
+          *accountIdentifierOut = NULL;
+          strappy_set_error(errorOut,
+                            "Could not allocate ChatGPT credential snapshot.");
+        } else {
+          ok = 1;
+        }
+      }
+    }
+  }
+  }
+  return ok;
+}
 
 typedef struct StrappySessionResponsesContext {
   StrappySession *session;
@@ -192,16 +387,33 @@ static NSString *StrappySessionStringFromCString(char *value)
 }
 
 @interface StrappySession ()
++ (BOOL)initializeSessionStoreAndPrepareCredentials:(BOOL)prepareCredentials
+                                               error:(NSError **)error;
++ (NSArray *)providerAccountCatalogVerifyingCredentials:
+               (BOOL)verifyCredentials
+                                                   error:(NSError **)error;
 + (NSMutableDictionary *)inFlightSessions;
 + (void)registerInFlightSession:(StrappySession *)session;
 + (void)unregisterInFlightSession:(StrappySession *)session;
 + (StrappySession *)inFlightSessionForIdentifier:(NSNumber *)identifier;
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
                                     error:(NSError **)error;
-+ (NSArray *)openRouterModelCatalogFromList:
-    (const strappy_openrouter_model_record_list *)list;
-+ (NSDictionary *)dictionaryFromOpenRouterModelRecord:
-    (const strappy_openrouter_model_record *)record;
++ (NSArray *)modelCatalogFromList:(const strappy_model_record_list *)list;
++ (BOOL)manualModelInput:(strappy_manual_model_input *)input
+             wireModelID:(NSString *)wireModelID
+             displayName:(NSString *)displayName
+      contextWindowTokens:(long long)contextWindowTokens
+          maxOutputTokens:(long long)maxOutputTokens
+        reasoningEnabled:(BOOL)reasoningEnabled
+       imageInputEnabled:(BOOL)imageInputEnabled
+   localFunctionsEnabled:(BOOL)localFunctionsEnabled
+       inputPricePerToken:(NSString *)inputPricePerToken
+      outputPricePerToken:(NSString *)outputPricePerToken
+   cacheReadPricePerToken:(NSString *)cacheReadPricePerToken
+  cacheWritePricePerToken:(NSString *)cacheWritePricePerToken
+                    error:(NSError **)error;
++ (NSDictionary *)dictionaryFromModelRecord:
+    (const strappy_model_record *)record;
 + (NSDictionary *)dictionaryFromAssistantSetRecord:
     (const strappy_assistant_set_record *)record;
 + (NSDictionary *)dictionaryFromDatabaseStudyStatusRecord:
@@ -396,8 +608,30 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
                    roundLimit:(NSUInteger)roundLimit
              workingDirectory:(NSString *)workingDirectory
 {
+  return [self initWithModelIdentifier:modelIdentifier
+             providerAccountIdentifier:@""
+                assistantSetIdentifier:assistantSetIdentifier
+                           webProvider:webProvider
+                      webSearchEnabled:webSearchEnabled
+                           bashEnabled:bashEnabled
+                        limitToOneTool:limitToOneTool
+                            roundLimit:roundLimit
+                      workingDirectory:workingDirectory];
+}
+
+- (id)initWithModelIdentifier:(NSString *)modelIdentifier
+    providerAccountIdentifier:(NSString *)providerAccountIdentifier
+       assistantSetIdentifier:(NSString *)assistantSetIdentifier
+                  webProvider:(NSString *)webProvider
+             webSearchEnabled:(BOOL)webSearchEnabled
+                  bashEnabled:(BOOL)bashEnabled
+               limitToOneTool:(BOOL)limitToOneTool
+                   roundLimit:(NSUInteger)roundLimit
+             workingDirectory:(NSString *)workingDirectory
+{
   if ((self = [super init])) {
     [self setModelIdentifier:modelIdentifier];
+    [self setProviderAccountIdentifier:providerAccountIdentifier];
     [self setAssistantSetIdentifier:assistantSetIdentifier];
     [self setWebProvider:webProvider];
     [self setWebSearchEnabled:webSearchEnabled];
@@ -423,6 +657,7 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
              limitToOneTool:[self limitToOneTool]
                  roundLimit:[self roundLimit]
            workingDirectory:[self workingDirectory]];
+  [copy setProviderAccountIdentifier:[self providerAccountIdentifier]];
   [copy setAnswerQualityEnabled:[self answerQualityEnabled]];
   return copy;
 }
@@ -441,6 +676,23 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
   if (modelIdentifier_ != value) {
     [modelIdentifier_ release];
     modelIdentifier_ = [value copy];
+  }
+}
+
+- (NSString *)providerAccountIdentifier
+{
+  return providerAccountIdentifier_;
+}
+
+- (void)setProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+{
+  NSString *value;
+
+  value = [providerAccountIdentifier isKindOfClass:[NSString class]] ?
+    providerAccountIdentifier : @"";
+  if (providerAccountIdentifier_ != value) {
+    [providerAccountIdentifier_ release];
+    providerAccountIdentifier_ = [value copy];
   }
 }
 
@@ -547,6 +799,7 @@ static NSUInteger StrappySessionLimitFromSummary(NSDictionary *summary,
 - (void)dealloc
 {
   [modelIdentifier_ release];
+  [providerAccountIdentifier_ release];
   [assistantSetIdentifier_ release];
   [webProvider_ release];
   [workingDirectory_ release];
@@ -560,12 +813,17 @@ static StrappySessionOptions *StrappySessionOptionsFromSummary(
   NSString *workingDirectory)
 {
   NSString *modelIdentifier;
+  NSString *providerAccountIdentifier;
   NSString *assistantSetIdentifier;
   StrappySessionOptions *options;
 
   modelIdentifier = [summary objectForKey:@"model"];
   if (![modelIdentifier isKindOfClass:[NSString class]]) {
     modelIdentifier = @"";
+  }
+  providerAccountIdentifier = [summary objectForKey:@"provider_account_id"];
+  if (![providerAccountIdentifier isKindOfClass:[NSString class]]) {
+    providerAccountIdentifier = @"";
   }
   assistantSetIdentifier = [summary objectForKey:@"assistant_set_id"];
   if (![assistantSetIdentifier isKindOfClass:[NSString class]] ||
@@ -585,6 +843,7 @@ static StrappySessionOptions *StrappySessionOptionsFromSummary(
                 StrappySessionDefaultRoundLimit)
            workingDirectory:workingDirectory]
     autorelease];
+  [options setProviderAccountIdentifier:providerAccountIdentifier];
   [options setAnswerQualityEnabled:
     StrappySessionAnswerQualityEnabledFromSummary(summary)];
   return options;
@@ -618,6 +877,9 @@ static StrappySessionOptions *StrappySessionOptionsFromRecord(
                  roundLimit:(NSUInteger)options->round_limit
            workingDirectory:workingDirectory]
     autorelease];
+  [sessionOptions setProviderAccountIdentifier:
+    ((options->provider_account_id != NULL) ?
+      [NSString stringWithUTF8String:options->provider_account_id] : @"")];
   [sessionOptions setAnswerQualityEnabled:
     (options->answer_quality_enabled ? YES : NO)];
   return sessionOptions;
@@ -649,6 +911,8 @@ static BOOL StrappySessionRecordFromOptions(
     return NO;
   }
   record->model_id = (char *)[[options modelIdentifier] UTF8String];
+  record->provider_account_id =
+    (char *)[[options providerAccountIdentifier] UTF8String];
   record->assistant_set_id =
     (char *)[[options assistantSetIdentifier] UTF8String];
   record->working_directory =
@@ -1249,6 +1513,11 @@ static BOOL StrappySessionRecordFromOptions(
   ok = strappy_session_configure_process([caCertPath fileSystemRepresentation],
                                          [fontsPath fileSystemRepresentation],
                                          &strappyError);
+  if (ok) {
+    ok = strappy_openai_oauth_set_cainfo(
+      [caCertPath fileSystemRepresentation],
+      &strappyError);
+  }
   if (!ok) {
     NSString *message = nil;
     if (strappyError != NULL) {
@@ -1258,6 +1527,9 @@ static BOOL StrappySessionRecordFromOptions(
     [NSException raise:NSInvalidArgumentException
                 format:@"%@", (message ? message : @"Could not bootstrap Strappy.")];
   }
+  strappy_responses_set_provider_credentials_callback(
+    StrappySessionCopyChatGPTCredentials,
+    NULL);
   (void)[StrappySession assistantSetCatalog];
 }
 
@@ -1313,6 +1585,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *response;
   NSString *model;
   NSString *modelName;
+  NSString *providerAccountIdentifier;
   NSString *webProvider;
   NSString *assistantSetIdentifier;
   NSString *createdAt;
@@ -1338,6 +1611,8 @@ static BOOL StrappySessionRecordFromOptions(
   response = [StrappySession stringFromCStringOrEmpty:record->response];
   model = [StrappySession stringFromCStringOrEmpty:record->model];
   modelName = [StrappySession stringFromCStringOrEmpty:record->model_name];
+  providerAccountIdentifier =
+    [StrappySession stringFromCStringOrEmpty:record->provider_account_id];
   assistantSetIdentifier =
     [StrappySession stringFromCStringOrEmpty:record->assistant_set_id];
   createdAt = [StrappySession stringFromCStringOrEmpty:record->created_at];
@@ -1351,6 +1626,7 @@ static BOOL StrappySessionRecordFromOptions(
     response, @"response",
     model, @"model",
     modelName, @"model_name",
+    providerAccountIdentifier, @"provider_account_id",
     assistantSetIdentifier, @"assistant_set_id",
     httpStatus, @"http_status",
     webProvider, @"web_provider",
@@ -1405,6 +1681,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSNumber *httpStatus;
   NSNumber *includeInContext;
   NSNumber *isError;
+  NSNumber *reasoningEncrypted;
   NSNumber *promptIndex;
   NSNumber *roundIndex;
   NSNumber *attemptIndex;
@@ -1465,6 +1742,8 @@ static BOOL StrappySessionRecordFromOptions(
   httpStatus = [NSNumber numberWithLong:record->http_status];
   includeInContext = [NSNumber numberWithBool:(record->include_in_context ? YES : NO)];
   isError = [NSNumber numberWithBool:(record->is_error ? YES : NO)];
+  reasoningEncrypted = [NSNumber numberWithBool:
+    (record->reasoning_encrypted ? YES : NO)];
   turnKey = [StrappySession stringFromCStringOrEmpty:record->turn_key];
   promptGroupKey =
     [StrappySession stringFromCStringOrEmpty:record->prompt_group_key];
@@ -1531,6 +1810,7 @@ static BOOL StrappySessionRecordFromOptions(
     renderStateJSON, @"render_state_json",
     messageJSON, @"message_json",
     reasoning, @"reasoning",
+    reasoningEncrypted, @"reasoning_encrypted",
     messageKey, @"message_key",
     targetMessageKey, @"target_message_key",
     direction, @"direction",
@@ -1553,10 +1833,15 @@ static BOOL StrappySessionRecordFromOptions(
     nil];
 }
 
-+ (NSDictionary *)dictionaryFromOpenRouterModelRecord:
-    (const strappy_openrouter_model_record *)record
++ (NSDictionary *)dictionaryFromModelRecord:(const strappy_model_record *)record
 {
   NSString *modelId;
+  NSString *providerAccountId;
+  NSString *providerId;
+  NSString *providerName;
+  NSString *providerAccountName;
+  NSString *wireModelId;
+  NSString *billingKind;
   NSString *canonicalSlug;
   NSString *huggingFaceId;
   NSString *name;
@@ -1589,6 +1874,34 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   modelId = [StrappySession stringFromCStringOrEmpty:record->model_id];
+  providerAccountId =
+    [StrappySession stringFromCStringOrEmpty:record->provider_account_id];
+  providerId = [StrappySession stringFromCStringOrEmpty:record->provider_id];
+  providerName = providerId;
+  {
+    NSArray *providers;
+    NSUInteger providerIndex;
+
+    providers = [StrappySession providerCatalog];
+    for (providerIndex = 0U; providerIndex < [providers count]; providerIndex++) {
+      NSDictionary *provider;
+
+      provider = [providers objectAtIndex:providerIndex];
+      if ([[provider objectForKey:@"id"] isEqualToString:providerId]) {
+        NSString *candidate;
+
+        candidate = [provider objectForKey:@"name"];
+        if ([candidate isKindOfClass:[NSString class]]) providerName = candidate;
+        break;
+      }
+    }
+  }
+  providerAccountName =
+    [StrappySession stringFromCStringOrEmpty:record->provider_account_name];
+  wireModelId =
+    [StrappySession stringFromCStringOrEmpty:record->wire_model_id];
+  billingKind =
+    [StrappySession stringFromCStringOrEmpty:record->billing_kind];
   canonicalSlug =
     [StrappySession stringFromCStringOrEmpty:record->canonical_slug];
   huggingFaceId =
@@ -1639,6 +1952,20 @@ static BOOL StrappySessionRecordFromOptions(
 
   return [NSDictionary dictionaryWithObjectsAndKeys:
     modelId, @"id",
+    providerAccountId, @"provider_account_id",
+    providerId, @"provider_id",
+    providerName, @"provider_name",
+    providerAccountName, @"provider_account_name",
+    wireModelId, @"wire_model_id",
+    billingKind, @"billing_kind",
+    [NSNumber numberWithBool:(record->reasoning_enabled ? YES : NO)],
+      @"reasoning_enabled",
+    [NSNumber numberWithBool:(record->local_functions_enabled ? YES : NO)],
+      @"local_functions_enabled",
+    [NSNumber numberWithBool:(record->hosted_tools_enabled ? YES : NO)],
+      @"hosted_tools_enabled",
+    [NSNumber numberWithBool:(record->image_input_enabled ? YES : NO)],
+      @"image_input_enabled",
     canonicalSlug, @"canonical_slug",
     huggingFaceId, @"hugging_face_id",
     name, @"name",
@@ -1850,6 +2177,243 @@ static BOOL StrappySessionRecordFromOptions(
 
 + (BOOL)initializeSessionStoreWithError:(NSError **)error
 {
+  return [self initializeSessionStoreAndPrepareCredentials:NO error:error];
+}
+
++ (BOOL)prepareProviderCredentialsWithError:(NSError **)error
+{
+  static BOOL credentialsPrepared = NO;
+  BOOL ok;
+  BOOL didPrepare;
+
+  didPrepare = NO;
+  @synchronized(self) {
+    if (credentialsPrepared) {
+      return YES;
+    }
+    ok = [self initializeSessionStoreAndPrepareCredentials:YES error:error];
+    if (ok) {
+      credentialsPrepared = YES;
+      didPrepare = YES;
+    }
+  }
+  if (didPrepare) {
+    [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappyProviderAccountsDidChangeNotification
+                    object:self
+                  userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                    @"prepared", @"action", nil]];
+  }
+  return ok;
+}
+
++ (BOOL)isChatGPTProviderEnabled
+{
+  return strappy_provider_chatgpt_is_enabled() ? YES : NO;
+}
+
++ (long long)currentTimestampMilliseconds
+{
+  return strappy_unix_milliseconds();
+}
+
++ (NSString *)performChatGPTDeviceAuthorizationForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                observer:(id<StrappyChatGPTAuthorizationObserver>)observer
+                context:(id)operationContext
+                error:(NSError **)error
+{
+  StrappyChatGPTAuthorizationCancellationContext cancellationContext;
+  strappy_openai_oauth_configuration configuration;
+  strappy_openai_oauth_device device;
+  strappy_openai_oauth_credentials credentials;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  NSString *verificationURL;
+  NSString *userCode;
+  NSString *accessToken;
+  NSString *refreshToken;
+  NSString *accountIdentifier;
+  char *strappyError;
+  int ok;
+
+  if (([providerAccountIdentifier length] == 0U) || (observer == nil)) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "ChatGPT authorization inputs are incomplete."];
+    }
+    return nil;
+  }
+  cancellationContext.observer = observer;
+  cancellationContext.context = operationContext;
+  strappy_openai_oauth_default_configuration(&configuration);
+  strappy_openai_oauth_device_init(&device);
+  strappy_openai_oauth_credentials_init(&credentials);
+  strappyError = NULL;
+  ok = strappy_openai_oauth_start_device_authorization(
+    &configuration, &device, StrappyChatGPTAuthorizationShouldCancel,
+    &cancellationContext, &strappyError);
+  if (ok) {
+    verificationURL = [NSString stringWithUTF8String:
+      configuration.verification_url];
+    userCode = [NSString stringWithUTF8String:device.user_code];
+    if ((verificationURL == nil) || (userCode == nil)) {
+      ok = 0;
+      strappy_set_error(&strappyError,
+                        "ChatGPT authorization response is invalid.");
+    } else {
+      [observer
+        strappyChatGPTAuthorizationDidReceiveVerificationURL:verificationURL
+                                                     userCode:userCode
+                                                      context:operationContext];
+    }
+  }
+  if (ok && !StrappyChatGPTAuthorizationShouldCancel(&cancellationContext)) {
+    ok = strappy_openai_oauth_complete_device_authorization(
+      &configuration, &device, &credentials,
+      StrappyChatGPTAuthorizationShouldCancel, &cancellationContext,
+      &strappyError);
+  } else {
+    ok = 0;
+  }
+  accountIdentifier = nil;
+  if (ok) {
+    accessToken = [NSString stringWithUTF8String:credentials.access_token];
+    refreshToken = [NSString stringWithUTF8String:credentials.refresh_token];
+    accountIdentifier = [NSString stringWithUTF8String:credentials.account_id];
+    keychain = [StrappyKeychain sharedKeychain];
+    credentialLock = [keychain
+      credentialLockForProviderIdentifier:@"openai_chatgpt"
+      providerAccountIdentifier:providerAccountIdentifier];
+    @synchronized(credentialLock) {
+      if ((accessToken == nil) || (refreshToken == nil) ||
+          (accountIdentifier == nil) ||
+          StrappyChatGPTAuthorizationShouldCancel(&cancellationContext) ||
+          ![keychain saveChatGPTAccessToken:accessToken
+                                refreshToken:refreshToken
+                           accountIdentifier:accountIdentifier
+                        expiresAtMilliseconds:
+                          credentials.expires_at_milliseconds
+                   providerAccountIdentifier:providerAccountIdentifier]) {
+        accountIdentifier = nil;
+      }
+    }
+    if (accountIdentifier == nil) {
+      ok = 0;
+      strappy_set_error(&strappyError,
+                        "The Keychain refused the ChatGPT credential write.");
+    }
+  }
+  if (!ok && (error != nil)) {
+    *error = [self errorFromCString:(strappyError != NULL) ? strappyError :
+      "ChatGPT sign-in failed."];
+  }
+  strappy_free_string(strappyError);
+  strappy_openai_oauth_credentials_destroy(&credentials);
+  strappy_openai_oauth_device_destroy(&device);
+  return accountIdentifier;
+}
+
++ (NSString *)refreshChatGPTCredentialsForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                expectedAccountIdentifier:(NSString *)expectedAccountIdentifier
+                observer:(id<StrappyChatGPTAuthorizationObserver>)observer
+                context:(id)operationContext
+                error:(NSError **)error
+{
+  StrappyChatGPTAuthorizationCancellationContext cancellationContext;
+  strappy_openai_oauth_configuration configuration;
+  strappy_openai_oauth_credentials credentials;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  NSString *currentRefreshToken;
+  NSString *currentAccountIdentifier;
+  NSString *accessToken;
+  NSString *nextRefreshToken;
+  NSString *accountIdentifier;
+  char *strappyError;
+  int ok;
+
+  if (([providerAccountIdentifier length] == 0U) ||
+      ([expectedAccountIdentifier length] == 0U) || (observer == nil)) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "ChatGPT refresh inputs are incomplete."];
+    }
+    return nil;
+  }
+  cancellationContext.observer = observer;
+  cancellationContext.context = operationContext;
+  strappy_openai_oauth_default_configuration(&configuration);
+  strappy_openai_oauth_credentials_init(&credentials);
+  keychain = [StrappyKeychain sharedKeychain];
+  credentialLock = [keychain
+    credentialLockForProviderIdentifier:@"openai_chatgpt"
+    providerAccountIdentifier:providerAccountIdentifier];
+  currentRefreshToken = nil;
+  currentAccountIdentifier = nil;
+  accountIdentifier = nil;
+  strappyError = NULL;
+  ok = 0;
+  @synchronized(credentialLock) {
+    if (![keychain loadChatGPTAccessToken:NULL
+                                refreshToken:&currentRefreshToken
+                           accountIdentifier:&currentAccountIdentifier
+                        expiresAtMilliseconds:NULL
+                   providerAccountIdentifier:providerAccountIdentifier]) {
+      strappy_set_error(&strappyError,
+                        "Stored ChatGPT credentials are unavailable.");
+    } else if (![currentAccountIdentifier
+                 isEqualToString:expectedAccountIdentifier]) {
+      strappy_set_error(&strappyError,
+                        "The refreshed ChatGPT credential changed accounts.");
+    } else {
+      ok = strappy_openai_oauth_refresh_credentials(
+        &configuration, [currentRefreshToken UTF8String], &credentials,
+        StrappyChatGPTAuthorizationShouldCancel, &cancellationContext,
+        &strappyError);
+      if (ok) {
+        accessToken = [NSString stringWithUTF8String:credentials.access_token];
+        nextRefreshToken = [NSString stringWithUTF8String:
+          credentials.refresh_token];
+        accountIdentifier = [NSString stringWithUTF8String:
+          credentials.account_id];
+        if ((accountIdentifier == nil) ||
+            ![accountIdentifier isEqualToString:expectedAccountIdentifier]) {
+          accountIdentifier = nil;
+          ok = 0;
+          strappy_set_error(&strappyError,
+            "The refreshed ChatGPT credential changed accounts.");
+        } else if ((accessToken == nil) || (nextRefreshToken == nil) ||
+                   StrappyChatGPTAuthorizationShouldCancel(
+                     &cancellationContext) ||
+                   ![keychain saveChatGPTAccessToken:accessToken
+                                          refreshToken:nextRefreshToken
+                                     accountIdentifier:accountIdentifier
+                                  expiresAtMilliseconds:
+                                    credentials.expires_at_milliseconds
+                             providerAccountIdentifier:
+                               providerAccountIdentifier]) {
+          accountIdentifier = nil;
+          ok = 0;
+          strappy_set_error(&strappyError,
+            "The Keychain refused the refreshed ChatGPT credential write.");
+        }
+      }
+    }
+  }
+  if (!ok && (error != nil)) {
+    *error = [self errorFromCString:(strappyError != NULL) ? strappyError :
+      "ChatGPT credential refresh failed."];
+  }
+  strappy_free_string(strappyError);
+  strappy_openai_oauth_credentials_destroy(&credentials);
+  return accountIdentifier;
+}
+
++ (BOOL)initializeSessionStoreAndPrepareCredentials:(BOOL)prepareCredentials
+                                               error:(NSError **)error
+{
   NSString *databasePath;
   char *strappyError;
   int ok;
@@ -1863,6 +2427,175 @@ static BOOL StrappySessionRecordFromOptions(
   strappyError = NULL;
   ok = strappy_session_initialize_store([databasePath UTF8String],
                                         &strappyError);
+  if (ok && prepareCredentials) {
+    static const char *providerIDs[] = {
+      STRAPPY_PROVIDER_OPENROUTER,
+      STRAPPY_PROVIDER_OPENAI_CHATGPT
+    };
+    static const char *accountIDs[] = {
+      STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
+      STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT
+    };
+    static const char *accountNames[] = {
+      STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
+      STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT_NAME
+    };
+    size_t providerIndex;
+
+    for (providerIndex = 0U;
+         ok && (providerIndex < (sizeof(providerIDs) / sizeof(providerIDs[0])));
+         providerIndex++) {
+      strappy_provider_account_record_list existingAccounts;
+      NSString *providerIdentifier;
+      NSString *providerAccountIdentifier;
+      StrappyKeychain *keychain;
+      NSObject *credentialLock;
+      NSString *legacyEndpoint;
+      NSMutableArray *restoreIdentifiers;
+      NSArray *credentialIdentifiers;
+      NSUInteger credentialIndex;
+
+      strappy_provider_account_record_list_init(&existingAccounts);
+      if (!strappy_db_list_provider_accounts(
+            [databasePath fileSystemRepresentation], providerIDs[providerIndex],
+            0, &existingAccounts, &strappyError)) {
+        ok = 0;
+        break;
+      }
+      providerIdentifier = [NSString stringWithUTF8String:
+        providerIDs[providerIndex]];
+      providerAccountIdentifier = [NSString stringWithUTF8String:
+        (existingAccounts.count > 0U) ?
+          existingAccounts.records[0].account_id : accountIDs[providerIndex]];
+      keychain = [StrappyKeychain sharedKeychain];
+      credentialLock = [keychain
+        credentialLockForProviderIdentifier:providerIdentifier
+        providerAccountIdentifier:providerAccountIdentifier];
+      legacyEndpoint = nil;
+      @synchronized(credentialLock) {
+        if (strcmp(providerIDs[providerIndex], STRAPPY_PROVIDER_OPENROUTER) == 0) {
+          ok = [keychain
+            migrateLegacyOpenRouterCredentialToProviderAccountIdentifier:
+              providerAccountIdentifier
+            endpoint:&legacyEndpoint] ? 1 : 0;
+        } else {
+          ok = [keychain
+            migrateLegacyChatGPTCredentialToProviderAccountIdentifier:
+              providerAccountIdentifier] ? 1 : 0;
+        }
+      }
+      if (ok && (existingAccounts.count == 0U)) {
+        restoreIdentifiers = [NSMutableArray array];
+        credentialIdentifiers = [keychain
+          credentialProviderAccountIdentifiersForProviderIdentifier:
+            providerIdentifier];
+        if ([credentialIdentifiers containsObject:providerAccountIdentifier]) {
+          [restoreIdentifiers addObject:providerAccountIdentifier];
+        }
+        for (credentialIndex = 0U;
+             credentialIndex < [credentialIdentifiers count];
+             credentialIndex++) {
+          NSString *identifier;
+
+          identifier = [credentialIdentifiers objectAtIndex:credentialIndex];
+          if (![restoreIdentifiers containsObject:identifier]) {
+            [restoreIdentifiers addObject:identifier];
+          }
+        }
+        for (credentialIndex = 0U;
+             ok && (credentialIndex < [restoreIdentifiers count]);
+             credentialIndex++) {
+          NSString *identifier;
+          NSString *displayName;
+          NSString *savedDisplayName;
+          const char *endpoint;
+
+          identifier = [restoreIdentifiers objectAtIndex:credentialIndex];
+          savedDisplayName = nil;
+          displayName = [keychain loadDisplayName:&savedDisplayName
+            forProviderIdentifier:providerIdentifier
+            providerAccountIdentifier:identifier] ? savedDisplayName : nil;
+          if ([displayName length] == 0U) {
+            displayName = (credentialIndex == 0U) ?
+              [NSString stringWithUTF8String:accountNames[providerIndex]] :
+              [NSString stringWithFormat:@"%s %lu", accountNames[providerIndex],
+                (unsigned long)(credentialIndex + 1U)];
+          }
+          endpoint = ([identifier isEqualToString:providerAccountIdentifier] &&
+                      ([legacyEndpoint length] > 0U)) ?
+            [legacyEndpoint UTF8String] : NULL;
+          ok = strappy_db_restore_provider_account(
+            [databasePath fileSystemRepresentation], [identifier UTF8String],
+            providerIDs[providerIndex], [displayName UTF8String], endpoint,
+            &strappyError);
+          if (ok) {
+            ok = [keychain saveDisplayName:displayName
+              forProviderIdentifier:providerIdentifier
+              providerAccountIdentifier:identifier] ? 1 : 0;
+          }
+        }
+      } else if (ok &&
+                 ([legacyEndpoint length] > 0U)) {
+        ok = strappy_db_update_provider_account(
+          [databasePath fileSystemRepresentation],
+          existingAccounts.records[0].account_id,
+          existingAccounts.records[0].display_name,
+          [legacyEndpoint UTF8String],
+          existingAccounts.records[0].max_output_tokens, &strappyError);
+      }
+      if (ok && (existingAccounts.count > 0U)) {
+        size_t existingIndex;
+
+        for (existingIndex = 0U;
+             ok && (existingIndex < existingAccounts.count);
+             existingIndex++) {
+          NSString *identifier;
+          NSString *displayName;
+          NSString *savedDisplayName;
+          NSObject *nameCredentialLock;
+
+          identifier = [NSString stringWithUTF8String:
+            existingAccounts.records[existingIndex].account_id];
+          displayName = [NSString stringWithUTF8String:
+            existingAccounts.records[existingIndex].display_name];
+          savedDisplayName = nil;
+          nameCredentialLock = [keychain
+            credentialLockForProviderIdentifier:providerIdentifier
+            providerAccountIdentifier:identifier];
+          @synchronized(nameCredentialLock) {
+            if (![keychain loadDisplayName:&savedDisplayName
+                     forProviderIdentifier:providerIdentifier
+                 providerAccountIdentifier:identifier] ||
+                ![savedDisplayName isEqualToString:displayName]) {
+              ok = [keychain saveDisplayName:displayName
+                forProviderIdentifier:providerIdentifier
+                providerAccountIdentifier:identifier] ? 1 : 0;
+            }
+          }
+        }
+      }
+      strappy_provider_account_record_list_destroy(&existingAccounts);
+      if (!ok && (strappyError == NULL)) {
+        strappy_set_error(&strappyError,
+                          "Could not convert the saved account credential.");
+      }
+    }
+  }
+  if (ok) {
+    NSString *resourcePath;
+
+    resourcePath = [[NSBundle mainBundle] resourcePath];
+    ok = [resourcePath isKindOfClass:[NSString class]] &&
+      ([resourcePath length] > 0U) &&
+      strappy_model_catalog_import_bundled_models(
+        [resourcePath fileSystemRepresentation],
+        [databasePath fileSystemRepresentation],
+        &strappyError);
+    if (!ok && (strappyError == NULL)) {
+      strappy_set_error(&strappyError,
+                        "Bundled model catalog resource is missing.");
+    }
+  }
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
@@ -1874,8 +2607,708 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
-+ (NSArray *)openRouterModelCatalogFromList:
-    (const strappy_openrouter_model_record_list *)list
++ (NSString *)designatedProviderAccountIdentifierForProviderIdentifier:
+                (NSString *)providerIdentifier
+                                                               error:
+                (NSError **)error
+{
+  NSString *databasePath;
+  char *accountID;
+  char *strappyError;
+  NSString *result;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:
+        "Provider identifier is missing."];
+    }
+    return nil;
+  }
+  databasePath = [StrappySession sessionsDatabasePath];
+  accountID = NULL;
+  strappyError = NULL;
+  if (!strappy_db_get_designated_provider_account(
+        [databasePath fileSystemRepresentation],
+        [providerIdentifier UTF8String],
+        &accountID,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+  result = [NSString stringWithUTF8String:accountID];
+  free(accountID);
+  strappy_free_string(strappyError);
+  return result;
+}
+
++ (NSDictionary *)dictionaryFromProviderAccountRecord:
+                    (const strappy_provider_account_record *)record
+{
+  NSString *accountIdentifier;
+  NSString *providerIdentifier;
+  NSString *displayName;
+  NSString *lifecycleState;
+  NSString *responsesEndpoint;
+
+  if ((record == NULL) || (record->account_id == NULL) ||
+      (record->provider_id == NULL) || (record->display_name == NULL) ||
+      (record->lifecycle_state == NULL)) {
+    return nil;
+  }
+  accountIdentifier = [NSString stringWithUTF8String:record->account_id];
+  providerIdentifier = [NSString stringWithUTF8String:record->provider_id];
+  displayName = [NSString stringWithUTF8String:record->display_name];
+  lifecycleState = [NSString stringWithUTF8String:record->lifecycle_state];
+  responsesEndpoint = (record->responses_endpoint != NULL) ?
+    [NSString stringWithUTF8String:record->responses_endpoint] : @"";
+  if ((accountIdentifier == nil) || (providerIdentifier == nil) ||
+      (displayName == nil) || (lifecycleState == nil) ||
+      (responsesEndpoint == nil)) {
+    return nil;
+  }
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    accountIdentifier, @"id",
+    providerIdentifier, @"provider_id",
+    displayName, @"name",
+    lifecycleState, @"lifecycle_state",
+    responsesEndpoint, @"responses_endpoint",
+    [NSNumber numberWithLongLong:record->max_output_tokens],
+      @"max_output_tokens",
+    [NSNumber numberWithLongLong:record->created_at_ms], @"created_at_ms",
+    [NSNumber numberWithLongLong:record->updated_at_ms], @"updated_at_ms",
+    [NSNumber numberWithBool:(record->has_last_used_at_ms ? YES : NO)],
+      @"has_last_used_at_ms",
+    [NSNumber numberWithLongLong:record->last_used_at_ms], @"last_used_at_ms",
+    nil];
+}
+
++ (NSArray *)providerCatalog
+{
+  NSMutableArray *providers;
+  size_t index;
+
+  providers = [NSMutableArray arrayWithCapacity:strappy_provider_count()];
+  for (index = 0U; index < strappy_provider_count(); index++) {
+    const strappy_provider_definition *definition;
+    NSString *providerIdentifier;
+    NSString *displayName;
+
+    definition = strappy_provider_at(index);
+    if ((definition == NULL) || (definition->provider_id == NULL) ||
+        (definition->display_name == NULL)) {
+      continue;
+    }
+    providerIdentifier = [NSString stringWithUTF8String:
+      definition->provider_id];
+    displayName = [NSString stringWithUTF8String:definition->display_name];
+    if ((providerIdentifier == nil) || (displayName == nil)) {
+      continue;
+    }
+    [providers addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+      providerIdentifier, @"id",
+      displayName, @"name",
+      [NSNumber XP_numberWithInteger:
+        (XPInteger)definition->credential_kind],
+        @"credential_kind",
+      [NSNumber numberWithBool:
+        (definition->requires_endpoint_override ? YES : NO)],
+        @"requires_endpoint",
+      [NSNumber numberWithBool:
+        (strappy_provider_is_available(definition) ? YES : NO)],
+        @"available",
+      nil]];
+  }
+  return providers;
+}
+
++ (NSArray *)providerAccountCatalogWithError:(NSError **)error
+{
+  return [self providerAccountCatalogVerifyingCredentials:NO error:error];
+}
+
++ (NSArray *)verifiedProviderAccountCatalogWithError:(NSError **)error
+{
+  return [self providerAccountCatalogVerifyingCredentials:YES error:error];
+}
+
++ (BOOL)parseOptionalPositiveIntegerText:(NSString *)text
+                                   value:(long long *)value
+{
+  if (![text isKindOfClass:[NSString class]]) {
+    text = @"";
+  }
+  return strappy_provider_parse_optional_positive_integer(
+    [text UTF8String], value) ? YES : NO;
+}
+
++ (NSString *)pricePerTokenForPricePerMillionText:(NSString *)text
+                                             valid:(BOOL *)valid
+{
+  char *price;
+  NSString *result;
+  int ok;
+
+  if (![text isKindOfClass:[NSString class]]) {
+    text = @"";
+  }
+  price = NULL;
+  ok = strappy_provider_price_per_million_to_per_token(
+    [text UTF8String], &price);
+  if (valid != NULL) {
+    *valid = ok ? YES : NO;
+  }
+  result = (price != NULL) ? [NSString stringWithUTF8String:price] : nil;
+  strappy_free_string(price);
+  return result;
+}
+
++ (NSArray *)providerAccountCatalogVerifyingCredentials:
+               (BOOL)verifyCredentials
+                                                   error:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_provider_account_record_list list;
+  char *strappyError;
+  NSMutableArray *accounts;
+  size_t index;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  strappy_provider_account_record_list_init(&list);
+  strappyError = NULL;
+  if (!strappy_db_list_provider_accounts(
+        [databasePath fileSystemRepresentation], NULL, 0, &list,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+  accounts = [NSMutableArray arrayWithCapacity:list.count];
+  for (index = 0U; index < list.count; index++) {
+    NSDictionary *account;
+    NSMutableDictionary *availableAccount;
+    const strappy_provider_definition *definition;
+    NSString *accountIdentifier;
+    NSString *providerIdentifier;
+    NSString *responsesEndpoint;
+    unsigned int missingFields;
+    BOOL available;
+    BOOL hasCredential;
+
+    account = [StrappySession dictionaryFromProviderAccountRecord:
+      &list.records[index]];
+    if (account != nil) {
+      accountIdentifier = [account objectForKey:@"id"];
+      providerIdentifier = [account objectForKey:@"provider_id"];
+      responsesEndpoint = [account objectForKey:@"responses_endpoint"];
+      definition = strappy_provider_find([providerIdentifier UTF8String]);
+      available = (definition != NULL) &&
+        strappy_provider_is_available(definition);
+      hasCredential = (definition != NULL) &&
+        (definition->credential_kind ==
+          STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER);
+      if ((definition != NULL) && !hasCredential) {
+        StrappyKeychain *keychain;
+        NSObject *credentialLock;
+
+        keychain = [StrappyKeychain sharedKeychain];
+        credentialLock = [keychain
+          credentialLockForProviderIdentifier:providerIdentifier
+          providerAccountIdentifier:accountIdentifier];
+        @synchronized(credentialLock) {
+          if ([providerIdentifier isEqualToString:@"openrouter"]) {
+            hasCredential = [keychain
+              hasBearerTokenForProviderIdentifier:providerIdentifier
+              providerAccountIdentifier:accountIdentifier];
+          } else {
+            hasCredential = [keychain
+              hasChatGPTCredentialsForProviderAccountIdentifier:
+                accountIdentifier];
+          }
+        }
+      }
+      missingFields = strappy_provider_account_missing_required_fields(
+        definition,
+        [[account objectForKey:@"name"] UTF8String],
+        [responsesEndpoint UTF8String],
+        hasCredential ? 1 : 0);
+      if ((missingFields & STRAPPY_PROVIDER_ACCOUNT_MISSING_ENDPOINT) != 0U) {
+        available = NO;
+      }
+      if (verifyCredentials &&
+          ((missingFields &
+            STRAPPY_PROVIDER_ACCOUNT_MISSING_CREDENTIAL) != 0U)) {
+        available = NO;
+      }
+      availableAccount = [[account mutableCopy] autorelease];
+      [availableAccount setObject:[NSNumber numberWithBool:available]
+                           forKey:@"available"];
+      [availableAccount setObject:[NSNumber numberWithUnsignedInt:missingFields]
+                           forKey:@"missing_required_fields"];
+      [availableAccount setObject:[NSNumber numberWithBool:
+        (missingFields != 0U)] forKey:@"has_missing_required_fields"];
+      [accounts addObject:availableAccount];
+    }
+  }
+  strappy_provider_account_record_list_destroy(&list);
+  strappy_free_string(strappyError);
+  return accounts;
+}
+
++ (NSString *)defaultProviderAccountNameForProviderIdentifier:
+                (NSString *)providerIdentifier
+                                                    accounts:
+                (NSArray *)accounts
+{
+  NSString *baseName;
+  NSString *candidate;
+  NSUInteger suffix;
+  NSUInteger index;
+  BOOL found;
+
+  if ([providerIdentifier isEqualToString:@"openrouter"]) {
+    baseName = @"OpenRouter";
+  } else if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
+    baseName = @"ChatGPT";
+  } else {
+    baseName = @"Custom";
+  }
+  candidate = baseName;
+  suffix = 1U;
+  do {
+    found = NO;
+    for (index = 0U; index < [accounts count]; index++) {
+      NSDictionary *account;
+      NSString *name;
+
+      account = [accounts objectAtIndex:index];
+      name = [account objectForKey:@"name"];
+      if ([name isKindOfClass:[NSString class]] &&
+          [name isEqualToString:candidate]) {
+        found = YES;
+        break;
+      }
+    }
+    if (found) {
+      suffix++;
+      candidate = [NSString stringWithFormat:@"%@ %lu", baseName,
+        (unsigned long)suffix];
+    }
+  } while (found);
+  return candidate;
+}
+
++ (NSDictionary *)createProviderAccountForProviderIdentifier:
+                    (NSString *)providerIdentifier
+                                                        error:
+                    (NSError **)error
+{
+  NSString *databasePath;
+  NSArray *accounts;
+  NSString *displayName;
+  char *accountID;
+  char *strappyError;
+  strappy_provider_account_record record;
+  NSDictionary *account;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:
+        "Provider identifier is missing."];
+    }
+    return nil;
+  }
+  if (strappy_provider_find([providerIdentifier UTF8String]) == NULL) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:
+        "Provider account type is not registered."];
+    }
+    return nil;
+  }
+  accounts = [StrappySession providerAccountCatalogWithError:error];
+  if (accounts == nil) {
+    return nil;
+  }
+  displayName = [StrappySession
+    defaultProviderAccountNameForProviderIdentifier:providerIdentifier
+                                           accounts:accounts];
+  databasePath = [StrappySession sessionsDatabasePath];
+  accountID = NULL;
+  strappyError = NULL;
+  if (!strappy_db_create_provider_account(
+        [databasePath fileSystemRepresentation],
+        [providerIdentifier UTF8String], [displayName UTF8String], NULL,
+        &accountID, &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+  strappy_provider_account_record_init(&record);
+  account = nil;
+  if (strappy_db_get_provider_account([databasePath fileSystemRepresentation],
+                                      accountID, &record, &strappyError)) {
+    account = [StrappySession dictionaryFromProviderAccountRecord:&record];
+  }
+  if (account != nil) {
+    NSString *accountIdentifier;
+    StrappyKeychain *keychain;
+    NSObject *credentialLock;
+
+    accountIdentifier = [account objectForKey:@"id"];
+    keychain = [StrappyKeychain sharedKeychain];
+    credentialLock = [keychain
+      credentialLockForProviderIdentifier:providerIdentifier
+      providerAccountIdentifier:accountIdentifier];
+    @synchronized(credentialLock) {
+      if (![keychain saveDisplayName:displayName
+               forProviderIdentifier:providerIdentifier
+           providerAccountIdentifier:accountIdentifier]) {
+        (void)strappy_db_archive_provider_account(
+          [databasePath fileSystemRepresentation], accountID, NULL);
+        account = nil;
+        strappy_set_error(&strappyError,
+                          "Could not save the account name in Keychain.");
+      }
+    }
+  }
+  strappy_provider_account_record_destroy(&record);
+  free(accountID);
+  if (account == nil) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return nil;
+  }
+  strappy_free_string(strappyError);
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappyProviderAccountsDidChangeNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  [account objectForKey:@"id"], @"account_id",
+                  @"created", @"action",
+                  nil]];
+  return account;
+}
+
++ (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                            displayName:(NSString *)displayName
+                      responsesEndpoint:(NSString *)responsesEndpoint
+                        maxOutputTokens:(long long)maxOutputTokens
+                                  error:(NSError **)error
+{
+  NSString *databasePath;
+  NSString *trimmedName;
+  NSString *trimmedEndpoint;
+  strappy_provider_account_record existingRecord;
+  NSString *providerIdentifier;
+  NSString *previousName;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  char *strappyError;
+
+  trimmedName = [displayName stringByTrimmingCharactersInSet:
+    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  trimmedEndpoint = [responsesEndpoint stringByTrimmingCharactersInSet:
+    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if (([providerAccountIdentifier length] == 0U) ||
+      ([trimmedName length] == 0U) || (maxOutputTokens < 0LL)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:
+        "Provider account update is incomplete."];
+    }
+    return NO;
+  }
+  databasePath = [StrappySession sessionsDatabasePath];
+  strappy_provider_account_record_init(&existingRecord);
+  strappyError = NULL;
+  if (!strappy_db_get_provider_account(
+        [databasePath fileSystemRepresentation],
+        [providerAccountIdentifier UTF8String], &existingRecord,
+        &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_provider_account_record_destroy(&existingRecord);
+    strappy_free_string(strappyError);
+    return NO;
+  }
+  providerIdentifier = [NSString stringWithUTF8String:
+    existingRecord.provider_id];
+  previousName = [NSString stringWithUTF8String:existingRecord.display_name];
+  keychain = [StrappyKeychain sharedKeychain];
+  credentialLock = [keychain
+    credentialLockForProviderIdentifier:providerIdentifier
+    providerAccountIdentifier:providerAccountIdentifier];
+  @synchronized(credentialLock) {
+    if (![keychain saveDisplayName:trimmedName
+             forProviderIdentifier:providerIdentifier
+         providerAccountIdentifier:providerAccountIdentifier]) {
+      if (error != nil) {
+        *error = [StrappySession errorFromCString:
+          "Could not save the account name in Keychain."];
+      }
+      strappy_provider_account_record_destroy(&existingRecord);
+      strappy_free_string(strappyError);
+      return NO;
+    }
+  }
+  if (!strappy_db_update_provider_account(
+        [databasePath fileSystemRepresentation],
+        [providerAccountIdentifier UTF8String], [trimmedName UTF8String],
+        StrappySessionOptionalCString(trimmedEndpoint), maxOutputTokens,
+        &strappyError)) {
+    @synchronized(credentialLock) {
+      (void)[keychain saveDisplayName:previousName
+               forProviderIdentifier:providerIdentifier
+           providerAccountIdentifier:providerAccountIdentifier];
+    }
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_provider_account_record_destroy(&existingRecord);
+    strappy_free_string(strappyError);
+    return NO;
+  }
+  strappy_provider_account_record_destroy(&existingRecord);
+  strappy_free_string(strappyError);
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappyProviderAccountsDidChangeNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  providerAccountIdentifier, @"account_id",
+                  @"updated", @"action",
+                  nil]];
+  return YES;
+}
+
++ (NSString *)bearerTokenForProviderAccountIdentifier:
+                (NSString *)providerAccountIdentifier
+                                                  error:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_provider_account_record record;
+  NSString *providerIdentifier;
+  NSString *token;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  char *strappyError;
+
+  if ([providerAccountIdentifier length] == 0U) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Provider account identifier is missing."];
+    }
+    return nil;
+  }
+  databasePath = [self sessionsDatabasePath];
+  strappy_provider_account_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_db_get_provider_account([databasePath fileSystemRepresentation],
+                                       [providerAccountIdentifier UTF8String],
+                                       &record, &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_provider_account_record_destroy(&record);
+    strappy_free_string(strappyError);
+    return nil;
+  }
+  providerIdentifier = [NSString stringWithUTF8String:record.provider_id];
+  strappy_provider_account_record_destroy(&record);
+  strappy_free_string(strappyError);
+  keychain = [StrappyKeychain sharedKeychain];
+  credentialLock = [keychain
+    credentialLockForProviderIdentifier:providerIdentifier
+    providerAccountIdentifier:providerAccountIdentifier];
+  token = nil;
+  @synchronized(credentialLock) {
+    (void)[keychain loadBearerToken:&token
+      forProviderIdentifier:providerIdentifier
+      providerAccountIdentifier:providerAccountIdentifier];
+  }
+  return token;
+}
+
++ (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                            displayName:(NSString *)displayName
+                      responsesEndpoint:(NSString *)responsesEndpoint
+                        maxOutputTokens:(long long)maxOutputTokens
+                            bearerToken:(NSString *)bearerToken
+                                  error:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_provider_account_record record;
+  NSString *providerIdentifier;
+  NSString *trimmedToken;
+  NSString *previousToken;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  char *strappyError;
+  BOOL credentialSaved;
+  BOOL hadPreviousToken;
+
+  databasePath = [self sessionsDatabasePath];
+  strappy_provider_account_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_db_get_provider_account([databasePath fileSystemRepresentation],
+                                       [providerAccountIdentifier UTF8String],
+                                       &record, &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_provider_account_record_destroy(&record);
+    strappy_free_string(strappyError);
+    return NO;
+  }
+  providerIdentifier = [NSString stringWithUTF8String:record.provider_id];
+  strappy_provider_account_record_destroy(&record);
+  strappy_free_string(strappyError);
+  if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
+    return [self updateProviderAccountIdentifier:providerAccountIdentifier
+                                     displayName:displayName
+                               responsesEndpoint:responsesEndpoint
+                                 maxOutputTokens:maxOutputTokens
+                                           error:error];
+  }
+  trimmedToken = [bearerToken stringByTrimmingCharactersInSet:
+    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+  if ([providerIdentifier isEqualToString:@"openrouter"] &&
+      ([trimmedToken length] == 0U)) {
+    if (error != nil) {
+      *error = [self errorFromCString:"OpenRouter API key is required."];
+    }
+    return NO;
+  }
+  keychain = [StrappyKeychain sharedKeychain];
+  credentialLock = [keychain
+    credentialLockForProviderIdentifier:providerIdentifier
+    providerAccountIdentifier:providerAccountIdentifier];
+  previousToken = nil;
+  @synchronized(credentialLock) {
+    hadPreviousToken = [keychain loadBearerToken:&previousToken
+      forProviderIdentifier:providerIdentifier
+      providerAccountIdentifier:providerAccountIdentifier];
+    credentialSaved = ([trimmedToken length] > 0U) ?
+      [keychain saveBearerToken:trimmedToken
+          forProviderIdentifier:providerIdentifier
+          providerAccountIdentifier:providerAccountIdentifier] :
+      [keychain deleteBearerTokenForProviderIdentifier:providerIdentifier
+          providerAccountIdentifier:providerAccountIdentifier];
+  }
+  if (!credentialSaved) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "The Keychain refused the provider credential write."];
+    }
+    return NO;
+  }
+  if ([self updateProviderAccountIdentifier:providerAccountIdentifier
+                                displayName:displayName
+                          responsesEndpoint:responsesEndpoint
+                            maxOutputTokens:maxOutputTokens
+                                      error:error]) {
+    return YES;
+  }
+  @synchronized(credentialLock) {
+    if (hadPreviousToken) {
+      (void)[keychain saveBearerToken:previousToken
+        forProviderIdentifier:providerIdentifier
+        providerAccountIdentifier:providerAccountIdentifier];
+    } else {
+      (void)[keychain deleteBearerTokenForProviderIdentifier:
+        providerIdentifier
+        providerAccountIdentifier:providerAccountIdentifier];
+    }
+  }
+  return NO;
+}
+
++ (BOOL)archiveProviderAccountIdentifier:(NSString *)providerAccountIdentifier
+                                    error:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_provider_account_record record;
+  NSString *providerIdentifier;
+  StrappyKeychain *keychain;
+  NSObject *credentialLock;
+  char *strappyError;
+  BOOL credentialDeleted;
+
+  if ([providerAccountIdentifier length] == 0U) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:
+        "Provider account identifier is missing."];
+    }
+    return NO;
+  }
+  databasePath = [StrappySession sessionsDatabasePath];
+  strappy_provider_account_record_init(&record);
+  strappyError = NULL;
+  if (!strappy_db_get_provider_account([databasePath fileSystemRepresentation],
+                                       [providerAccountIdentifier UTF8String],
+                                       &record, &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_provider_account_record_destroy(&record);
+    strappy_free_string(strappyError);
+    return NO;
+  }
+  providerIdentifier = [NSString stringWithUTF8String:record.provider_id];
+  strappy_provider_account_record_destroy(&record);
+  keychain = [StrappyKeychain sharedKeychain];
+  credentialLock = [keychain
+    credentialLockForProviderIdentifier:providerIdentifier
+    providerAccountIdentifier:providerAccountIdentifier];
+  @synchronized(credentialLock) {
+    if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
+      credentialDeleted = [keychain
+        deleteChatGPTCredentialsForProviderAccountIdentifier:
+          providerAccountIdentifier];
+    } else {
+      credentialDeleted = [keychain
+        deleteBearerTokenForProviderIdentifier:providerIdentifier
+        providerAccountIdentifier:providerAccountIdentifier];
+    }
+  }
+  if (!credentialDeleted) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:
+        "The Keychain refused to remove the account credential."];
+    }
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_db_archive_provider_account(
+        [databasePath fileSystemRepresentation],
+        [providerAccountIdentifier UTF8String], &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_free_string(strappyError);
+    return NO;
+  }
+  strappy_free_string(strappyError);
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappyProviderAccountsDidChangeNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  providerAccountIdentifier, @"account_id",
+                  @"archived", @"action",
+                  nil]];
+  return YES;
+}
+
++ (NSArray *)modelCatalogFromList:(const strappy_model_record_list *)list
 {
   NSMutableArray *models;
   size_t index;
@@ -1887,7 +3320,7 @@ static BOOL StrappySessionRecordFromOptions(
   models = [NSMutableArray arrayWithCapacity:list->count];
   for (index = 0U; index < list->count; index++) {
     NSDictionary *model =
-      [StrappySession dictionaryFromOpenRouterModelRecord:&list->records[index]];
+      [StrappySession dictionaryFromModelRecord:&list->records[index]];
     if (model != nil) {
       [models addObject:model];
     }
@@ -1895,11 +3328,11 @@ static BOOL StrappySessionRecordFromOptions(
   return models;
 }
 
-+ (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
-                                                error:(NSError **)error
++ (NSArray *)modelCatalogMatchingSearchText:(NSString *)searchText
+                                       error:(NSError **)error
 {
   NSString *databasePath;
-  strappy_openrouter_model_record_list list;
+  strappy_model_record_list list;
   NSArray *models;
   char *strappyError;
   const char *searchCString;
@@ -1910,37 +3343,36 @@ static BOOL StrappySessionRecordFromOptions(
     return nil;
   }
 
-  strappy_openrouter_model_record_list_init(&list);
+  strappy_model_record_list_init(&list);
   strappyError = NULL;
   searchCString = ((searchText != nil) && ([searchText length] > 0U)) ?
     [searchText UTF8String] : NULL;
-  if (!strappy_session_list_openrouter_models_matching([databasePath UTF8String],
-                                                  searchCString,
-                                                  &list,
-                                                  &strappyError)) {
+  if (!strappy_session_list_models_matching([databasePath UTF8String],
+                                            searchCString,
+                                            &list,
+                                            &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
     strappy_session_free_string(strappyError);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return nil;
   }
 
-  models = [StrappySession openRouterModelCatalogFromList:&list];
-  strappy_openrouter_model_record_list_destroy(&list);
+  models = [StrappySession modelCatalogFromList:&list];
+  strappy_model_record_list_destroy(&list);
   return models;
 }
 
-+ (NSArray *)openRouterModelCatalogWithError:(NSError **)error
++ (NSArray *)modelCatalogWithError:(NSError **)error
 {
-  return [StrappySession openRouterModelCatalogMatchingSearchText:nil
-                                                            error:error];
+  return [StrappySession modelCatalogMatchingSearchText:nil error:error];
 }
 
-+ (NSArray *)allowedOpenRouterModelCatalogWithError:(NSError **)error
++ (NSArray *)configuredProviderModelCatalogWithError:(NSError **)error
 {
   NSString *databasePath;
-  strappy_openrouter_model_record_list list;
+  strappy_model_record_list list;
   NSArray *models;
   char *strappyError;
 
@@ -1950,22 +3382,165 @@ static BOOL StrappySessionRecordFromOptions(
     return nil;
   }
 
-  strappy_openrouter_model_record_list_init(&list);
+  strappy_model_record_list_init(&list);
   strappyError = NULL;
-  if (!strappy_session_list_allowed_openrouter_models([databasePath UTF8String],
-                                                 &list,
-                                                 &strappyError)) {
+  if (!strappy_session_list_models_for_configured_providers(
+        [databasePath UTF8String], &list, &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
     strappy_session_free_string(strappyError);
-    strappy_openrouter_model_record_list_destroy(&list);
+    strappy_model_record_list_destroy(&list);
     return nil;
   }
 
-  models = [StrappySession openRouterModelCatalogFromList:&list];
-  strappy_openrouter_model_record_list_destroy(&list);
+  models = [StrappySession modelCatalogFromList:&list];
+  strappy_model_record_list_destroy(&list);
   return models;
+}
+
++ (NSArray *)allowedModelCatalogWithError:(NSError **)error
+{
+  NSString *databasePath;
+  strappy_model_record_list list;
+  NSArray *models;
+  char *strappyError;
+
+  databasePath = [StrappySession sessionsDatabasePath];
+  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+                                                        error:error]) {
+    return nil;
+  }
+
+  strappy_model_record_list_init(&list);
+  strappyError = NULL;
+  if (!strappy_session_list_allowed_models([databasePath UTF8String],
+                                           &list,
+                                           &strappyError)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    strappy_model_record_list_destroy(&list);
+    return nil;
+  }
+
+  models = [StrappySession modelCatalogFromList:&list];
+  strappy_model_record_list_destroy(&list);
+  return models;
+}
+
++ (NSArray *)bundledModelCatalogForProviderIdentifier:
+               (NSString *)providerIdentifier
+                                                 error:
+               (NSError **)error
+{
+  NSString *path;
+  NSData *data;
+  char *json;
+  cJSON *root;
+  cJSON *models;
+  NSMutableArray *result;
+  int count;
+  int index;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U)) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Bundled model provider identifier is missing."];
+    }
+    return nil;
+  }
+  path = [[NSBundle mainBundle] pathForResource:@"BundledModels"
+                                         ofType:@"json"];
+  data = (path != nil) ? [NSData dataWithContentsOfFile:path] : nil;
+  if ((data == nil) || ([data length] == 0U) ||
+      ([data length] > (512U * 1024U))) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Bundled model catalog could not be loaded."];
+    }
+    return nil;
+  }
+  json = (char *)malloc([data length] + 1U);
+  if (json == NULL) {
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Could not allocate bundled model catalog."];
+    }
+    return nil;
+  }
+  memcpy(json, [data bytes], [data length]);
+  json[[data length]] = '\0';
+  root = cJSON_Parse(json);
+  free(json);
+  models = (root != NULL) ?
+    cJSON_GetObjectItemCaseSensitive(root, "models") : NULL;
+  if (!cJSON_IsArray(models)) {
+    cJSON_Delete(root);
+    if (error != nil) {
+      *error = [self errorFromCString:
+        "Bundled model catalog is invalid."];
+    }
+    return nil;
+  }
+  result = [NSMutableArray array];
+  count = cJSON_GetArraySize(models);
+  for (index = 0; index < count; index++) {
+    cJSON *model;
+    cJSON *provider;
+    cJSON *wireModelID;
+    cJSON *displayName;
+    cJSON *active;
+    NSString *modelProviderIdentifier;
+    NSString *modelWireID;
+    NSString *modelDisplayName;
+
+    model = cJSON_GetArrayItem(models, index);
+    provider = cJSON_GetObjectItemCaseSensitive(model, "provider_id");
+    wireModelID = cJSON_GetObjectItemCaseSensitive(model, "wire_model_id");
+    displayName = cJSON_GetObjectItemCaseSensitive(model, "display_name");
+    active = cJSON_GetObjectItemCaseSensitive(model, "catalog_active");
+    if (!cJSON_IsString(provider) || (provider->valuestring == NULL) ||
+        !cJSON_IsString(wireModelID) || (wireModelID->valuestring == NULL) ||
+        !cJSON_IsString(displayName) || (displayName->valuestring == NULL) ||
+        !cJSON_IsTrue(active)) {
+      continue;
+    }
+    modelProviderIdentifier =
+      [NSString stringWithUTF8String:provider->valuestring];
+    if (![modelProviderIdentifier isEqualToString:providerIdentifier]) {
+      continue;
+    }
+    modelWireID = [NSString stringWithUTF8String:wireModelID->valuestring];
+    modelDisplayName = [NSString stringWithUTF8String:displayName->valuestring];
+    if ((modelWireID != nil) && (modelDisplayName != nil)) {
+      [result addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+        modelProviderIdentifier, @"provider_id",
+        modelWireID, @"wire_model_id",
+        modelDisplayName, @"name",
+        nil]];
+    }
+  }
+  cJSON_Delete(root);
+  return result;
+}
+
++ (NSArray *)openRouterModelCatalogMatchingSearchText:(NSString *)searchText
+                                                error:(NSError **)error
+{
+  return [StrappySession modelCatalogMatchingSearchText:searchText error:error];
+}
+
++ (NSArray *)openRouterModelCatalogWithError:(NSError **)error
+{
+  return [StrappySession modelCatalogWithError:error];
+}
+
++ (NSArray *)allowedOpenRouterModelCatalogWithError:(NSError **)error
+{
+  return [StrappySession allowedModelCatalogWithError:error];
 }
 
 + (NSArray *)assistantSetCatalog
@@ -2068,7 +3643,7 @@ static BOOL StrappySessionRecordFromOptions(
   return sets;
 }
 
-+ (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error
++ (NSString *)defaultModelIdentifierWithError:(NSError **)error
 {
   NSString *databasePath;
   char *modelId;
@@ -2083,9 +3658,9 @@ static BOOL StrappySessionRecordFromOptions(
 
   modelId = NULL;
   strappyError = NULL;
-  if (!strappy_session_get_default_openrouter_model([databasePath UTF8String],
-                                               &modelId,
-                                               &strappyError)) {
+  if (!strappy_session_get_default_model([databasePath UTF8String],
+                                         &modelId,
+                                         &strappyError)) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
     }
@@ -2101,8 +3676,8 @@ static BOOL StrappySessionRecordFromOptions(
   return result;
 }
 
-+ (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
-                                      error:(NSError **)error
++ (BOOL)setDefaultModelIdentifier:(NSString *)modelIdentifier
+                             error:(NSError **)error
 {
   NSString *databasePath;
   char *strappyError;
@@ -2128,9 +3703,9 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   strappyError = NULL;
-  ok = strappy_session_set_default_openrouter_model([databasePath UTF8String],
-                                               [modelIdentifier UTF8String],
-                                               &strappyError);
+  ok = strappy_session_set_default_model([databasePath UTF8String],
+                                         [modelIdentifier UTF8String],
+                                         &strappyError);
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
@@ -2147,6 +3722,17 @@ static BOOL StrappySessionRecordFromOptions(
                   modelIdentifier, @"selected_model_id",
                   nil]];
   return YES;
+}
+
++ (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error
+{
+  return [StrappySession defaultModelIdentifierWithError:error];
+}
+
++ (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
+                                      error:(NSError **)error
+{
+  return [StrappySession setDefaultModelIdentifier:modelIdentifier error:error];
 }
 
 + (StrappySessionOptions *)defaultSessionOptionsWithError:(NSError **)error
@@ -2310,9 +3896,9 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
-+ (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
-                forModelIdentifier:(NSString *)modelIdentifier
-                             error:(NSError **)error
++ (BOOL)setModelAllowed:(BOOL)allowed
+     forModelIdentifier:(NSString *)modelIdentifier
+                  error:(NSError **)error
 {
   NSString *databasePath;
   char *strappyError;
@@ -2338,10 +3924,10 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   strappyError = NULL;
-  ok = strappy_session_set_openrouter_model_allowed([databasePath UTF8String],
-                                               [modelIdentifier UTF8String],
-                                               allowed ? 1 : 0,
-                                               &strappyError);
+  ok = strappy_session_set_model_allowed([databasePath UTF8String],
+                                         [modelIdentifier UTF8String],
+                                         allowed ? 1 : 0,
+                                         &strappyError);
   if (!ok) {
     if (error != nil) {
       *error = [StrappySession errorFromCString:strappyError];
@@ -2360,9 +3946,283 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
-+ (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error
++ (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
+                forModelIdentifier:(NSString *)modelIdentifier
+                             error:(NSError **)error
+{
+  return [StrappySession setModelAllowed:allowed
+                      forModelIdentifier:modelIdentifier
+                                   error:error];
+}
+
++ (BOOL)manualModelInput:(strappy_manual_model_input *)input
+             wireModelID:(NSString *)wireModelID
+             displayName:(NSString *)displayName
+      contextWindowTokens:(long long)contextWindowTokens
+          maxOutputTokens:(long long)maxOutputTokens
+        reasoningEnabled:(BOOL)reasoningEnabled
+       imageInputEnabled:(BOOL)imageInputEnabled
+   localFunctionsEnabled:(BOOL)localFunctionsEnabled
+       inputPricePerToken:(NSString *)inputPricePerToken
+      outputPricePerToken:(NSString *)outputPricePerToken
+   cacheReadPricePerToken:(NSString *)cacheReadPricePerToken
+  cacheWritePricePerToken:(NSString *)cacheWritePricePerToken
+                    error:(NSError **)error
+{
+  NSArray *prices;
+  NSUInteger priceIndex;
+
+  if ((input == NULL) ||
+      ![wireModelID isKindOfClass:[NSString class]] ||
+      ((displayName != nil) &&
+       ![displayName isKindOfClass:[NSString class]]) ||
+      ([wireModelID length] == 0U) || ([wireModelID length] > 128U) ||
+      ([displayName length] > 160U) ||
+      (contextWindowTokens < 0LL) || (maxOutputTokens < 0LL)) {
+    if (error != nil) {
+      *error = [StrappySession errorFromCString:
+        "Manual model metadata is invalid."];
+    }
+    return NO;
+  }
+  prices = [NSArray arrayWithObjects:
+    (inputPricePerToken != nil) ? (id)inputPricePerToken : (id)[NSNull null],
+    (outputPricePerToken != nil) ? (id)outputPricePerToken : (id)[NSNull null],
+    (cacheReadPricePerToken != nil) ?
+      (id)cacheReadPricePerToken : (id)[NSNull null],
+    (cacheWritePricePerToken != nil) ?
+      (id)cacheWritePricePerToken : (id)[NSNull null],
+    nil];
+  for (priceIndex = 0U; priceIndex < [prices count]; priceIndex++) {
+    id price;
+
+    price = [prices objectAtIndex:priceIndex];
+    if (![price isKindOfClass:[NSNull class]] &&
+        (![price isKindOfClass:[NSString class]] ||
+         ([(NSString *)price length] > 64U))) {
+      if (error != nil) {
+        *error = [StrappySession errorFromCString:
+          "Manual model pricing is invalid."];
+      }
+      return NO;
+    }
+  }
+  input->wire_model_id = [wireModelID UTF8String];
+  input->display_name = ([displayName length] > 0U) ?
+    [displayName UTF8String] : NULL;
+  input->context_window_tokens = contextWindowTokens;
+  input->max_output_tokens = maxOutputTokens;
+  input->reasoning_enabled = reasoningEnabled ? 1 : 0;
+  input->image_input_enabled = imageInputEnabled ? 1 : 0;
+  input->local_functions_enabled = localFunctionsEnabled ? 1 : 0;
+  input->pricing_prompt = ([inputPricePerToken length] > 0U) ?
+    [inputPricePerToken UTF8String] : NULL;
+  input->pricing_completion = ([outputPricePerToken length] > 0U) ?
+    [outputPricePerToken UTF8String] : NULL;
+  input->pricing_input_cache_read = ([cacheReadPricePerToken length] > 0U) ?
+    [cacheReadPricePerToken UTF8String] : NULL;
+  input->pricing_input_cache_write = ([cacheWritePricePerToken length] > 0U) ?
+    [cacheWritePricePerToken UTF8String] : NULL;
+  return YES;
+}
+
++ (NSString *)createManualModelForProviderIdentifier:
+                (NSString *)providerIdentifier
+                                                wireModelID:
+                (NSString *)wireModelID
+                                                displayName:
+                (NSString *)displayName
+                                         contextWindowTokens:
+                (long long)contextWindowTokens
+                                             maxOutputTokens:
+                (long long)maxOutputTokens
+                                           reasoningEnabled:
+                (BOOL)reasoningEnabled
+                                          imageInputEnabled:
+                (BOOL)imageInputEnabled
+                                      localFunctionsEnabled:
+                (BOOL)localFunctionsEnabled
+                                          inputPricePerToken:
+                (NSString *)inputPricePerToken
+                                         outputPricePerToken:
+                (NSString *)outputPricePerToken
+                                      cacheReadPricePerToken:
+                (NSString *)cacheReadPricePerToken
+                                     cacheWritePricePerToken:
+                (NSString *)cacheWritePricePerToken
+                                                       error:
+                (NSError **)error
 {
   NSString *databasePath;
+  NSString *modelIdentifier;
+  strappy_manual_model_input input;
+  char *modelID;
+  char *strappyError;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U) ||
+      ![self manualModelInput:&input
+                  wireModelID:wireModelID
+                  displayName:displayName
+           contextWindowTokens:contextWindowTokens
+               maxOutputTokens:maxOutputTokens
+             reasoningEnabled:reasoningEnabled
+            imageInputEnabled:imageInputEnabled
+        localFunctionsEnabled:localFunctionsEnabled
+            inputPricePerToken:inputPricePerToken
+           outputPricePerToken:outputPricePerToken
+        cacheReadPricePerToken:cacheReadPricePerToken
+       cacheWritePricePerToken:cacheWritePricePerToken
+                         error:error]) {
+    return nil;
+  }
+  databasePath = [self sessionsDatabasePath];
+  if (![self ensureSessionsDirectoryForDatabasePath:databasePath error:error]) {
+    return nil;
+  }
+  modelID = NULL;
+  strappyError = NULL;
+  if (!strappy_db_create_manual_model([databasePath fileSystemRepresentation],
+                                      [providerIdentifier UTF8String],
+                                      &input, &modelID, &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return nil;
+  }
+  modelIdentifier = (modelID != NULL) ?
+    [NSString stringWithUTF8String:modelID] : nil;
+  strappy_session_free_string(modelID);
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                  object:self
+                userInfo:(modelIdentifier != nil) ?
+      [NSDictionary dictionaryWithObjectsAndKeys:
+        modelIdentifier, @"model_id", @"created", @"action", nil] : nil];
+  return modelIdentifier;
+}
+
++ (BOOL)updateManualModelForProviderIdentifier:
+            (NSString *)providerIdentifier
+                                            wireModelID:
+            (NSString *)wireModelID
+                                            displayName:
+            (NSString *)displayName
+                                     contextWindowTokens:
+            (long long)contextWindowTokens
+                                         maxOutputTokens:
+            (long long)maxOutputTokens
+                                       reasoningEnabled:
+            (BOOL)reasoningEnabled
+                                      imageInputEnabled:
+            (BOOL)imageInputEnabled
+                                  localFunctionsEnabled:
+            (BOOL)localFunctionsEnabled
+                                      inputPricePerToken:
+            (NSString *)inputPricePerToken
+                                     outputPricePerToken:
+            (NSString *)outputPricePerToken
+                                  cacheReadPricePerToken:
+            (NSString *)cacheReadPricePerToken
+                                 cacheWritePricePerToken:
+            (NSString *)cacheWritePricePerToken
+                                                   error:
+            (NSError **)error
+{
+  NSString *databasePath;
+  strappy_manual_model_input input;
+  char *strappyError;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U) ||
+      ![self manualModelInput:&input
+                  wireModelID:wireModelID
+                  displayName:displayName
+           contextWindowTokens:contextWindowTokens
+               maxOutputTokens:maxOutputTokens
+             reasoningEnabled:reasoningEnabled
+            imageInputEnabled:imageInputEnabled
+        localFunctionsEnabled:localFunctionsEnabled
+            inputPricePerToken:inputPricePerToken
+           outputPricePerToken:outputPricePerToken
+        cacheReadPricePerToken:cacheReadPricePerToken
+       cacheWritePricePerToken:cacheWritePricePerToken
+                         error:error]) {
+    return NO;
+  }
+  databasePath = [self sessionsDatabasePath];
+  if (![self ensureSessionsDirectoryForDatabasePath:databasePath error:error]) {
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_db_update_manual_model([databasePath fileSystemRepresentation],
+                                      [providerIdentifier UTF8String],
+                                      &input, &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  wireModelID, @"wire_model_id", @"updated", @"action", nil]];
+  return YES;
+}
+
++ (BOOL)archiveManualModelForProviderIdentifier:
+            (NSString *)providerIdentifier
+                                             wireModelID:
+            (NSString *)wireModelID
+                                                    error:
+            (NSError **)error
+{
+  NSString *databasePath;
+  char *strappyError;
+
+  if (![providerIdentifier isKindOfClass:[NSString class]] ||
+      ([providerIdentifier length] == 0U) ||
+      ![wireModelID isKindOfClass:[NSString class]] ||
+      ([wireModelID length] == 0U)) {
+    if (error != nil) {
+      *error = [self errorFromCString:"Manual model selection is invalid."];
+    }
+    return NO;
+  }
+  databasePath = [self sessionsDatabasePath];
+  if (![self ensureSessionsDirectoryForDatabasePath:databasePath error:error]) {
+    return NO;
+  }
+  strappyError = NULL;
+  if (!strappy_db_archive_manual_model([databasePath fileSystemRepresentation],
+                                       [providerIdentifier UTF8String],
+                                       [wireModelID UTF8String],
+                                       &strappyError)) {
+    if (error != nil) {
+      *error = [self errorFromCString:strappyError];
+    }
+    strappy_session_free_string(strappyError);
+    return NO;
+  }
+  [[NSNotificationCenter defaultCenter]
+    postNotificationName:StrappySessionModelCatalogDidChangeNotification
+                  object:self
+                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+                  wireModelID, @"wire_model_id", @"archived", @"action", nil]];
+  return YES;
+}
+
++ (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error
+{
+  NSArray *accounts;
+  NSString *designatedAccountIdentifier;
+  NSString *providerAccountIdentifier;
+  NSString *databasePath;
+  NSUInteger index;
+  BOOL hasOpenRouterAccount;
 
   @synchronized(self) {
     if (StrappySessionModelCatalogRefreshInFlight) {
@@ -2373,6 +4233,66 @@ static BOOL StrappySessionRecordFromOptions(
         *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
                                      code:10
                                  userInfo:userInfo];
+      }
+      return NO;
+    }
+  }
+
+  accounts = [StrappySession verifiedProviderAccountCatalogWithError:error];
+  if (accounts == nil) {
+    return NO;
+  }
+  designatedAccountIdentifier = [StrappySession
+    designatedProviderAccountIdentifierForProviderIdentifier:@"openrouter"
+    error:nil];
+  providerAccountIdentifier = nil;
+  hasOpenRouterAccount = NO;
+  for (index = 0U; index < [accounts count]; index++) {
+    NSDictionary *account;
+    NSString *accountIdentifier;
+
+    account = [accounts objectAtIndex:index];
+    if (![[account objectForKey:@"provider_id"]
+          isEqualToString:@"openrouter"]) {
+      continue;
+    }
+    hasOpenRouterAccount = YES;
+    if (![[account objectForKey:@"available"] boolValue]) {
+      continue;
+    }
+    accountIdentifier = [account objectForKey:@"id"];
+    if (providerAccountIdentifier == nil) {
+      providerAccountIdentifier = accountIdentifier;
+    }
+    if ([accountIdentifier isEqualToString:designatedAccountIdentifier]) {
+      providerAccountIdentifier = accountIdentifier;
+      break;
+    }
+  }
+  if ([providerAccountIdentifier length] == 0U) {
+    NSString *message;
+
+    message = hasOpenRouterAccount ? NSLocalizedString(
+      @"Enter an API key for an OpenRouter account before fetching models.",
+      nil) : NSLocalizedString(
+      @"Add an OpenRouter account before fetching models.", nil);
+    if (error != nil) {
+      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                   code:11
+                               userInfo:[NSDictionary dictionaryWithObject:message
+                                         forKey:NSLocalizedDescriptionKey]];
+    }
+    return NO;
+  }
+
+  @synchronized(self) {
+    if (StrappySessionModelCatalogRefreshInFlight) {
+      if (error != nil) {
+        *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
+                                     code:10
+                                 userInfo:[NSDictionary dictionaryWithObject:
+                                   NSLocalizedString(@"Model refresh is already running.", nil)
+                                   forKey:NSLocalizedDescriptionKey]];
       }
       return NO;
     }
@@ -2393,7 +4313,7 @@ static BOOL StrappySessionRecordFromOptions(
                   object:self];
   [NSThread detachNewThreadSelector:@selector(refreshOpenRouterModelCatalogInBackground:)
                            toTarget:self
-                         withObject:nil];
+                         withObject:providerAccountIdentifier];
   return YES;
 }
 
@@ -2403,21 +4323,53 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *databasePath;
   NSString *apiEndpoint;
   NSString *apiToken;
+  NSString *providerAccountIdentifier;
   NSMutableDictionary *result;
   char *strappyError;
   int ok;
 
-  (void)ignored;
   pool = [[NSAutoreleasePool alloc] init];
   databasePath = [StrappySession sessionsDatabasePath];
-  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+  providerAccountIdentifier = [ignored isKindOfClass:[NSString class]] ?
+    ignored : nil;
+  apiEndpoint = nil;
+  apiToken = nil;
+  if ([providerAccountIdentifier length] > 0U) {
+    strappy_provider_account_record account;
+
+    strappy_provider_account_record_init(&account);
+    if (strappy_db_get_provider_account([databasePath fileSystemRepresentation],
+                                        [providerAccountIdentifier UTF8String],
+                                        &account,
+                                        NULL)) {
+      apiEndpoint = (account.responses_endpoint != NULL) ?
+        [NSString stringWithUTF8String:account.responses_endpoint] : nil;
+    }
+    strappy_provider_account_record_destroy(&account);
+    @synchronized([[StrappyKeychain sharedKeychain]
+      credentialLockForProviderIdentifier:@"openrouter"
+      providerAccountIdentifier:providerAccountIdentifier]) {
+      [[StrappyKeychain sharedKeychain]
+        loadBearerToken:&apiToken
+        forProviderIdentifier:@"openrouter"
+        providerAccountIdentifier:providerAccountIdentifier];
+    }
+  }
+  if ([apiEndpoint length] == 0U) {
+    apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
+  }
+  if ([apiToken length] == 0U) {
+    apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+  }
   result = [[NSMutableDictionary alloc] init];
 
   strappyError = NULL;
-  ok = strappy_session_refresh_openrouter_user_models(
+  ok = strappy_model_catalog_update_for_account(
+    StrappySessionOptionalCString(providerAccountIdentifier),
+    NULL,
     StrappySessionOptionalCString(apiEndpoint),
     StrappySessionOptionalCString(apiToken),
+    NULL,
     [databasePath UTF8String],
     &strappyError);
   if (!ok) {
@@ -2433,7 +4385,7 @@ static BOOL StrappySessionRecordFromOptions(
   } else {
     NSArray *models;
 
-    models = [StrappySession openRouterModelCatalogWithError:nil];
+    models = [StrappySession modelCatalogWithError:nil];
     if (models != nil) {
       [result setObject:[NSNumber XP_numberWithUnsignedInteger:[models count]]
                  forKey:@"model_count"];
@@ -2698,7 +4650,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
   strappy_study_database_id_list_destroy(&pending);
 
-  defaultModel = [StrappySession defaultOpenRouterModelIdentifierWithError:error];
+  defaultModel = [StrappySession defaultModelIdentifierWithError:error];
   if (defaultModel == nil) {
     return nil;
   }
@@ -3670,6 +5622,7 @@ static BOOL StrappySessionRecordFromOptions(
   strappy_session_record record;
   NSDictionary *session;
   StrappySessionResponsesContext responsesContext;
+  strappy_model_route_record route;
 
   if ((prompt == nil) || ([prompt length] == 0U)) {
     if (error != nil) {
@@ -3712,7 +5665,6 @@ static BOOL StrappySessionRecordFromOptions(
                                                         error:error]) {
     return nil;
   }
-
   memset(&responsesContext, 0, sizeof(responsesContext));
   responsesContext.session = self;
   responsesContext.context = [context retain];
@@ -3742,8 +5694,20 @@ static BOOL StrappySessionRecordFromOptions(
           (renderContextError != NULL) ? renderContextError : "unknown error");
   }
   strappy_session_free_string(renderContextError);
-  apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+  apiEndpoint = nil;
+  apiToken = nil;
+  strappy_model_route_record_init(&route);
+  if (strappy_db_get_session_model_route(
+        [databasePath fileSystemRepresentation], sessionId, &route, NULL) &&
+      (route.provider_id != NULL) &&
+      (strcmp(route.provider_id, STRAPPY_PROVIDER_OPENROUTER) == 0) &&
+      (route.provider_account_id != NULL) &&
+      (strcmp(route.provider_account_id,
+              STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) == 0)) {
+    apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
+    apiToken = [[StrappyKeychain sharedKeychain] apiToken];
+  }
+  strappy_model_route_record_destroy(&route);
 
   strappy_session_record_init(&record);
   strappyError = NULL;

@@ -1,8 +1,9 @@
 #import "PreferencesTableViewController.h"
 
+#import "AIFontAwesome.h"
 #import "FileScanner.h"
+#import "StrappyAccountTableViewController.h"
 #import "StrappyAppearance.h"
-#import "StrappyKeychain.h"
 #import "StrappyActivityAccessoryView.h"
 #import "StrappyPreferencesDatabaseWhitelistTableViewController.h"
 #import "StrappyPreferencesDatabaseStudyViewController.h"
@@ -11,15 +12,6 @@
 #import "StrappySession.h"
 #import "StrappySessionOptionsTableViewController.h"
 #import "XPUIKit.h"
-
-static NSString *StrappyPreferencesTrimmedString(NSString *string)
-{
-  if (![string isKindOfClass:[NSString class]]) {
-    return @"";
-  }
-  return [string stringByTrimmingCharactersInSet:
-    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-}
 
 static NSString *StrappyPreferencesModelStringForRow(NSDictionary *row,
                                                      NSString *key)
@@ -47,6 +39,21 @@ static NSString *StrappyPreferencesModelDisplayNameForRow(NSDictionary *row)
     ? modelIdentifier : NSLocalizedString(@"Model", nil);
 }
 
+static UIImage *StrappyPreferencesAccountProblemImage(void)
+{
+  static UIImage *image = nil;
+
+  if (image == nil) {
+    image = [AIFontAwesome imageForIcon:AIFACircleExclamation
+                                  style:AIFontAwesomeStyleSolid
+                               iconSize:18.0f
+                             canvasSize:24.0f
+                                  color:[StrappyAppearance primaryTintColor]
+                                  scale:0.0f];
+  }
+  return image;
+}
+
 static NSComparisonResult StrappyPreferencesCompareModelNameRows(
   id left,
   id right,
@@ -69,41 +76,35 @@ static NSComparisonResult StrappyPreferencesCompareModelNameRows(
 }
 
 enum {
-  kStrappyPreferencesSectionAuthentication = 0,
+  kStrappyPreferencesSectionAccounts = 0,
   kStrappyPreferencesSectionPanes,
   kStrappyPreferencesSectionCount
 };
 
 enum {
-  kStrappyAuthRowEndpoint = 0,
-  kStrappyAuthRowToken,
-  kStrappyAuthRowCount
-};
-
-enum {
-  kStrappyPaneRowSessionDefaults = 0,
-  kStrappyPaneRowModels,
+  kStrappyPaneRowModels = 0,
+  kStrappyPaneRowSessionDefaults,
   kStrappyPaneRowDatabases,
   kStrappyPaneRowStudy,
   kStrappyPaneRowPrompts,
   kStrappyPaneRowCount
 };
 
+enum {
+  kStrappyAddAccountActionSheetTag = 9201
+};
+
 @interface PreferencesTableViewController ()
-  <UITextFieldDelegate, StrappySessionOptionsTableViewControllerDelegate>
-@property (nonatomic, strong) UITextField *apiEndpointField;
-@property (nonatomic, strong) UITextField *apiTokenField;
+  <StrappySessionOptionsTableViewControllerDelegate, UIActionSheetDelegate>
+@property (nonatomic, strong) NSArray *accounts;
 @property (nonatomic, copy) StrappySessionOptions *defaultSessionOptions;
 @property (nonatomic, assign) BOOL defaultSessionOptionsLoaded;
-@property (nonatomic, assign) BOOL authenticationDirty;
-- (UITextField *)makeFieldSecure:(BOOL)secure placeholder:(NSString *)placeholder;
-- (void)loadAuthenticationFields;
-- (BOOL)saveAuthenticationIfNeeded;
-- (BOOL)saveAuthentication;
 - (void)showMessage:(NSString *)message title:(NSString *)title;
 - (void)showError:(NSError *)error title:(NSString *)title;
-- (void)fieldChanged:(id)sender;
+- (void)reloadAccounts;
+- (void)providerAccountsDidChange:(NSNotification *)notification;
 - (void)longRunningPreferenceWorkDidChange:(NSNotification *)notification;
+- (void)showAddAccountActionSheetFromIndexPath:(NSIndexPath *)indexPath;
 - (void)doneAction:(id)sender;
 @end
 
@@ -120,15 +121,7 @@ enum {
 - (void)viewDidLoad
 {
   [super viewDidLoad];
-
-  [self setApiEndpointField:
-    [self makeFieldSecure:NO
-              placeholder:NSLocalizedString(
-                @"https://openrouter.ai/api/v1/responses", nil)]];
-  [self setApiTokenField:
-    [self makeFieldSecure:YES
-              placeholder:NSLocalizedString(@"Paste API token", nil)]];
-  [self loadAuthenticationFields];
+  [self reloadAccounts];
 
   [[self navigationItem] setRightBarButtonItem:
     [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemDone
@@ -157,6 +150,11 @@ enum {
        selector:@selector(longRunningPreferenceWorkDidChange:)
            name:FileScannerDatabaseCatalogScanDidFinishNotification
          object:nil];
+  [[NSNotificationCenter defaultCenter]
+    addObserver:self
+       selector:@selector(providerAccountsDidChange:)
+           name:StrappyProviderAccountsDidChangeNotification
+         object:nil];
 }
 
 - (void)viewWillAppear:(BOOL)animated
@@ -165,6 +163,7 @@ enum {
   [self setDefaultSessionOptions:nil];
   [self setDefaultSessionOptionsLoaded:NO];
   [[self navigationController] setToolbarHidden:YES animated:animated];
+  [self reloadAccounts];
 }
 
 - (void)showMessage:(NSString *)message title:(NSString *)title
@@ -190,46 +189,26 @@ enum {
   [self showMessage:message title:title];
 }
 
-- (UITextField *)makeFieldSecure:(BOOL)secure placeholder:(NSString *)placeholder
+- (void)reloadAccounts
 {
-  UITextField *field;
+  NSArray *accounts;
+  NSError *error;
 
-  field = [[UITextField alloc] initWithFrame:CGRectZero];
-  [field setPlaceholder:placeholder];
-  [field setSecureTextEntry:secure];
-  [field setDelegate:self];
-  [field setAutocorrectionType:UITextAutocorrectionTypeNo];
-  [field setAutocapitalizationType:UITextAutocapitalizationTypeNone];
-  [field setClearButtonMode:UITextFieldViewModeWhileEditing];
-  [field setContentVerticalAlignment:UIControlContentVerticalAlignmentCenter];
-  [field setReturnKeyType:secure ? UIReturnKeyDone : UIReturnKeyNext];
-  [field setKeyboardType:secure ? UIKeyboardTypeDefault : UIKeyboardTypeURL];
-  [field addTarget:self
-            action:@selector(fieldChanged:)
-  forControlEvents:UIControlEventEditingChanged];
-  return field;
-}
-
-- (void)loadAuthenticationFields
-{
-  NSString *endpoint;
-  NSString *token;
-
-  endpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  if ([endpoint length] == 0U) {
-    endpoint = [StrappyKeychain defaultAPIEndpoint];
+  error = nil;
+  accounts = [StrappySession verifiedProviderAccountCatalogWithError:&error];
+  if (![accounts isKindOfClass:[NSArray class]]) {
+    [self setAccounts:[NSArray array]];
+    [self showError:error title:NSLocalizedString(@"Could Not Load Accounts", nil)];
+  } else {
+    [self setAccounts:accounts];
   }
-  token = [[StrappyKeychain sharedKeychain] apiToken];
-
-  [[self apiEndpointField] setText:(endpoint != nil) ? endpoint : @""];
-  [[self apiTokenField] setText:(token != nil) ? token : @""];
-  [self setAuthenticationDirty:NO];
+  [[self tableView] reloadData];
 }
 
-- (void)fieldChanged:(id)sender
+- (void)providerAccountsDidChange:(NSNotification *)notification
 {
-  (void)sender;
-  [self setAuthenticationDirty:YES];
+  (void)notification;
+  [self reloadAccounts];
 }
 
 - (void)longRunningPreferenceWorkDidChange:(NSNotification *)notification
@@ -242,48 +221,25 @@ enum {
 {
   (void)sender;
   [[self view] endEditing:YES];
-  if (![self saveAuthenticationIfNeeded]) {
-    return;
-  }
   [self XP_dismissViewControllerAnimated:YES];
 }
 
-- (BOOL)saveAuthenticationIfNeeded
-{
-  if (![self authenticationDirty]) {
-    return YES;
-  }
-  return [self saveAuthentication];
-}
-
-- (BOOL)saveAuthentication
-{
-  NSString *endpoint;
-  NSString *token;
-
-  endpoint = StrappyPreferencesTrimmedString([[self apiEndpointField] text]);
-  token = StrappyPreferencesTrimmedString([[self apiTokenField] text]);
-  if (([endpoint length] == 0U) || ([token length] == 0U)) {
-    [self showMessage:NSLocalizedString(
-      @"API endpoint and token are required.", nil)
-                title:NSLocalizedString(@"Credentials Required", nil)];
-    return NO;
-  }
-
-  if (![[StrappyKeychain sharedKeychain] saveAPIEndpoint:endpoint token:token]) {
-    [self showMessage:NSLocalizedString(
-      @"The keychain refused the write.", nil)
-                title:NSLocalizedString(@"Could Not Save Credentials", nil)];
-    return NO;
-  }
-
-  [[self apiEndpointField] setText:endpoint];
-  [[self apiTokenField] setText:token];
-  [self setAuthenticationDirty:NO];
-  return YES;
-}
-
 #pragma mark - StrappySessionOptionsTableViewControllerDelegate
+
+- (NSArray *)currentProviderAccounts
+{
+  NSError *error;
+  NSArray *accounts;
+
+  error = nil;
+  accounts = [StrappySession providerAccountCatalogWithError:&error];
+  if (![accounts isKindOfClass:[NSArray class]]) {
+    [self showError:error
+              title:NSLocalizedString(@"Could Not Load Accounts", nil)];
+    return [NSArray array];
+  }
+  return accounts;
+}
 
 - (NSArray *)currentAllowedModels
 {
@@ -291,7 +247,7 @@ enum {
   NSArray *models;
 
   error = nil;
-  models = [StrappySession allowedOpenRouterModelCatalogWithError:&error];
+  models = [StrappySession allowedModelCatalogWithError:&error];
   if (![models isKindOfClass:[NSArray class]]) {
     [self showError:error
               title:NSLocalizedString(@"Could not load models", nil)];
@@ -358,20 +314,6 @@ enum {
   [[self navigationController] popToViewController:self animated:animated];
 }
 
-#pragma mark - UITextFieldDelegate
-
-- (BOOL)textFieldShouldReturn:(UITextField *)textField
-{
-  if (textField == [self apiEndpointField]) {
-    [[self apiTokenField] becomeFirstResponder];
-    return NO;
-  }
-
-  [textField resignFirstResponder];
-  [self saveAuthenticationIfNeeded];
-  return NO;
-}
-
 #pragma mark - UITableViewDataSource
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
@@ -384,8 +326,8 @@ enum {
  numberOfRowsInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == kStrappyPreferencesSectionAuthentication) {
-    return kStrappyAuthRowCount;
+  if (section == kStrappyPreferencesSectionAccounts) {
+    return (NSInteger)[[self accounts] count] + 1;
   }
   if (section == kStrappyPreferencesSectionPanes) {
     return kStrappyPaneRowCount;
@@ -397,8 +339,8 @@ enum {
 titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section == kStrappyPreferencesSectionAuthentication) {
-    return NSLocalizedString(@"Authentication", nil);
+  if (section == kStrappyPreferencesSectionAccounts) {
+    return NSLocalizedString(@"Accounts", nil);
   }
   if (section == kStrappyPreferencesSectionPanes) {
     return NSLocalizedString(@"Preferences", nil);
@@ -418,19 +360,41 @@ titleForFooterInSection:(NSInteger)section
          cellForRowAtIndexPath:(NSIndexPath *)indexPath
 {
   UITableViewCell *cell;
-  UITextField *field;
+  if ([indexPath section] == kStrappyPreferencesSectionAccounts) {
+    NSDictionary *account;
+    NSString *provider;
 
-  if ([indexPath section] == kStrappyPreferencesSectionAuthentication) {
-    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault
+    if ((NSUInteger)[indexPath row] == [[self accounts] count]) {
+      cell = [[UITableViewCell alloc]
+        initWithStyle:UITableViewCellStyleDefault reuseIdentifier:nil];
+      [[cell textLabel] setText:NSLocalizedString(@"Add Account", nil)];
+      [[cell textLabel] setTextColor:[StrappyAppearance primaryTintColor]];
+      [[cell textLabel] XP_setTextAlignmentCenter];
+      [cell setAccessoryType:UITableViewCellAccessoryNone];
+      return cell;
+    }
+    cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                   reuseIdentifier:nil];
-    [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
-    field = ([indexPath row] == kStrappyAuthRowEndpoint)
-      ? [self apiEndpointField]
-      : [self apiTokenField];
-    [field setFrame:CGRectInset([[cell contentView] bounds], 15.0f, 0.0f)];
-    [field setAutoresizingMask:
-      UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight];
-    [[cell contentView] addSubview:field];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
+    account = [[self accounts] objectAtIndex:(NSUInteger)[indexPath row]];
+    provider = StrappyPreferencesModelStringForRow(account, @"provider_id");
+    [[cell textLabel] setText:StrappyPreferencesModelStringForRow(account,
+      @"name")];
+    if ([provider isEqualToString:@"openrouter"]) {
+      [[cell detailTextLabel] setText:@"OpenRouter"];
+    } else if ([provider isEqualToString:@"openai_chatgpt"]) {
+      [[cell detailTextLabel] setText:@"ChatGPT"];
+    } else {
+      [[cell detailTextLabel] setText:NSLocalizedString(@"Custom", nil)];
+    }
+    if (![[account objectForKey:@"available"] boolValue]) {
+      [[cell detailTextLabel] setText:[NSString stringWithFormat:
+        NSLocalizedString(@"%@ — setup required", nil),
+        [[cell detailTextLabel] text]]];
+    }
+    if ([[account objectForKey:@"has_missing_required_fields"] boolValue]) {
+      [[cell imageView] setImage:StrappyPreferencesAccountProblemImage()];
+    }
     return cell;
   }
 
@@ -463,6 +427,77 @@ titleForFooterInSection:(NSInteger)section
 
 #pragma mark - UITableViewDelegate
 
+- (void)showAddAccountActionSheetFromIndexPath:(NSIndexPath *)indexPath
+{
+  UIActionSheet *actionSheet;
+  UITableView *tableView;
+
+  actionSheet = [[UIActionSheet alloc]
+    initWithTitle:nil
+          delegate:self
+ cancelButtonTitle:NSLocalizedString(@"Cancel", nil)
+destructiveButtonTitle:nil
+ otherButtonTitles:NSLocalizedString(@"ChatGPT", nil),
+                   NSLocalizedString(@"OpenRouter", nil),
+                   NSLocalizedString(@"Custom", nil), nil];
+  [actionSheet setTag:kStrappyAddAccountActionSheetTag];
+  tableView = [self tableView];
+  [actionSheet showFromRect:[tableView rectForRowAtIndexPath:indexPath]
+                     inView:tableView
+                   animated:YES];
+}
+
+- (void)actionSheet:(UIActionSheet *)actionSheet
+didDismissWithButtonIndex:(NSInteger)buttonIndex
+{
+  NSInteger firstOtherButtonIndex;
+  NSString *providerIdentifier;
+  NSArray *providers;
+  NSUInteger providerIndex;
+  BOOL providerAvailable;
+  NSError *error;
+
+  if (([actionSheet tag] != kStrappyAddAccountActionSheetTag) ||
+      (buttonIndex == [actionSheet cancelButtonIndex])) {
+    return;
+  }
+  firstOtherButtonIndex = [actionSheet firstOtherButtonIndex];
+  if (buttonIndex == firstOtherButtonIndex) {
+    providerIdentifier = @"openai_chatgpt";
+  } else if (buttonIndex == (firstOtherButtonIndex + 1)) {
+    providerIdentifier = @"openrouter";
+  } else if (buttonIndex == (firstOtherButtonIndex + 2)) {
+    providerIdentifier = @"other";
+  } else {
+    return;
+  }
+
+  providers = [StrappySession providerCatalog];
+  providerAvailable = NO;
+  for (providerIndex = 0U; providerIndex < [providers count]; providerIndex++) {
+    NSDictionary *provider;
+
+    provider = [providers objectAtIndex:providerIndex];
+    if ([StrappyPreferencesModelStringForRow(provider, @"id")
+          isEqualToString:providerIdentifier]) {
+      providerAvailable = [[provider objectForKey:@"available"] boolValue];
+      break;
+    }
+  }
+  if (!providerAvailable) {
+    [self showMessage:NSLocalizedString(
+      @"This account type is not available in this build.", nil)
+                 title:NSLocalizedString(@"Could Not Add Account", nil)];
+    return;
+  }
+
+  error = nil;
+  if ([StrappySession createProviderAccountForProviderIdentifier:
+        providerIdentifier error:&error] == nil) {
+    [self showError:error title:NSLocalizedString(@"Could Not Add Account", nil)];
+  }
+}
+
 - (void)tableView:(UITableView *)tableView
 didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
@@ -470,8 +505,25 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
 
-  if ([indexPath section] == kStrappyPreferencesSectionAuthentication) {
-    return;
+  if ([indexPath section] == kStrappyPreferencesSectionAccounts) {
+    if ((NSUInteger)[indexPath row] == [[self accounts] count]) {
+      [self showAddAccountActionSheetFromIndexPath:indexPath];
+      return;
+    } else {
+      NSDictionary *account;
+      StrappyAccountTableViewController *accountController;
+      UINavigationController *navigationController;
+
+      account = [[self accounts] objectAtIndex:(NSUInteger)[indexPath row]];
+      accountController = [[StrappyAccountTableViewController alloc]
+        initWithProviderAccountIdentifier:
+          StrappyPreferencesModelStringForRow(account, @"id")
+                       presentedModally:YES];
+      navigationController = [[UINavigationController alloc]
+        initWithRootViewController:accountController];
+      [self XP_presentViewController:navigationController animated:YES];
+      return;
+    }
   }
 
   controller = nil;
@@ -505,8 +557,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [[self apiEndpointField] setDelegate:nil];
-  [[self apiTokenField] setDelegate:nil];
 }
 
 @end
