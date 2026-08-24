@@ -320,7 +320,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 - (void)layoutDefaultsViews;
 - (StrappySessionOptions *)currentOptions;
 - (BOOL)canEditOptions;
-- (BOOL)canChangeAccount;
+- (void)showOptionsErrorMessage:(NSString *)message title:(NSString *)title;
 - (void)populateAccountPopUpWithOptions:(StrappySessionOptions *)options
                                accounts:(NSArray *)accounts
                                  models:(NSArray *)models;
@@ -877,8 +877,6 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   if (session_ != session) {
     [session_ release];
     session_ = [session retain];
-    [statusText_ release];
-    statusText_ = nil;
   }
   [self reloadOptions];
 }
@@ -908,18 +906,6 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     return NO;
   }
   return YES;
-}
-
-- (BOOL)canChangeAccount
-{
-  if (![self canEditOptions]) {
-    return NO;
-  }
-  if (editsSessionDefaults_) {
-    return YES;
-  }
-  return ([[[session_ cachedSummary] objectForKey:@"prompt"] length] == 0U) ?
-    YES : NO;
 }
 
 - (void)reloadOptions
@@ -1004,13 +990,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   [roundLimitValueLabel_ setStringValue:
     [NSString stringWithFormat:@"%lu", (unsigned long)roundLimit]];
 
-  if ([statusText_ length] > 0U) {
-    message = statusText_;
-    [statusLabel_ setTextColor:[NSColor redColor]];
-  } else if (editsSessionDefaults_ && (options == nil)) {
-    message = loadErrorMessage;
-    [statusLabel_ setTextColor:[NSColor redColor]];
-  } else if (editsSessionDefaults_) {
+  if (editsSessionDefaults_) {
     message = NSLocalizedString(
       @"Session defaults apply to new sessions",
       nil);
@@ -1033,6 +1013,12 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   [self updateControlEnabledStates];
   [self layoutInspectorViews];
   reloading_ = NO;
+  if (editsSessionDefaults_ && (options == nil) &&
+      ([loadErrorMessage length] > 0U)) {
+    [self showOptionsErrorMessage:loadErrorMessage
+                            title:NSLocalizedString(
+                              @"Could Not Load Session Defaults", nil)];
+  }
 }
 
 - (void)populateAccountPopUpWithOptions:(StrappySessionOptions *)options
@@ -1306,7 +1292,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     hostedToolsEnabled &&
     supportsSearchProvider &&
     [options webSearchEnabled];
-  [accountPopUpButton_ setEnabled:[self canChangeAccount] &&
+  [accountPopUpButton_ setEnabled:enabled &&
     StrappyInspectorPopUpHasEnabledChoice(accountPopUpButton_)];
   [modelPopUpButton_ setEnabled:
     (enabled && StrappyInspectorPopUpHasEnabledChoice(modelPopUpButton_))];
@@ -1338,6 +1324,26 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   return StrappyInspectorStringForRow(account, @"provider_id");
 }
 
+- (void)showOptionsErrorMessage:(NSString *)message title:(NSString *)title
+{
+  NSAlert *alert;
+  NSWindow *window;
+
+  window = [[self view] window];
+  if (window == nil) {
+    NSBeep();
+    return;
+  }
+  alert = [[[NSAlert alloc] init] autorelease];
+  [alert setMessageText:title];
+  [alert setInformativeText:message];
+  [alert addButtonWithTitle:NSLocalizedString(@"OK", nil)];
+  [alert XP_beginSheetModalForWindow:window
+                       modalDelegate:nil
+                      didEndSelector:NULL
+                         contextInfo:NULL];
+}
+
 - (BOOL)saveOptions:(StrappySessionOptions *)options
       changedFields:(StrappySessionOptionMask)changedFields
 {
@@ -1366,15 +1372,13 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
     if ([message length] == 0U) {
       message = NSLocalizedString(@"Your changes could not be saved.", nil);
     }
-    [statusText_ release];
-    statusText_ = [message copy];
-    NSBeep();
     [self reloadOptions];
+    [self showOptionsErrorMessage:message
+                            title:NSLocalizedString(
+                              @"Failed to Save Changes", nil)];
     return NO;
   }
 
-  [statusText_ release];
-  statusText_ = nil;
   [self reloadOptions];
   return YES;
 }
@@ -1412,7 +1416,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   StrappySessionOptionMask changedFields;
 
   (void)sender;
-  if (![self canChangeAccount]) {
+  if (![self canEditOptions]) {
     [self reloadOptions];
     return;
   }
@@ -1640,7 +1644,6 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   [defaultOptions_ release];
   [accountRows_ release];
   [modelRows_ release];
-  [statusText_ release];
   [scrollView_ release];
   [documentView_ release];
   [titleLabel_ release];

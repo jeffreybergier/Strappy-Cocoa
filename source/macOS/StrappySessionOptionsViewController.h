@@ -36,7 +36,6 @@
   StrappySessionOptions *defaultOptions_;
   NSArray *accountRows_;
   NSArray *modelRows_;
-  NSString *statusText_;
   BOOL editsSessionDefaults_;
   BOOL layingOut_;
   BOOL reloading_;

@@ -355,6 +355,7 @@
 "Application" = "アプリケーション";
 "Context: %@" = "コンテキスト: %@";
 "Could Not Load Study" = "データベース調査を読み込めませんでした";
+"Could Not Load Session Defaults" = "デフォルトのセッション設定を読み込めませんでした";
 "Could Not Reset Study" = "データベース調査をリセットできませんでした";
 "Could Not Save Credentials" = "認証情報を保存できませんでした";
 "Could Not Start Study" = "データベース調査を開始できませんでした";

@@ -823,55 +823,10 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (NSArray *)availableModels
 {
   NSArray *models;
-  NSDictionary *summary;
-  StrappySessionOptions *options;
-  NSString *selectedAccountIdentifier;
-  NSMutableArray *filteredModels;
-  NSUInteger index;
 
   models = [StrappySession allowedModelCatalogWithError:nil];
-  if (![models isKindOfClass:[NSArray class]]) {
-    return [NSArray array];
-  }
-  /* Once a request has bound the conversation, keep model choices on the
-   * selected account's provider. */
-  summary = [[self session] cachedSummary];
-  if ([StrappyStringForSessionSummary(summary, @"prompt") length] == 0U) {
-    return models;
-  }
-  options = [[self session] optionsWithError:nil];
-  selectedAccountIdentifier = @"";
-  {
-    NSArray *accounts;
-    NSUInteger accountIndex;
-
-    accounts = [StrappySession providerAccountCatalogWithError:nil];
-    for (accountIndex = 0U; accountIndex < [accounts count]; accountIndex++) {
-      NSDictionary *account;
-
-      account = [accounts objectAtIndex:accountIndex];
-      if ([StrappyStringForSessionSummary(account, @"id")
-            isEqualToString:[options providerAccountIdentifier]]) {
-        selectedAccountIdentifier =
-          StrappyStringForSessionSummary(account, @"provider_id");
-        break;
-      }
-    }
-  }
-  if ([selectedAccountIdentifier length] == 0U) {
-    return models;
-  }
-  filteredModels = [NSMutableArray array];
-  for (index = 0U; index < [models count]; index++) {
-    NSDictionary *model;
-
-    model = [models objectAtIndex:index];
-    if ([StrappyStringForSessionSummary(model, @"provider_id")
-          isEqualToString:selectedAccountIdentifier]) {
-      [filteredModels addObject:model];
-    }
-  }
-  return filteredModels;
+  return [models isKindOfClass:[NSArray class]] ?
+    models : [NSArray array];
 }
 
 - (NSArray *)availableAssistantSets

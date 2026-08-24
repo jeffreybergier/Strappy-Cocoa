@@ -355,6 +355,7 @@
 "Application" = "Application";
 "Context: %@" = "Context: %@";
 "Could Not Load Study" = "Could Not Load Study";
+"Could Not Load Session Defaults" = "Could Not Load Session Defaults";
 "Could Not Reset Study" = "Could Not Reset Study";
 "Could Not Save Credentials" = "Could Not Save Credentials";
 "Could Not Start Study" = "Could Not Start Study";
