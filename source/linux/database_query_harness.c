@@ -3661,6 +3661,15 @@ static int harness_run_helper_datetime_tests(void)
   if (!harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_DATETIME_TO_ISO8601,
+        "{\"timestamps\":[\"-62167219200\",\"253402300799\"],"
+        "\"unit\":\"unix_seconds\"}",
+        "[\"0000-01-01T00:00:00Z\",\"9999-12-31T23:59:59Z\"]")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_DATETIME_TO_ISO8601,
         "{\"timestamps\":[\"0\",\" 1.25 \"],"
         "\"unit\":\"apple_seconds\"}",
         "[\"2001-01-01T00:00:00Z\",\"2001-01-01T00:00:01.25Z\"]")) {
@@ -3728,6 +3737,46 @@ static int harness_run_helper_datetime_tests(void)
   if (!harness_expect_output_equals(
         NULL,
         STRAPPY_TOOL_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":[\"0000-01-01T00:00:00Z\","
+        "\"9999-12-31T23:59:59Z\"],"
+        "\"unit\":\"unix_seconds\"}",
+        "[\"-62167219200\",\"253402300799\"]")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":[\"2000-02-29T00:00:00Z\","
+        "\"1900-02-28T00:00:00Z\"],"
+        "\"unit\":\"unix_seconds\"}",
+        "[\"951782400\",\"-2203977600\"]")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":[\"1582-10-04T00:00:00Z\","
+        "\"1582-10-15T00:00:00Z\"],"
+        "\"unit\":\"unix_seconds\"}",
+        "[\"-12220243200\",\"-12219292800\"]")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":[\"1970-01-01T00:30:00+01:00\","
+        "\"1969-12-31T23:30:00-01:00\"],"
+        "\"unit\":\"unix_seconds\"}",
+        "[\"-1800\",\"1800\"]")) {
+    return 0;
+  }
+
+  if (!harness_expect_output_equals(
+        NULL,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"2001-01-01T00:00:00Z\","
         "\"2026-01-01T00:00:00Z\",\"2027-01-01T00:00:00Z\"],"
         "\"unit\":\"apple_seconds\"}",
@@ -3784,6 +3833,15 @@ static int harness_run_helper_datetime_tests(void)
         STRAPPY_TOOL_DATETIME_FROM_ISO8601,
         "{\"datetimes\":[\"2026-02-30\"],"
         "\"unit\":\"apple_seconds\"}",
+        "date is invalid")) {
+    return 0;
+  }
+
+  if (!harness_expect_error_contains(
+        NULL,
+        STRAPPY_TOOL_DATETIME_FROM_ISO8601,
+        "{\"datetimes\":[\"1900-02-29\"],"
+        "\"unit\":\"unix_seconds\"}",
         "date is invalid")) {
     return 0;
   }

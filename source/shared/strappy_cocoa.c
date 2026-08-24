@@ -1,5 +1,5 @@
 #if !defined(__APPLE__)
-#define _POSIX_C_SOURCE 200809L
+#define _GNU_SOURCE
 #endif
 
 #include "strappy_cocoa.h"
@@ -13,6 +13,7 @@
 #include <time.h>
 #endif
 
+#include <errno.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -450,61 +451,117 @@ static int strappy_cocoa_parse_fixed_digits(const char **cursor_in_out,
   return 1;
 }
 
-static int strappy_cocoa_is_leap_year(int year)
+#if defined(__APPLE__) && defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+/*
+ * These Core Foundation Gregorian utilities preserve ISO 8601's proleptic
+ * Gregorian calendar and astronomical year zero on every supported Apple OS.
+ */
+static int strappy_cocoa_calendar_components_to_unix_seconds(
+  int year,
+  int month,
+  int day,
+  int hour,
+  int minute,
+  int second,
+  int offset_seconds,
+  long long *unix_seconds_out,
+  char **error_out)
 {
-  if ((year % 4) != 0) {
+#ifdef __APPLE__
+  CFGregorianDate calendar_date;
+  CFGregorianDate normalized_date;
+  CFTimeZoneRef time_zone;
+  CFAbsoluteTime absolute_time;
+  double unix_seconds;
+
+  time_zone = CFTimeZoneCreateWithTimeIntervalFromGMT(
+    kCFAllocatorDefault,
+    (CFTimeInterval)offset_seconds);
+  if (time_zone == NULL) {
+    strappy_set_error(error_out, "Could not create ISO8601 timezone.");
     return 0;
   }
-  if ((year % 100) != 0) {
-    return 1;
+
+  calendar_date.year = (SInt32)year;
+  calendar_date.month = (SInt8)month;
+  calendar_date.day = (SInt8)day;
+  calendar_date.hour = (SInt8)hour;
+  calendar_date.minute = (SInt8)minute;
+  calendar_date.second = (double)second;
+  absolute_time = CFGregorianDateGetAbsoluteTime(calendar_date, time_zone);
+  /* A component round trip rejects normalized dates such as February 30. */
+  normalized_date = CFAbsoluteTimeGetGregorianDate(absolute_time, time_zone);
+  CFRelease(time_zone);
+
+  if ((normalized_date.year != calendar_date.year) ||
+      (normalized_date.month != calendar_date.month) ||
+      (normalized_date.day != calendar_date.day) ||
+      (normalized_date.hour != calendar_date.hour) ||
+      (normalized_date.minute != calendar_date.minute) ||
+      (normalized_date.second != calendar_date.second)) {
+    strappy_set_error(error_out, "ISO8601 date is invalid.");
+    return 0;
   }
-  return ((year % 400) == 0) ? 1 : 0;
-}
+  unix_seconds = absolute_time + kCFAbsoluteTimeIntervalSince1970;
+  if ((unix_seconds < (double)LLONG_MIN) ||
+      (unix_seconds > (double)LLONG_MAX)) {
+    strappy_set_error(error_out,
+                      "ISO8601 datetime is outside the supported range.");
+    return 0;
+  }
+  *unix_seconds_out = (long long)unix_seconds;
+#else
+  struct tm local_time;
+  struct tm normalized_time;
+  time_t local_timestamp;
+  time_t timestamp;
 
-static int strappy_cocoa_days_in_month(int year, int month)
-{
-  static const int days_by_month[] = {
-    31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
-  };
+  memset(&local_time, 0, sizeof(local_time));
+  local_time.tm_year = year - 1900;
+  local_time.tm_mon = month - 1;
+  local_time.tm_mday = day;
+  local_time.tm_hour = hour;
+  local_time.tm_min = minute;
+  local_time.tm_sec = second;
+  local_time.tm_isdst = 0;
 
-  if ((month < 1) || (month > 12)) {
+  errno = 0;
+  local_timestamp = timegm(&local_time);
+  if (((local_timestamp == (time_t)-1) && (errno == EOVERFLOW)) ||
+      (gmtime_r(&local_timestamp, &normalized_time) == NULL) ||
+      (normalized_time.tm_year != year - 1900) ||
+      (normalized_time.tm_mon != month - 1) ||
+      (normalized_time.tm_mday != day) ||
+      (normalized_time.tm_hour != hour) ||
+      (normalized_time.tm_min != minute) ||
+      (normalized_time.tm_sec != second)) {
+    strappy_set_error(error_out, "ISO8601 date is invalid.");
     return 0;
   }
 
-  if ((month == 2) && strappy_cocoa_is_leap_year(year)) {
-    return 29;
+  normalized_time.tm_sec -= offset_seconds;
+  errno = 0;
+  timestamp = timegm(&normalized_time);
+  if ((timestamp == (time_t)-1) && (errno == EOVERFLOW)) {
+    strappy_set_error(error_out,
+                      "ISO8601 datetime is outside the supported range.");
+    return 0;
   }
-
-  return days_by_month[month - 1];
-}
-
-static long long strappy_cocoa_days_from_civil(int year,
-                                               unsigned int month,
-                                               unsigned int day)
-{
-  long long adjusted_year;
-  long long era;
-  int adjusted_month;
-  unsigned long long year_of_era;
-  unsigned long long day_of_year;
-  unsigned long long day_of_era;
-
-  adjusted_year = (long long)year;
-  if (month <= 2U) {
-    adjusted_year--;
+  if ((time_t)(long long)timestamp != timestamp) {
+    strappy_set_error(error_out,
+                      "ISO8601 datetime does not fit in a long long.");
+    return 0;
   }
-  era = (adjusted_year >= 0LL) ? (adjusted_year / 400LL)
-                               : ((adjusted_year - 399LL) / 400LL);
-  year_of_era = (unsigned long long)(adjusted_year - (era * 400LL));
-  adjusted_month = (int)month + ((month > 2U) ? -3 : 9);
-  day_of_year =
-    ((153ULL * (unsigned long long)adjusted_month + 2ULL) /
-     5ULL) +
-    (unsigned long long)day - 1ULL;
-  day_of_era = (year_of_era * 365ULL) + (year_of_era / 4ULL) -
-               (year_of_era / 100ULL) + day_of_year;
-  return (era * 146097LL) + (long long)day_of_era - 719468LL;
+  *unix_seconds_out = (long long)timestamp;
+#endif
+  return 1;
 }
+#if defined(__APPLE__) && defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 static int strappy_cocoa_parse_iso8601_value(const char *iso8601,
                                              long long *unix_seconds_out,
@@ -512,8 +569,6 @@ static int strappy_cocoa_parse_iso8601_value(const char *iso8601,
                                              char **error_out)
 {
   const char *cursor;
-  long long days;
-  long long day_seconds;
   long long unix_seconds;
   int year;
   int month;
@@ -552,12 +607,6 @@ static int strappy_cocoa_parse_iso8601_value(const char *iso8601,
   if (!strappy_cocoa_parse_fixed_digits(&cursor, 2, &day)) {
     strappy_set_error(error_out,
                       "ISO8601 datetime must start with YYYY-MM-DD.");
-    return 0;
-  }
-
-  if ((month < 1) || (month > 12) || (day < 1) ||
-      (day > strappy_cocoa_days_in_month(year, month))) {
-    strappy_set_error(error_out, "ISO8601 date is invalid.");
     return 0;
   }
 
@@ -669,16 +718,15 @@ static int strappy_cocoa_parse_iso8601_value(const char *iso8601,
     }
   }
 
-  days = strappy_cocoa_days_from_civil(year,
-                                       (unsigned int)month,
-                                       (unsigned int)day);
-  day_seconds = (days * 86400LL) + ((long long)hour * 3600LL) +
-                ((long long)minute * 60LL) + (long long)second;
-  if (!strappy_cocoa_add_long_long(day_seconds,
-                                   -((long long)offset_seconds),
-                                   &unix_seconds)) {
-    strappy_set_error(error_out,
-                      "ISO8601 datetime is outside the supported range.");
+  if (!strappy_cocoa_calendar_components_to_unix_seconds(year,
+                                                          month,
+                                                          day,
+                                                          hour,
+                                                          minute,
+                                                          second,
+                                                          offset_seconds,
+                                                          &unix_seconds,
+                                                          error_out)) {
     return 0;
   }
 
@@ -1230,73 +1278,41 @@ int strappy_cocoa_copy_container_info(const char *container_path,
   return 1;
 }
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 static char *strappy_cocoa_copy_base_iso8601_timestamp(
   long long unix_seconds,
   char **error_out)
 {
-  CFDateRef date;
-  CFDateFormatterRef formatter;
-  CFLocaleRef locale;
-  CFTimeZoneRef time_zone;
-  CFStringRef timestamp;
-  char *result;
+  char buffer[32];
+  CFGregorianDate utc_date;
   CFAbsoluteTime absolute_time;
+  int written;
 
   absolute_time =
     (CFAbsoluteTime)((double)unix_seconds -
                      kCFAbsoluteTimeIntervalSince1970);
-  date = CFDateCreate(kCFAllocatorDefault, absolute_time);
-  if (date == NULL) {
-    strappy_set_error(error_out, "Could not create CoreFoundation date.");
+  utc_date = CFAbsoluteTimeGetGregorianDate(absolute_time, NULL);
+  written = snprintf(buffer,
+                     sizeof(buffer),
+                     "%04ld-%02d-%02dT%02d:%02d:%02dZ",
+                     (long)utc_date.year,
+                     (int)utc_date.month,
+                     (int)utc_date.day,
+                     (int)utc_date.hour,
+                     (int)utc_date.minute,
+                     (int)utc_date.second);
+  if ((written < 0) || ((size_t)written >= sizeof(buffer))) {
+    strappy_set_error(error_out, "Could not format UTC timestamp.");
     return NULL;
   }
-
-  locale = CFLocaleCreate(kCFAllocatorDefault, CFSTR("en_US_POSIX"));
-  if (locale == NULL) {
-    CFRelease(date);
-    strappy_set_error(error_out, "Could not create CoreFoundation locale.");
-    return NULL;
-  }
-
-  formatter = CFDateFormatterCreate(kCFAllocatorDefault,
-                                    locale,
-                                    kCFDateFormatterNoStyle,
-                                    kCFDateFormatterNoStyle);
-  CFRelease(locale);
-  if (formatter == NULL) {
-    CFRelease(date);
-    strappy_set_error(error_out, "Could not create CoreFoundation formatter.");
-    return NULL;
-  }
-
-  time_zone =
-    CFTimeZoneCreateWithName(kCFAllocatorDefault, CFSTR("UTC"), 0);
-  if (time_zone == NULL) {
-    CFRelease(formatter);
-    CFRelease(date);
-    strappy_set_error(error_out, "Could not create CoreFoundation UTC zone.");
-    return NULL;
-  }
-
-  CFDateFormatterSetProperty(formatter,
-                             kCFDateFormatterTimeZone,
-                             time_zone);
-  CFRelease(time_zone);
-  CFDateFormatterSetFormat(formatter,
-                           CFSTR("yyyy-MM-dd'T'HH:mm:ss'Z'"));
-
-  timestamp = CFDateFormatterCreateStringWithDate(kCFAllocatorDefault,
-                                                  formatter,
-                                                  date);
-  result = strappy_cocoa_copy_cf_string_utf8(timestamp, error_out);
-
-  if (timestamp != NULL) {
-    CFRelease(timestamp);
-  }
-  CFRelease(formatter);
-  CFRelease(date);
-  return result;
+  return strappy_string_duplicate(buffer);
 }
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 #else
 static char *strappy_cocoa_copy_file_contents(const char *path,
                                                char **error_out)
@@ -1467,8 +1483,9 @@ static char *strappy_cocoa_copy_base_iso8601_timestamp(
   char **error_out)
 {
   char buffer[32];
-  struct tm *utc_time;
+  struct tm utc_time;
   time_t timestamp;
+  int written;
 
   timestamp = (time_t)unix_seconds;
   if ((long long)timestamp != unix_seconds) {
@@ -1477,16 +1494,21 @@ static char *strappy_cocoa_copy_base_iso8601_timestamp(
     return NULL;
   }
 
-  utc_time = gmtime(&timestamp);
-  if (utc_time == NULL) {
+  if (gmtime_r(&timestamp, &utc_time) == NULL) {
     strappy_set_error(error_out, "Could not convert timestamp to UTC.");
     return NULL;
   }
 
-  if (strftime(buffer,
-               sizeof(buffer),
-               "%Y-%m-%dT%H:%M:%SZ",
-               utc_time) == 0U) {
+  written = snprintf(buffer,
+                     sizeof(buffer),
+                     "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                     utc_time.tm_year + 1900,
+                     utc_time.tm_mon + 1,
+                     utc_time.tm_mday,
+                     utc_time.tm_hour,
+                     utc_time.tm_min,
+                     utc_time.tm_sec);
+  if ((written < 0) || ((size_t)written >= sizeof(buffer))) {
     strappy_set_error(error_out, "Could not format UTC timestamp.");
     return NULL;
   }
