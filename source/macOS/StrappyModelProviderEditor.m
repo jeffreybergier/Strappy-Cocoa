@@ -207,8 +207,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     [providerScrollView setHasVerticalScroller:YES];
     providerTableView_ = [[NSTableView alloc]
       initWithFrame:[[providerScrollView contentView] bounds]];
-    providerColumn = StrappyEditorTextColumn(@"provider", @"Provider", 150.0,
-                                             NO);
+    providerColumn = StrappyEditorTextColumn(
+      @"provider", NSLocalizedString(@"Provider", nil), 150.0, NO);
     [providerTableView_ addTableColumn:providerColumn];
     [providerTableView_ setHeaderView:nil];
     [providerTableView_ setDataSource:self];
@@ -431,29 +431,32 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   otherTableView_ = [[[NSTableView alloc]
     initWithFrame:[[scrollView contentView] bounds]] autorelease];
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(@"wire_model_id",
-    @"Model ID (Required)", 180.0, YES)];
+    NSLocalizedString(@"Model ID (Required)", nil), 180.0, YES)];
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(@"name",
-    @"Name (Optional)", 150.0, YES)];
+    NSLocalizedString(@"Name (Optional)", nil), 150.0, YES)];
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(@"context_length",
-    @"Context (Optional)", 120.0, YES)];
+    NSLocalizedString(@"Context (Optional)", nil), 120.0, YES)];
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(
-    @"top_provider_max_completion_tokens", @"Max Output (Optional)",
-    145.0, YES)];
+    @"top_provider_max_completion_tokens",
+    NSLocalizedString(@"Max Output (Optional)", nil), 145.0, YES)];
   [otherTableView_ addTableColumn:StrappyEditorCheckboxColumn(
-    @"reasoning_enabled", @"Reasoning (Optional)", 130.0)];
+    @"reasoning_enabled", NSLocalizedString(@"Reasoning (Optional)", nil),
+    130.0)];
   /* Keep image_input_enabled in model drafts and persistence, but hide its
    * column until Strappy supports image input or output.
   [otherTableView_ addTableColumn:StrappyEditorCheckboxColumn(
     @"image_input_enabled", @"Images (Optional)", 115.0)];
    */
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(@"pricing_prompt",
-    @"Input $/1M (Optional)", 140.0, YES)];
+    NSLocalizedString(@"Input $/1M (Optional)", nil), 140.0, YES)];
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(@"pricing_completion",
-    @"Output $/1M (Optional)", 145.0, YES)];
+    NSLocalizedString(@"Output $/1M (Optional)", nil), 145.0, YES)];
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(
-    @"pricing_input_cache_read", @"Cache Read $/1M (Optional)", 175.0, YES)];
+    @"pricing_input_cache_read",
+    NSLocalizedString(@"Cache Read $/1M (Optional)", nil), 175.0, YES)];
   [otherTableView_ addTableColumn:StrappyEditorTextColumn(
-    @"pricing_input_cache_write", @"Cache Write $/1M (Optional)", 180.0, YES)];
+    @"pricing_input_cache_write",
+    NSLocalizedString(@"Cache Write $/1M (Optional)", nil), 180.0, YES)];
   [otherTableView_ setDataSource:self];
   [otherTableView_ setDelegate:self];
   [scrollView setDocumentView:otherTableView_];
