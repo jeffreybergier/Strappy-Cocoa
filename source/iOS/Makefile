@@ -45,7 +45,7 @@ ALTIVECCOCOA_REQUIRED = 1
 SOURCE_DIRS = $(SHARED_DIR)
 vpath %.m $(SHARED_DIR)
 EXTRA_FLAGS = -I$(SHARED_DIR)
-EXTRA_SOURCES = XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_provider.c strappy_config.c strappy_client.c strappy_sse.c strappy_identity.c strappy_openai_oauth.c strappy_db.c strappy_db_catalog.c strappy_db_sessions.c strappy_db_responses.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_responses.c strappy_webview.c
+EXTRA_SOURCES = XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_config.c strappy_client.c strappy_sse.c strappy_identity.c strappy_openai_oauth.c strappy_db.c strappy_db_catalog.c strappy_db_sessions.c strappy_db_responses.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_responses.c strappy_webview.c
 PHONE_SOURCE_FLAGS = -fobjc-arc
 LIBS_IPHONE = -framework Security -framework QuartzCore -weak_framework WebKit
 PHONE_LDID_SIGN ?= 1

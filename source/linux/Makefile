@@ -20,6 +20,9 @@ STRAPPY_DB_SOURCES = \
 	$(SHARED_DIR)/strappy_db_catalog.c \
 	$(SHARED_DIR)/strappy_db_sessions.c \
 	$(SHARED_DIR)/strappy_db_responses.c
+STRAPPY_PLATFORM_SOURCES = \
+	$(SHARED_DIR)/strappy_cocoa.c \
+	$(SHARED_DIR)/strappy_calendar.c
 FONTAWESOME_GENERATOR := $(SHARED_DIR)/tools/generate_fontawesome_webview_map.py
 FONTAWESOME_ICONS_RESOURCE := $(SHARED_DIR)/Resources/FontAwesomeIcons.json
 FONTAWESOME_WEBVIEW_MAP := $(SHARED_DIR)/strappy_fontawesome_icons.inc
@@ -47,6 +50,7 @@ CHATGPT_COMPATIBILITY_PROBE := $(BUILD_DIR)/chatgpt_compatibility_probe
 OTHER_OPENROUTER_COMPATIBILITY_PROBE := \
 	$(BUILD_DIR)/other_openrouter_compatibility_probe
 PROVIDER_REGISTRY_HARNESS := $(BUILD_DIR)/provider_registry_harness
+CALENDAR_HARNESS := $(BUILD_DIR)/calendar_harness
 STRAPPY_CHATGPT_PROBE_CREDENTIAL_PATH ?= \
 	$(abspath ../../.env.chatgpt.json)
 STRAPPY_OTHER_PROBE_ENV_PATH ?= $(abspath ../../.env)
@@ -59,7 +63,7 @@ export TMPDIR
 
 DATABASE_QUERY_HARNESS_SOURCES = \
 	database_query_harness.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_client.c \
 	$(SHARED_DIR)/strappy_sse.c \
 	$(SHARED_DIR)/strappy_identity.c \
@@ -82,7 +86,7 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 BASH_HARNESS_SOURCES = \
 	bash_harness.c \
 	$(SHARED_DIR)/strappy_bash.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_config.c \
 	$(STRAPPY_DB_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
@@ -92,7 +96,7 @@ BASH_HARNESS_SOURCES = \
 WEBVIEW_HARNESS_SOURCES = \
 	webview_harness.c \
 	$(SHARED_DIR)/strappy_webview.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
 	$(CJSON_DIR)/cJSON.c
 
@@ -102,7 +106,7 @@ RESPONSES_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_sse.c \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
 	$(STRAPPY_DB_SOURCES) \
 	$(SHARED_DIR)/strappy_model_catalog.c \
@@ -139,7 +143,7 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_file_write.c \
 	$(SHARED_DIR)/strappy_file_edit.c \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
 	$(STRAPPY_DB_SOURCES) \
 	$(CJSON_DIR)/cJSON.c
@@ -147,13 +151,13 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 SCANNER_PROFILE_HARNESS_SOURCES = \
 	scanner_profile_harness.c \
 	$(SHARED_DIR)/strappy_file_scanner.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c
 
 OPENAI_OAUTH_POC_SOURCES = \
 	openai_oauth_poc.c \
 	$(SHARED_DIR)/strappy_identity.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
 	$(CJSON_DIR)/cJSON.c
 
@@ -161,7 +165,7 @@ OPENAI_OAUTH_HARNESS_SOURCES = \
 	openai_oauth_harness.c \
 	$(SHARED_DIR)/strappy_openai_oauth.c \
 	$(SHARED_DIR)/strappy_identity.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
 	$(CJSON_DIR)/cJSON.c
 
@@ -172,7 +176,7 @@ CHATGPT_ADAPTER_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_provider.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
 	$(CJSON_DIR)/cJSON.c
 
@@ -184,7 +188,7 @@ CHATGPT_COMPATIBILITY_PROBE_SOURCES = \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_provider.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
 	$(CJSON_DIR)/cJSON.c
 
@@ -195,13 +199,18 @@ OTHER_OPENROUTER_COMPATIBILITY_PROBE_SOURCES = \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_provider.c \
-	$(SHARED_DIR)/strappy_cocoa.c \
+	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_core.c \
 	$(CJSON_DIR)/cJSON.c
 
 PROVIDER_REGISTRY_HARNESS_SOURCES = \
 	provider_registry_harness.c \
 	$(SHARED_DIR)/strappy_provider.c \
+	$(SHARED_DIR)/strappy_core.c
+
+CALENDAR_HARNESS_SOURCES = \
+	calendar_harness.c \
+	$(SHARED_DIR)/strappy_calendar.c \
 	$(SHARED_DIR)/strappy_core.c
 
 ifeq ($(shell uname -s),Darwin)
@@ -215,43 +224,46 @@ endif
 	openrouter-live-test openai-oauth-test \
 	openai-oauth-poc-self-test clean
 
-test: $(PROVIDER_REGISTRY_HARNESS) $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) $(OPENAI_OAUTH_HARNESS) $(CHATGPT_ADAPTER_HARNESS) $(CHATGPT_COMPATIBILITY_PROBE) | $(TEST_DIR)
+test: $(PROVIDER_REGISTRY_HARNESS) $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) $(OPENAI_OAUTH_HARNESS) $(CHATGPT_ADAPTER_HARNESS) $(CHATGPT_COMPATIBILITY_PROBE) $(CALENDAR_HARNESS) | $(TEST_DIR)
 	@echo "--- Running Linux shared-core test suite ---"
 	@echo "No live provider requests are made by this target."
-	@echo " [1/11] RUN  provider_registry_harness"
+	@echo " [1/12] RUN  provider_registry_harness"
 	./$(PROVIDER_REGISTRY_HARNESS)
-	@echo " [1/11] PASS provider_registry_harness"
-	@echo " [2/11] RUN  scanner_profile_harness"
+	@echo " [1/12] PASS provider_registry_harness"
+	@echo " [2/12] RUN  scanner_profile_harness"
 	./$(SCANNER_PROFILE_HARNESS)
-	@echo " [2/11] PASS scanner_profile_harness"
-	@echo " [3/11] RUN  database_query_harness"
+	@echo " [2/12] PASS scanner_profile_harness"
+	@echo " [3/12] RUN  database_query_harness"
 	./$(DATABASE_QUERY_HARNESS)
-	@echo " [3/11] PASS database_query_harness"
-	@echo " [4/11] RUN  bash_harness"
+	@echo " [3/12] PASS database_query_harness"
+	@echo " [4/12] RUN  bash_harness"
 	./$(BASH_HARNESS)
-	@echo " [4/11] PASS bash_harness"
-	@echo " [5/11] RUN  webview_harness"
+	@echo " [4/12] PASS bash_harness"
+	@echo " [5/12] RUN  webview_harness"
 	STRAPPY_WEBVIEW_PAGE_OUTPUT=$(WEBVIEW_PAGE_FIXTURE) ./$(WEBVIEW_HARNESS)
-	@echo " [5/11] PASS webview_harness"
-	@echo " [6/11] RUN  webview_behavior_harness.js"
+	@echo " [5/12] PASS webview_harness"
+	@echo " [6/12] RUN  webview_behavior_harness.js"
 	$(NODE) webview_behavior_harness.js $(WEBVIEW_PAGE_FIXTURE)
-	@echo " [6/11] PASS webview_behavior_harness.js"
-	@echo " [7/11] RUN  responses_harness"
+	@echo " [6/12] PASS webview_behavior_harness.js"
+	@echo " [7/12] RUN  responses_harness"
 	./$(RESPONSES_HARNESS)
-	@echo " [7/11] PASS responses_harness"
-	@echo " [8/11] RUN  prompt_generator_harness"
+	@echo " [7/12] PASS responses_harness"
+	@echo " [8/12] RUN  prompt_generator_harness"
 	./$(PROMPT_GENERATOR_HARNESS) $(SHARED_DIR)/Resources --check
-	@echo " [8/11] PASS prompt_generator_harness"
-	@echo " [9/11] RUN  openai_oauth_harness"
+	@echo " [8/12] PASS prompt_generator_harness"
+	@echo " [9/12] RUN  openai_oauth_harness"
 	./$(OPENAI_OAUTH_HARNESS)
-	@echo " [9/11] PASS openai_oauth_harness"
-	@echo " [10/11] RUN  chatgpt_adapter_harness"
+	@echo " [9/12] PASS openai_oauth_harness"
+	@echo " [10/12] RUN  chatgpt_adapter_harness"
 	./$(CHATGPT_ADAPTER_HARNESS)
-	@echo " [10/11] PASS chatgpt_adapter_harness"
-	@echo " [11/11] RUN  chatgpt credential-cache self-test"
+	@echo " [10/12] PASS chatgpt_adapter_harness"
+	@echo " [11/12] RUN  chatgpt credential-cache self-test"
 	./$(CHATGPT_COMPATIBILITY_PROBE) --credential-cache-self-test
-	@echo " [11/11] PASS chatgpt credential-cache self-test"
-	@echo "--- PASS: all 11 offline Linux shared-core checks completed ---"
+	@echo " [11/12] PASS chatgpt credential-cache self-test"
+	@echo " [12/12] RUN  calendar_harness"
+	./$(CALENDAR_HARNESS)
+	@echo " [12/12] PASS calendar_harness"
+	@echo "--- PASS: all 12 offline Linux shared-core checks completed ---"
 
 require-live-test-opt-in:
 	@test "$$STRAPPY_ALLOW_LIVE_PROVIDER_TESTS" = "YES" || \
@@ -345,6 +357,9 @@ $(OTHER_OPENROUTER_COMPATIBILITY_PROBE): $(OTHER_OPENROUTER_COMPATIBILITY_PROBE_
 
 $(PROVIDER_REGISTRY_HARNESS): $(PROVIDER_REGISTRY_HARNESS_SOURCES) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(PROVIDER_REGISTRY_HARNESS_SOURCES) $(PLATFORM_LIBS)
+
+$(CALENDAR_HARNESS): $(CALENDAR_HARNESS_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(CALENDAR_HARNESS_SOURCES) $(PLATFORM_LIBS)
 
 clean:
 	rm -rf $(BUILD_DIR) $(TEST_DIR) database_query_harness webview_harness responses_harness

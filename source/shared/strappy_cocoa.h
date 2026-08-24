@@ -32,9 +32,6 @@ int strappy_cocoa_copy_container_info(const char *container_path,
 int strappy_cocoa_parse_timestamp_unit(const char *value,
                                        strappy_cocoa_timestamp_unit *unit_out,
                                        char **error_out);
-char *strappy_cocoa_copy_iso8601_timestamp(long long unix_seconds,
-                                           int nanoseconds,
-                                           char **error_out);
 char *strappy_cocoa_copy_iso8601_timestamp_value(
   const char *timestamp,
   strappy_cocoa_timestamp_unit unit,
