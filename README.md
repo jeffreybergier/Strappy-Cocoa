@@ -88,7 +88,7 @@ and AppKit, except for the primary harness/chat/prompt view which is a webview.
 ```mermaid
 flowchart TB
     OpenRouter["OpenRouter<br/>Responses API"] <--> Core["Portable C backend<br/>HTTP · agent/tool loop · sessions"]
-    ChatGPT["ChatGPT Codex backend<br/>experimental subscription path"] <--> Core
+    ChatGPT["ChatGPT<br/>Codex Backend API"] <--> Core
     Core <--> DB[("SQLite<br/>strappy.sqlite")]
     Core <--> Bridge["Objective-C bridge<br/>StrappySession.m"]
     Bridge <--> UI["UIKit / AppKit UI<br/>session list · WebView timeline"]
@@ -145,11 +145,11 @@ Strappy only opens whitelisted databases and always in read-only mode:
   blocking writes, PRAGMA, ATTACH, and transactions
 - 100-row result limit
 
-Query results are sent to the provider selected for the session. For
-OpenRouter sessions, use
+Query results are sent through OpenRouter to the selected model provider. Use
 [OpenRouter Guardrails](https://openrouter.ai/docs/guides/features/guardrails)
-to control which upstream providers may receive your data. Experimental
-ChatGPT sessions send them to the ChatGPT Codex backend instead.
+to control which upstream providers may receive your data. If you are using
+your ChatGPT subscription, then your data is being sent to OpenAI. Strappy
+makes no other network requests.
 
 ## Coding Assistant
 
@@ -168,56 +168,46 @@ through a package manager or use the
 | iOS | armv7/arm64 | 5+ | 6, 8, 15 | `.deb`; jailbreak required |
 | macOS | PPC/i386/x86_64/arm64 | 10.4+ | 10.4–10.6, 10.8, 10.9, 10.14, 15 | zipped `.app` |
 
-The Mac build is one quad-fat binary. Older Mac apps often don't use SQLite
-databases, and newer macOS versions restrict access to some personal data.
-Personal Assistant may therefore find less useful data on a Mac.
+Modern macOS does a lot to protect user folders and databases. To ensure Strappy
+can access all of your data, I recommend giving Strappy full disk access
+permissions in System ~~Preferences~~ Settings. However, I had trouble getting
+this setting to stick until I signed the application with a Self-Signed
+certificate. So if you are still getting prompted to access folders and can't
+see critical databases like Calendar, AddressBook, chat.db, etc, then ask your
+favorite AI to use the `security` CLI to create a Self-Signed code-signing
+identity, then sign Strappy. After that, remove Strappy and re-add it in the
+full disk access security settings.
+
+I may look into distributing the app already signed with my self-signed
+certificate but I am not sure if that will make it easier or harder to open with
+or without gatekeeper getting in the way.
 
 ## Install from Releases
 
-Requires either an [OpenRouter](https://openrouter.ai/) API token or an
-eligible ChatGPT account using the experimental flow below.
+Strappy requires either an [OpenRouter](https://openrouter.ai/) API token or a
+ChatGPT subscription. 
 
-### Experimental ChatGPT subscription provider
-
-Preferences can sign in with ChatGPT using a device code. The access token,
-rotating refresh token, expiry, and account routing identifier are stored as one
-device-local Keychain credential; they are never treated as an OpenAI Platform
-API key. ChatGPT models are billed against eligible plan limits, so Strappy
-shows token usage without inventing a per-request dollar cost. OpenRouter
-credentials and conversations remain independent.
-
-This path uses an undocumented direct backend contract and is not approved for
-production distribution. OpenAI's documented embedding surface is
-[Codex App Server](https://learn.chatgpt.com/docs/app-server), whose
-documentation currently describes it as experimental and not supported for
-production workloads. [Device-code login](https://learn.chatgpt.com/docs/auth)
-may also need to be enabled by the user or workspace administrator. See
-[`PLAN.md`](PLAN.md) and the
-[secret-free compatibility report](docs/ChatGPTCompatibilityReport.md) before
-testing or distributing this feature.
-
-Set `STRAPPY_DISABLE_EXPERIMENTAL_CHATGPT=1` before launch to disable all new
-ChatGPT requests and sign-in/refresh activity without changing OpenRouter or
-deleting stored ChatGPT credentials. A build can also define
-`STRAPPY_ENABLE_EXPERIMENTAL_CHATGPT=0`.
+Note that the ChatGPT OAUTH support is unofficial and unapproved.
+Strappy does not try to pretend to be Codex or Pi. It identifies at itself. 
+So far ChatGPT OAUTH and subscription-based token usage has worked for me, but 
+it could result in your account getting banned. **Proceed with caution.**
 
 ### iOS
+
+You need to know whether your iPhone has a rootful or rootless jailbreak. If
+you don't know, try the rootful.deb file first as it will fail on rootless 
+jailbreaks.
 
 1. [Jailbreak](https://ios.cfw.guide) your iPhone
 1. Install OpenSSH from the package manager
 1. Download `Strappy-X.Y.Z-iOS-rootful.deb` or
-   `Strappy-X.Y.Z-iOS-rootless.deb`, as appropriate for your jailbreak, from
-   [Releases](https://github.com/jeffreybergier/Strappy-Cocoa/releases).
+   `Strappy-X.Y.Z-iOS-rootless.deb` from [Releases](https://github.com/jeffreybergier/Strappy-Cocoa/releases).
 1. Install it:
 
 ```sh
 scp Strappy-X.Y.Z-iOS-rootful.deb root@iphone-ip-address:~/strappy.deb
 ssh root@iphone-ip-address "dpkg -i ~/strappy.deb && rm ~/strappy.deb"
 ```
-
-Use the rootless package instead when `/var/jb` exists on the jailbroken
-device. Both packages contain the same universal armv7/arm64 executable; only
-the installation location differs.
 
 Depending on how new your computer is and how old your iPhone is, you may
 need to manually enable older RSA algorithms in order for SSH to connect:
@@ -249,8 +239,7 @@ ssh \
 
 In Preferences:
 
-1. Save your OpenRouter token, sign in to experimental ChatGPT, or configure
-   both.
+1. Add your accounts (OpenRouter and/or ChatGPT OAUTH)
 2. Select the models you want to whitelist
 3. Scan for databases and then whitelist the ones you want
 4. (Optional) Study databases to save tokens in future prompts
@@ -328,23 +317,22 @@ Mac with a screenshot. Please follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 If you want to contribute, these are the next items I plan to add myself:
 
-- Obtain a production-supported and explicitly permitted ChatGPT integration
-  path; the experimental implementation is complete enough for compatibility
-  testing but remains release-gated.
-- Improve macOS Coding Agent skill and toolchain: The mac already has a development
-  toolchain in Xcode, but it changes over time. Also I need to be able to 
-  provide AltivecCore and AltivecCocoa to macs (right now the toolchain only supports iPhone)
-- Add arm64 support to the iPhone development toolchain.
-- Remote Access: I want to be able to access Strappy on my iPhone from my computer.
+- [X] OpenAI OAUTH Support: I want to use my ChatGPT monthly plan in Strappy. This
+      is sort of a gray area I think? So not sure how well this will work out.
+- [ ] Improve macOS Coding Agent skill and toolchain: The mac already has a development
+      toolchain in Xcode, but it changes over time. Also I need to be able to 
+      provide AltivecCore and AltivecCocoa to macs (right now the toolchain only supports iPhone)
+- [ ] Add arm64 support to the iPhone development toolchain.
+- [ ] Remote Access: I want to be able to access Strappy on my iPhone from my computer.
     - This could be done via some sort of CLI on the iPhone that I
       can SSH into.
     - Or, this could be done by hosting a 
       [little web server](https://github.com/jeremycw/httpserver.h) 
       inside of Strappy 
-- Context Management: Currently there are checkboxes on each round to allow
-  full manual control of context. But I want to add an option where previous
-  prompts have all of their context ignored except the original prompt and the
-  final answer. This should help shrink the context a lot.
+- [ ] Context Management: Currently there are checkboxes on each round to allow
+      full manual control of context. But I want to add an option where previous
+      prompts have all of their context ignored except the original prompt and the
+      final answer. This should help shrink the context a lot.
 
 ## Status and license
 
