@@ -1,6 +1,7 @@
 #include "strappy_client.h"
 
 #include "strappy_core.h"
+#include "strappy_debug_capture.h"
 #include "strappy_identity.h"
 #include "strappy_sse.h"
 
@@ -9,6 +10,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -635,6 +637,7 @@ void strappy_responses_http_result_destroy(strappy_responses_http_result *result
     return;
   }
   free(result->response_json);
+  free(result->raw_response_body);
   free(result->response_headers);
   free(result->effective_url);
   free(result->transport_error);
@@ -1202,6 +1205,28 @@ int strappy_client_send_provider_responses_json_with_transport(
           sse_context.raw_response.data : "") :
         ((response_buffer.data != NULL) ? response_buffer.data : ""));
   }
+#if STRAPPY_RAW_JSON_DEBUG_CAPTURE
+  {
+    const strappy_http_buffer *raw_response;
+
+    raw_response = uses_sse ? &sse_context.raw_response : &response_buffer;
+    result->raw_response_body = (char *)malloc(raw_response->length + 1U);
+    /* Diagnostic capture is best effort and must not fail the API request. */
+    if (result->raw_response_body != NULL) {
+      if (raw_response->length > 0U) {
+        memcpy(result->raw_response_body,
+               raw_response->data,
+               raw_response->length);
+      }
+      result->raw_response_body[raw_response->length] = '\0';
+      result->raw_response_body_length = raw_response->length;
+    } else {
+      printf("Strappy debug capture skipped raw response: could not allocate "
+             "%lu bytes.\n",
+             (unsigned long)(raw_response->length + 1U));
+    }
+  }
+#endif
   result->response_headers = strappy_string_duplicate(
     (header_context.raw_headers.data != NULL) ?
       header_context.raw_headers.data : "");

@@ -6,6 +6,7 @@
 #include "strappy_config.h"
 #include "strappy_core.h"
 #include "strappy_db.h"
+#include "strappy_debug_capture.h"
 #include "strappy_prompt.h"
 #include "strappy_quality_policy.h"
 #include "strappy_skills.h"
@@ -2388,6 +2389,10 @@ static const char *strappy_responses_call_state(
 static int strappy_responses_finish_call(
   const char *session_db_path,
   long long call_id,
+  const char *provider_id,
+  const char *provider_account_id,
+  const char *model_id,
+  const char *request_kind,
   const strappy_responses_http_result *http,
   const strappy_responses_analysis *analysis,
   int client_ok,
@@ -2396,6 +2401,8 @@ static int strappy_responses_finish_call(
   char **error_out)
 {
   strappy_response_call_finish_input input;
+  strappy_response_call_identity identity;
+  char *debug_error;
 
   memset(&input, 0, sizeof(input));
   input.call_id = call_id;
@@ -2437,6 +2444,28 @@ static int strappy_responses_finish_call(
     input.response_headers = "";
     input.response_json = "";
   }
+  debug_error = NULL;
+  if (strappy_db_get_response_call_identity(session_db_path,
+                                            call_id,
+                                            &identity,
+                                            &debug_error)) {
+    strappy_debug_capture_response(
+      session_db_path,
+      &identity,
+      provider_id,
+      provider_account_id,
+      model_id,
+      request_kind,
+      input.state,
+      output_is_canonical,
+      input.http_status,
+      input.started_at_ms,
+      input.completed_at_ms,
+      input.content_type,
+      (http != NULL) ? http->raw_response_body : NULL,
+      (http != NULL) ? http->raw_response_body_length : 0U);
+  }
+  free(debug_error);
   return strappy_db_finish_response_call(session_db_path, &input, error_out);
 }
 
@@ -3098,6 +3127,25 @@ static int strappy_responses_send_round(
                                         error_out)) {
       return 0;
     }
+    {
+      strappy_response_call_identity debug_identity;
+      char *debug_error;
+
+      debug_error = NULL;
+      if (strappy_db_get_response_call_identity(session_db_path,
+                                                call_id,
+                                                &debug_identity,
+                                                &debug_error)) {
+        strappy_debug_capture_request(session_db_path,
+                                      &debug_identity,
+                                      runtime->provider_id,
+                                      runtime->provider_account_id,
+                                      runtime->model_id,
+                                      begin.request_kind,
+                                      request_json);
+      }
+      free(debug_error);
+    }
     if (round_call_id_out != NULL) {
       *round_call_id_out = call_id;
     }
@@ -3151,6 +3199,10 @@ static int strappy_responses_send_round(
     if (client_ok && !analyze_ok) {
       if (strappy_responses_finish_call(session_db_path,
                                         call_id,
+                                        runtime->provider_id,
+                                        runtime->provider_account_id,
+                                        runtime->model_id,
+                                        begin.request_kind,
                                         &http,
                                         &analysis,
                                         0,
@@ -3254,6 +3306,10 @@ static int strappy_responses_send_round(
     }
     if (!strappy_responses_finish_call(session_db_path,
                                        call_id,
+                                       runtime->provider_id,
+                                       runtime->provider_account_id,
+                                       runtime->model_id,
+                                       begin.request_kind,
                                        &http,
                                        &analysis,
                                        client_ok,

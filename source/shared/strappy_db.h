@@ -214,6 +214,17 @@ typedef struct strappy_response_call_finish_input {
   const strappy_answer_quality_audit_input *answer_quality_audit;
 } strappy_response_call_finish_input;
 
+typedef struct strappy_response_call_identity {
+  long long session_id;
+  long long session_created_at_ms;
+  long long turn_id;
+  long turn_ordinal;
+  long long model_request_id;
+  long round_index;
+  long long http_attempt_id;
+  long attempt_index;
+} strappy_response_call_identity;
+
 typedef struct strappy_response_item_raw_record {
   long long item_id;
   char *raw_json;
@@ -657,6 +668,11 @@ int strappy_db_begin_response_call(
   const char *db_path,
   const strappy_response_call_begin_input *input,
   long long *call_id_out,
+  char **error_out);
+int strappy_db_get_response_call_identity(
+  const char *db_path,
+  long long call_id,
+  strappy_response_call_identity *identity_out,
   char **error_out);
 int strappy_db_finish_response_call(
   const char *db_path,

@@ -182,6 +182,12 @@ House style for Strappy source:
     objects and arrays as `structured_documents` / `structured_nodes`. Never
     persist request bodies, response bodies, headers, or raw JSON. Reconstruct
     provider-shaped JSON transiently only at an API or compatibility boundary.
+    The one exception is the temporary filesystem diagnostic capture under
+    `Library/Application Support/Strappy/debug`: while
+    `STRAPPY_RAW_JSON_DEBUG_CAPTURE` is enabled, it stores exact request JSON,
+    the exact unprocessed response body in small per-attempt files keyed by the
+    existing SQLite ledger IDs. Never put this
+    diagnostic data in SQLite and never capture authorization or OAuth headers.
     Answer quality is a persisted per-session option whose initial default is
     off. The iOS Session Options > Limits section exposes it for active sessions
     and Preferences > Session Defaults > Limits exposes it for future sessions.

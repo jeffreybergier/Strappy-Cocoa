@@ -2295,6 +2295,57 @@ int strappy_db_begin_response_call(
                                                  error_out);
 }
 
+int strappy_db_get_response_call_identity(
+  const char *db_path,
+  long long call_id,
+  strappy_response_call_identity *identity_out,
+  char **error_out)
+{
+  static const char *sql =
+    "SELECT s.id, s.created_at_ms, t.id, t.ordinal, r.id, r.round_index, "
+    "a.id, a.attempt_index FROM http_attempts a "
+    "JOIN model_requests r ON r.id = a.request_id "
+    "JOIN turns t ON t.id = r.turn_id "
+    "JOIN sessions s ON s.id = t.session_id WHERE a.id = ?;";
+  sqlite3 *db;
+  sqlite3_stmt *stmt;
+  int rc;
+
+  if ((db_path == NULL) || (db_path[0] == '\0') || (call_id <= 0LL) ||
+      (identity_out == NULL)) {
+    strappy_set_error(error_out, "Responses call identity is incomplete.");
+    return 0;
+  }
+  memset(identity_out, 0, sizeof(*identity_out));
+  if (!strappy_db_open(db_path, &db, error_out)) {
+    return 0;
+  }
+  stmt = NULL;
+  rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)call_id) != SQLITE_OK) ||
+      (sqlite3_step(stmt) != SQLITE_ROW)) {
+    strappy_set_formatted_error(error_out,
+                                "Could not read Responses call identity: %s",
+                                sqlite3_errmsg(db));
+    sqlite3_finalize(stmt);
+    strappy_db_release(db);
+    return 0;
+  }
+  identity_out->session_id = (long long)sqlite3_column_int64(stmt, 0);
+  identity_out->session_created_at_ms =
+    (long long)sqlite3_column_int64(stmt, 1);
+  identity_out->turn_id = (long long)sqlite3_column_int64(stmt, 2);
+  identity_out->turn_ordinal = (long)sqlite3_column_int64(stmt, 3);
+  identity_out->model_request_id = (long long)sqlite3_column_int64(stmt, 4);
+  identity_out->round_index = (long)sqlite3_column_int64(stmt, 5);
+  identity_out->http_attempt_id = (long long)sqlite3_column_int64(stmt, 6);
+  identity_out->attempt_index = (long)sqlite3_column_int64(stmt, 7);
+  sqlite3_finalize(stmt);
+  strappy_db_release(db);
+  return 1;
+}
+
 static const char *strappy_db_semantic_json_string(cJSON *root,
                                                    const char *path)
 {

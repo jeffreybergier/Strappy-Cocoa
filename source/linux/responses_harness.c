@@ -24,6 +24,7 @@
 #include "../shared/strappy_config.h"
 #include "../shared/strappy_core.h"
 #include "../shared/strappy_db.h"
+#include "../shared/strappy_debug_capture.h"
 #include "../shared/strappy_identity.h"
 #include "../shared/strappy_prompt.h"
 #include "../shared/strappy_quality_policy.h"
@@ -9885,9 +9886,146 @@ cleanup:
   return ok;
 }
 
+#if STRAPPY_RAW_JSON_DEBUG_CAPTURE
+static int harness_test_raw_json_debug_capture(void)
+{
+  static const char request_json[] = "{\"model\":\"gpt-5.6-terra\"}";
+  static const char annotation_json[] =
+    "{\"type\":\"response.output_text.annotation.added\","
+    "\"annotation_index\":0}";
+  static const char normalized_json[] =
+    "{\"id\":\"resp-test\",\"status\":\"completed\"}";
+  char temporary_directory[] = "/tmp/strappy-debug-capture-XXXXXX";
+  char attempt_directory[1024];
+  char path[1200];
+  char raw_sse[512];
+  char db_path[1024];
+  struct stat info;
+  strappy_response_call_identity identity;
+  int ok;
+
+  if (mkdtemp(temporary_directory) == NULL) {
+    return harness_fail("Could not create debug-capture fixture directory.");
+  }
+  (void)snprintf(db_path,
+                 sizeof(db_path),
+                 "%s/strappy.sqlite",
+                 temporary_directory);
+  memset(&identity, 0, sizeof(identity));
+  identity.session_id = 17LL;
+  identity.session_created_at_ms = 1787660494000LL;
+  identity.turn_id = 123LL;
+  identity.turn_ordinal = 0L;
+  identity.model_request_id = 211LL;
+  identity.round_index = 2L;
+  identity.http_attempt_id = 215LL;
+  identity.attempt_index = 1L;
+  (void)snprintf(raw_sse,
+                 sizeof(raw_sse),
+                 "event: response.output_text.annotation.added\r\n"
+                 "data: %s\r\n\r\n"
+                 "event: response.completed\r\n"
+                 "data: %s\r\n\r\n",
+                 annotation_json,
+                 normalized_json);
+  strappy_debug_capture_request(db_path,
+                                &identity,
+                                "openai_chatgpt",
+                                "acct-test",
+                                "openai_chatgpt:gpt-5.6-terra",
+                                "retry",
+                                request_json);
+  strappy_debug_capture_response(db_path,
+                                 &identity,
+                                 "openai_chatgpt",
+                                 "acct-test",
+                                 "openai_chatgpt:gpt-5.6-terra",
+                                 "retry",
+                                 "completed",
+                                 1,
+                                 200L,
+                                 1000LL,
+                                 2000LL,
+                                 "text/event-stream",
+                                 raw_sse,
+                                 strlen(raw_sse));
+  (void)snprintf(
+    attempt_directory,
+    sizeof(attempt_directory),
+    "%s/debug/sessions/session-17/turns/turn-123-ordinal-000000/"
+    "request-211-round-002/attempt-215-index-001",
+    temporary_directory);
+  (void)snprintf(path, sizeof(path), "%s/request.json", attempt_directory);
+  ok = harness_file_content_equals(path, request_json) &&
+    (stat(path, &info) == 0) && ((info.st_mode & (mode_t)0777) == (mode_t)0600);
+  (void)snprintf(path,
+                 sizeof(path),
+                 "%s/response-body.json",
+                 attempt_directory);
+  ok = ok && harness_file_content_equals(path, raw_sse) &&
+    (stat(path, &info) == 0) && ((info.st_mode & (mode_t)0777) == (mode_t)0600);
+  (void)snprintf(path, sizeof(path), "%s/exchange.json", attempt_directory);
+  ok = ok && harness_file_contains_text(path, "\"session_id\":17") &&
+    harness_file_contains_text(path, "\"model_request_id\":211") &&
+    harness_file_contains_text(path, "\"http_attempt_id\":215") &&
+    harness_file_contains_text(path, "\"state\":\"completed\"");
+  if (!ok) {
+    fprintf(stderr, "Raw JSON debug capture fixture failed.\n");
+  }
+  (void)unlink(path);
+  (void)snprintf(path, sizeof(path), "%s/request.json", attempt_directory);
+  (void)unlink(path);
+  (void)snprintf(path,
+                 sizeof(path),
+                 "%s/response-body.json",
+                 attempt_directory);
+  (void)unlink(path);
+  (void)rmdir(attempt_directory);
+  (void)snprintf(path,
+                 sizeof(path),
+                 "%s/debug/sessions/session-17/turns/"
+                 "turn-123-ordinal-000000/request-211-round-002",
+                 temporary_directory);
+  (void)rmdir(path);
+  (void)snprintf(path,
+                 sizeof(path),
+                 "%s/debug/sessions/session-17/turns/turn-123-ordinal-000000",
+                 temporary_directory);
+  (void)rmdir(path);
+  (void)snprintf(path,
+                 sizeof(path),
+                 "%s/debug/sessions/session-17/turns",
+                 temporary_directory);
+  (void)rmdir(path);
+  (void)snprintf(path,
+                 sizeof(path),
+                 "%s/debug/sessions/session-17/session.json",
+                 temporary_directory);
+  (void)unlink(path);
+  (void)snprintf(path,
+                 sizeof(path),
+                 "%s/debug/sessions/session-17",
+                 temporary_directory);
+  (void)rmdir(path);
+  (void)snprintf(path,
+                 sizeof(path),
+                 "%s/debug/sessions",
+                 temporary_directory);
+  (void)rmdir(path);
+  (void)snprintf(path, sizeof(path), "%s/debug", temporary_directory);
+  (void)rmdir(path);
+  (void)rmdir(temporary_directory);
+  return ok;
+}
+#endif
+
 int main(void)
 {
-  if (harness_test_unicode_emoji_scan() &&
+  if (
+#if STRAPPY_RAW_JSON_DEBUG_CAPTURE
+      harness_test_raw_json_debug_capture() &&
+#endif
+      harness_test_unicode_emoji_scan() &&
       harness_test_working_directory_selection() &&
       harness_test_request_surfaces() &&
       harness_test_ledger() &&

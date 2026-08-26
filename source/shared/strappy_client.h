@@ -3,12 +3,16 @@
 
 #include "strappy_config.h"
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 typedef struct strappy_responses_http_result {
   char *response_json;
+  char *raw_response_body;
+  size_t raw_response_body_length;
   char *response_headers;
   char *effective_url;
   char *transport_error;
