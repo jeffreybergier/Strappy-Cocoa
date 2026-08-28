@@ -37,19 +37,19 @@ the browser's local OPFS data, and the browser contacts OpenRouter directly.
 
 ### 1. Establish the web build and smoke-test loop
 
-- [ ] Add `source/web/Makefile` with explicit Emscripten inputs and outputs.
-- [ ] Add a minimal `index.html`, application script, and Web Worker.
-- [ ] Add a `web` service to the existing `compose.yml` that serves the built
+- [x] Add `source/web/Makefile` with explicit Emscripten inputs and outputs.
+- [x] Add a minimal `index.html`, application script, and Web Worker.
+- [x] Add a `web` service to the existing `compose.yml` that serves the built
   static files on a fixed `http://localhost:8765` origin.
-- [ ] Bind the Compose port to `127.0.0.1` only, mount the build output
+- [x] Bind the Compose port to `127.0.0.1` only, mount the build output
   read-only, and pass no API key or other credential into the container.
-- [ ] Configure the static server to return the correct Wasm MIME type and
+- [x] Configure the static server to return the correct Wasm MIME type and
   disable caching of the entry HTML during development.
-- [ ] Compile `strappy_core.c` and one small exported C function to Wasm.
-- [ ] Package only the shared resources required by World Knowledge.
-- [ ] Add a `make -C source/web clean test` smoke test that loads the module and
+- [x] Compile `strappy_core.c` and one small exported C function to Wasm.
+- [x] Package only the shared resources required by World Knowledge.
+- [x] Add a `make -C source/web clean test` smoke test that loads the module and
   calls the exported function.
-- [ ] Keep the existing native and Linux builds unchanged.
+- [x] Keep the existing native and Linux builds unchanged.
 
 Exit condition: `docker compose up web` serves the application at the fixed
 localhost origin, and the browser and a headless test can load the Wasm module

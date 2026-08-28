@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Strappy WebAssembly</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: system-ui, sans-serif;
+    }
+
+    body {
+      display: grid;
+      min-height: 100vh;
+      margin: 0;
+      place-items: center;
+    }
+
+    main {
+      max-width: 36rem;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    #status[data-state="ready"] {
+      color: #16803c;
+    }
+
+    #status[data-state="error"] {
+      color: #c42b1c;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Strappy WebAssembly</h1>
+    <p id="status" role="status" aria-live="polite">Loading shared C code…</p>
+    <p id="detail" hidden></p>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

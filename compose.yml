@@ -1,4 +1,7 @@
 services:
+
+## Altivec Intelligence / Native Dev and Testing
+
   altivec:
     image: ghcr.io/jeffreybergier/altivec-intelligence:latest
     working_dir: /repo/Strappy
@@ -60,6 +63,8 @@ services:
       - altivec-sdk-modern:/osxcross/modern/SDK
     entrypoint: ["make", "-C", "source"]
 
+## WebAssembly Containers Developer and Testing
+
   wasm-build:
     profiles:
       - tools
@@ -74,8 +79,37 @@ services:
     ports:
       - "127.0.0.1:8765:80"
     volumes:
-      - ./source/web/build:/usr/share/nginx/html:ro
+      - ./source/web/build-release:/usr/share/nginx/html:ro
       - ./source/web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+  browser-test:
+    profiles:
+      - tools
+    image: selenium/standalone-chromium:4.35.0-20250909
+    shm_size: 2gb
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://localhost:4444/status >/dev/null"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  web-test:
+    profiles:
+      - tools
+    image: emscripten/emsdk:6.0.8
+    working_dir: /repo/Strappy
+    environment:
+      STRAPPY_WEB_BASE_URL: http://web
+      STRAPPY_WEBDRIVER_URL: http://browser-test:4444
+    volumes:
+      - .:/repo/Strappy
+    depends_on:
+      web:
+        condition: service_started
+      browser-test:
+        condition: service_healthy
+    entrypoint: ["make", "-C", "source/web"]
+    command: ["test"]
 
 volumes:
   cache:
