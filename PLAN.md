@@ -33,6 +33,17 @@ It requires no application backend: a Docker Compose service serves only the
 static HTML, JavaScript, Worker, Wasm, and resource files. SQLite remains in
 the browser's local OPFS data, and the browser contacts OpenRouter directly.
 
+## Implementation ground rule
+
+Reuse as much existing portable C code as possible without rewriting it for
+WebAssembly. Web-specific code is limited to unavoidable browser platform
+adapters such as Fetch, Worker messaging, OPFS connection policy, and DOM
+integration. Request construction, provider behavior, response parsing,
+limits, errors, persistence, tools, prompts, and rendering remain owned by the
+shared C modules. Any JavaScript-only behavior introduced by an early transport
+spike must be removed rather than evolved once the corresponding shared C path
+is connected.
+
 ## Implementation order
 
 ### 1. Establish the web build and smoke-test loop
@@ -57,18 +68,19 @@ and call shared C code.
 
 ### 2. Prove direct OpenRouter browser transport
 
-- [ ] Add an API-key form whose input is immediately handed to the Worker.
-- [ ] Keep the authoritative key only in Worker-owned volatile state.
-- [ ] Make a minimal JavaScript `fetch()` request to OpenRouter's Responses
-  endpoint with cancellation and streamed response-body handling.
-- [ ] Verify CORS, HTTP errors, invalid-key behavior, and an SSE response.
-- [ ] Add explicit `clear key` and Worker-shutdown paths.
+- [x] Add an API-key form whose input is immediately handed to the Worker.
+- [x] Keep the authoritative key only in Worker-owned volatile state.
+- [x] Make a minimal JavaScript `fetch()` request to OpenRouter's Responses
+  endpoint with cancellation and one non-streaming JSON response, matching the
+  native OpenRouter request profile.
+- [x] Verify CORS, HTTP errors, invalid-key behavior, and a JSON response.
+- [x] Add explicit `clear key` and Worker-shutdown paths.
 
 This step intentionally bypasses the full Strappy Responses runtime. It proves
 the external dependency before restructuring the C client.
 
 Exit condition: a user can enter a key, make one bounded test request, observe
-streamed events, clear the key, and confirm that reloading forgets it.
+the JSON response, clear the key, and confirm that reloading forgets it.
 
 ### 3. Split the shared client transport
 
@@ -78,6 +90,12 @@ streamed events, clear the key, and confirm that reloading forgets it.
 - [ ] Add `strappy_client_transport.h` for the internal backend contract.
 - [ ] Add `strappy_client_web.c` for the Emscripten/JavaScript bridge and
   `source/web/strappy_client_fetch.js` for Fetch.
+- [ ] Keep provider request construction and JSON response interpretation in
+  shared C; the Fetch bridge only transfers request and response bytes plus
+  transport metadata.
+- [ ] Have shared C omit optional provider headers that the browser cannot send
+  because of Fetch or CORS restrictions; do not encode provider-header policy
+  in the JavaScript bridge.
 - [ ] Link exactly one backend per target.
 - [ ] Preserve the current synchronous public API with Asyncify for the PoC; leave
   conversion to an explicit asynchronous state machine until after the PoC.

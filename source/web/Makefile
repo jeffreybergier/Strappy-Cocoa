@@ -20,7 +20,7 @@ WEB_BUILD_INPUTS := Makefile $(WEB_SOURCES) $(WEB_HEADERS)
 WEB_JAVASCRIPT := $(BUILD_DIR)/$(MODULE_NAME).js
 WEB_WASM := $(BUILD_DIR)/$(MODULE_NAME).wasm
 WEB_OUTPUTS := $(WEB_JAVASCRIPT) $(WEB_WASM)
-STATIC_INPUTS := index.html app.js worker.js
+STATIC_INPUTS := index.html app.js worker.js openrouter_transport.js
 STATIC_OUTPUTS := $(addprefix $(BUILD_DIR)/,$(STATIC_INPUTS))
 WORLD_KNOWLEDGE_RESOURCE_NAMES := \
 	AssistantSets.json \
