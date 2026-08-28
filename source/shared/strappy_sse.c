@@ -10,6 +10,147 @@
 #define STRAPPY_SSE_MAX_STREAM_BYTES (64U * 1024U * 1024U)
 #define STRAPPY_SSE_MAX_OUTPUT_ITEMS 4096U
 
+static int strappy_sse_replace_missing_citations(const char *text,
+                                                 char **normalized_out,
+                                                 char **error_out)
+{
+  static const char marker_start[] = "\356\210\200cite\356\210\202";
+  static const char marker_end[] = "\356\210\201";
+  static const char replacement[] = "**`[Citation Missing]`**";
+  const char *cursor;
+  const char *start;
+  const char *end;
+  char *normalized;
+  char *output;
+  size_t normalized_length;
+
+  *normalized_out = NULL;
+  cursor = text;
+  normalized_length = 0U;
+  while ((start = strstr(cursor, marker_start)) != NULL) {
+    size_t prefix_length;
+
+    end = strstr(start + sizeof(marker_start) - 1U, marker_end);
+    if (end == NULL) {
+      break;
+    }
+    prefix_length = (size_t)(start - cursor);
+    if ((prefix_length > ((size_t)-1) - normalized_length) ||
+        ((sizeof(replacement) - 1U) >
+         ((size_t)-1) - normalized_length - prefix_length)) {
+      strappy_set_error(error_out,
+                        "ChatGPT citation fallback text is too large.");
+      return 0;
+    }
+    normalized_length += prefix_length + sizeof(replacement) - 1U;
+    cursor = end + sizeof(marker_end) - 1U;
+  }
+  if (cursor == text) {
+    return 1;
+  }
+  if (strlen(cursor) >= ((size_t)-1) - normalized_length) {
+    strappy_set_error(error_out,
+                      "ChatGPT citation fallback text is too large.");
+    return 0;
+  }
+  normalized_length += strlen(cursor);
+  normalized = (char *)malloc(normalized_length + 1U);
+  if (normalized == NULL) {
+    strappy_set_error(error_out,
+                      "Could not allocate ChatGPT citation fallback text.");
+    return 0;
+  }
+
+  cursor = text;
+  output = normalized;
+  while ((start = strstr(cursor, marker_start)) != NULL) {
+    size_t prefix_length;
+
+    end = strstr(start + sizeof(marker_start) - 1U, marker_end);
+    if (end == NULL) {
+      break;
+    }
+    prefix_length = (size_t)(start - cursor);
+    memcpy(output, cursor, prefix_length);
+    output += prefix_length;
+    memcpy(output, replacement, sizeof(replacement) - 1U);
+    output += sizeof(replacement) - 1U;
+    cursor = end + sizeof(marker_end) - 1U;
+  }
+  memcpy(output, cursor, strlen(cursor) + 1U);
+  *normalized_out = normalized;
+  return 1;
+}
+
+static int strappy_sse_normalize_missing_citations(cJSON *item,
+                                                   char **error_out)
+{
+  cJSON *content;
+  cJSON *part;
+
+  if ((item == NULL) || !cJSON_IsObject(item)) {
+    return 1;
+  }
+  content = cJSON_GetObjectItemCaseSensitive(item, "content");
+  if ((content == NULL) || !cJSON_IsArray(content)) {
+    return 1;
+  }
+  for (part = content->child; part != NULL; part = part->next) {
+    cJSON *annotations;
+    cJSON *text;
+    cJSON *replacement;
+    char *normalized;
+
+    if (!cJSON_IsObject(part)) {
+      continue;
+    }
+    annotations = cJSON_GetObjectItemCaseSensitive(part, "annotations");
+    if (cJSON_IsArray(annotations) && (cJSON_GetArraySize(annotations) > 0)) {
+      continue;
+    }
+    text = cJSON_GetObjectItemCaseSensitive(part, "text");
+    if (!cJSON_IsString(text) || (text->valuestring == NULL)) {
+      continue;
+    }
+    normalized = NULL;
+    if (!strappy_sse_replace_missing_citations(text->valuestring,
+                                               &normalized,
+                                               error_out)) {
+      return 0;
+    }
+    if (normalized == NULL) {
+      continue;
+    }
+    replacement = cJSON_CreateString(normalized);
+    free(normalized);
+    if ((replacement == NULL) ||
+        !cJSON_ReplaceItemInObjectCaseSensitive(part,
+                                                "text",
+                                                replacement)) {
+      cJSON_Delete(replacement);
+      strappy_set_error(error_out,
+                        "Could not store ChatGPT citation fallback text.");
+      return 0;
+    }
+  }
+  return 1;
+}
+
+static int strappy_sse_normalize_output(cJSON *output, char **error_out)
+{
+  cJSON *item;
+
+  if ((output == NULL) || !cJSON_IsArray(output)) {
+    return 1;
+  }
+  for (item = output->child; item != NULL; item = item->next) {
+    if (!strappy_sse_normalize_missing_citations(item, error_out)) {
+      return 0;
+    }
+  }
+  return 1;
+}
+
 static int strappy_sse_store_completed_output(strappy_sse_parser *parser,
                                                cJSON *event,
                                                char **error_out)
@@ -22,6 +163,9 @@ static int strappy_sse_store_completed_output(strappy_sse_parser *parser,
   if (!cJSON_IsObject(item)) {
     strappy_set_error(error_out,
                       "ChatGPT completed output event has no item object.");
+    return 0;
+  }
+  if (!strappy_sse_normalize_missing_citations(item, error_out)) {
     return 0;
   }
   if (parser->completed_output_count >= STRAPPY_SSE_MAX_OUTPUT_ITEMS) {
@@ -135,6 +279,9 @@ static int strappy_sse_store_terminal(strappy_sse_parser *parser,
       return 0;
     }
     response_output = cJSON_GetObjectItemCaseSensitive(response, "output");
+    if (!strappy_sse_normalize_output(response_output, error_out)) {
+      return 0;
+    }
     completed_output = (cJSON *)parser->completed_output;
     if ((completed_output != NULL) &&
         ((!cJSON_IsArray(response_output)) ||

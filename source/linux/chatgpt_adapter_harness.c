@@ -351,6 +351,52 @@ static int chatgpt_harness_run_parser_matrix(void)
       return 0;
     }
   }
+
+  {
+    static const char stream[] =
+      "data: {\"type\":\"response.output_text.delta\","
+        "\"delta\":\"One \\ue200cite\"}\n\n"
+      "data: {\"type\":\"response.output_text.delta\","
+        "\"delta\":\"\\ue202\"}\n\n"
+      "data: {\"type\":\"response.output_text.delta\","
+        "\"delta\":\"turn0search0\"}\n\n"
+      "data: {\"type\":\"response.output_text.delta\","
+        "\"delta\":\"\\ue201.\"}\n\n"
+      "data: {\"type\":\"response.output_item.done\","
+        "\"output_index\":0,\"item\":{\"type\":\"message\","
+        "\"id\":\"msg-citation\",\"role\":\"assistant\","
+        "\"status\":\"completed\",\"content\":[{"
+        "\"type\":\"output_text\","
+        "\"text\":\"One \\ue200cite\\ue202turn0search0\\ue201.\","
+        "\"annotations\":[]}]}}\n\n"
+      "data: {\"type\":\"response.completed\",\"response\":{"
+        "\"id\":\"resp-citation\",\"status\":\"completed\","
+        "\"output\":[]}}\n\n";
+    strappy_sse_parser parser;
+    char *terminal_json;
+    char *error;
+    int ok;
+
+    strappy_sse_parser_init(&parser);
+    error = NULL;
+    ok = chatgpt_harness_feed_chunks(&parser, stream, &error) &&
+      strappy_sse_parser_finish(&parser, &error);
+    terminal_json = strappy_sse_parser_take_terminal_json(&parser);
+    ok = ok && (terminal_json != NULL) &&
+      (strstr(terminal_json,
+              "\"text\":\"One **`[Citation Missing]`**.\"") !=
+       NULL) &&
+      (strstr(terminal_json, "\\ue200cite") == NULL) &&
+      (strstr(terminal_json, "\356\210\200cite") == NULL);
+    free(terminal_json);
+    strappy_free_string(error);
+    strappy_sse_parser_destroy(&parser);
+    if (!ok) {
+      fprintf(stderr, "Missing citation fallback fixture failed.\n");
+      return 0;
+    }
+  }
+
   if (!strappy_provider_response_is_plan_limit(
         STRAPPY_PROVIDER_KIND_OPENAI_CHATGPT,
         429L,
