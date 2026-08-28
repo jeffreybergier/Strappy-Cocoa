@@ -30,6 +30,10 @@ typedef struct strappy_responses_http_result {
   char *rate_limit_reset_tokens;
   long http_status;
   long retry_after_seconds;
+  /* Transport-neutral completion code. Zero means the backend completed
+   * normally; nonzero values are backend-defined diagnostics. */
+  long transport_code;
+  /* Legacy native persistence field. Mirrors transport_code. */
   long curl_code;
   long long started_at_ms;
   long long completed_at_ms;

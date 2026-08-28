@@ -1,5 +1,3 @@
-import { makeOpenRouterTestRequest } from "./openrouter_transport.js";
-
 const baseUrl = process.env.STRAPPY_WEB_BASE_URL;
 const webdriverUrl = process.env.STRAPPY_WEBDRIVER_URL;
 const expectedResources = [
@@ -87,131 +85,6 @@ async function verifyStaticAssets() {
     throw new Error("Web build unexpectedly packages database guidance.");
   }
 
-  const transportResponse = await fetch(`${baseUrl}/openrouter_transport.js`);
-  if (!transportResponse.ok) {
-    throw new Error(`OpenRouter transport returned HTTP ${transportResponse.status}.`);
-  }
-}
-
-async function verifyTransportModule() {
-  const canaryKey = "not-a-real-phase-two-key";
-  let capturedUrl;
-  let capturedOptions;
-  const fetchImplementation = async (url, options) => {
-    capturedUrl = url;
-    capturedOptions = options;
-    return {
-      ok: true,
-      status: 200,
-      headers: new Headers({ "Content-Type": "application/json" }),
-      async json() {
-        return {
-          model: "example/test-model",
-          status: "completed",
-          output: [{
-            type: "message",
-            content: [{ type: "output_text", text: "Strappy transport works." }],
-          }],
-        };
-      },
-    };
-  };
-  const result = await makeOpenRouterTestRequest(
-    canaryKey,
-    new AbortController().signal,
-    fetchImplementation,
-  );
-  const requestBody = JSON.parse(capturedOptions.body);
-  if (capturedUrl !== "https://openrouter.ai/api/v1/responses") {
-    throw new Error("Transport used an unexpected OpenRouter endpoint.");
-  }
-  if (capturedOptions.headers.Authorization !== `Bearer ${canaryKey}`) {
-    throw new Error("Transport did not place the key in the authorization header.");
-  }
-  if (
-    capturedOptions.headers.Accept !== "application/json" ||
-    capturedOptions.headers["X-OpenRouter-Title"] !== "Strappy"
-  ) {
-    throw new Error("Transport did not use the browser-safe OpenRouter headers.");
-  }
-  if ("X-OpenRouter-Metadata" in capturedOptions.headers) {
-    throw new Error("Transport used an OpenRouter header rejected by browser CORS.");
-  }
-  if (
-    requestBody.model !== "openrouter/free" ||
-    requestBody.stream !== false ||
-    requestBody.store !== false ||
-    requestBody.max_output_tokens !== 256
-  ) {
-    throw new Error("Transport request does not match the bounded native profile.");
-  }
-  if (
-    result.httpStatus !== 200 ||
-    result.status !== "completed" ||
-    result.model !== "example/test-model" ||
-    result.outputText !== "Strappy transport works."
-  ) {
-    throw new Error("Transport did not interpret the successful JSON response.");
-  }
-
-  try {
-    await makeOpenRouterTestRequest(
-      canaryKey,
-      new AbortController().signal,
-      async () => ({
-        ok: true,
-        status: 200,
-        headers: new Headers({ "Content-Type": "application/json" }),
-        async json() {
-          return { status: "failed", error: { message: canaryKey } };
-        },
-      }),
-    );
-    throw new Error("Failed JSON response unexpectedly succeeded.");
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("response failure")) {
-      throw new Error("Failed JSON response did not produce a safe error.");
-    }
-    if (error.message.includes(canaryKey)) {
-      throw new Error("Failed JSON response exposed the API key.");
-    }
-  }
-
-  const cancellationController = new AbortController();
-  const cancellationPromise = makeOpenRouterTestRequest(
-    canaryKey,
-    cancellationController.signal,
-    async (_url, options) => new Promise((_resolve, reject) => {
-      options.signal.addEventListener("abort", () => {
-        reject(new DOMException("Cancelled", "AbortError"));
-      }, { once: true });
-    }),
-  );
-  cancellationController.abort();
-  try {
-    await cancellationPromise;
-    throw new Error("Cancelled request unexpectedly succeeded.");
-  } catch (error) {
-    if (!(error instanceof DOMException) || error.name !== "AbortError") {
-      throw new Error("Transport did not preserve request cancellation.");
-    }
-  }
-
-  try {
-    await makeOpenRouterTestRequest(
-      canaryKey,
-      new AbortController().signal,
-      async () => ({ ok: false, status: 401 }),
-    );
-    throw new Error("Invalid-key response unexpectedly succeeded.");
-  } catch (error) {
-    if (!(error instanceof Error) || !error.message.includes("HTTP 401")) {
-      throw new Error("Invalid-key response did not produce a useful error.");
-    }
-    if (error.message.includes(canaryKey)) {
-      throw new Error("Invalid-key error exposed the API key.");
-    }
-  }
 }
 
 async function verifyBrowserExecution() {
@@ -478,6 +351,5 @@ async function verifyBrowserExecution() {
 }
 
 await verifyStaticAssets();
-await verifyTransportModule();
 await verifyBrowserExecution();
 console.log("PASS: browser loaded Wasm and preserved the volatile key boundary.");

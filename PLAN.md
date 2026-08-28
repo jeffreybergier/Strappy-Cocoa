@@ -84,22 +84,22 @@ the JSON response, clear the key, and confirm that reloading forgets it.
 
 ### 3. Split the shared client transport
 
-- [ ] Keep `strappy_client.h` as the public client boundary.
-- [ ] Reduce `strappy_client.c` to common URL, result, limit, SSE, and error logic.
-- [ ] Move native HTTP mechanics into `strappy_client_curl.c`.
-- [ ] Add `strappy_client_transport.h` for the internal backend contract.
-- [ ] Add `strappy_client_web.c` for the Emscripten/JavaScript bridge and
+- [x] Keep `strappy_client.h` as the public client boundary.
+- [x] Reduce `strappy_client.c` to common URL, result, limit, SSE, and error logic.
+- [x] Move native HTTP mechanics into `strappy_client_curl.c`.
+- [x] Add `strappy_client_transport.h` for the internal backend contract.
+- [x] Add `strappy_client_web.c` for the Emscripten/JavaScript bridge and
   `source/web/strappy_client_fetch.js` for Fetch.
-- [ ] Keep provider request construction and JSON response interpretation in
+- [x] Keep provider request construction and JSON response interpretation in
   shared C; the Fetch bridge only transfers request and response bytes plus
   transport metadata.
-- [ ] Have shared C omit optional provider headers that the browser cannot send
+- [x] Have shared C omit optional provider headers that the browser cannot send
   because of Fetch or CORS restrictions; do not encode provider-header policy
   in the JavaScript bridge.
-- [ ] Link exactly one backend per target.
-- [ ] Preserve the current synchronous public API with Asyncify for the PoC; leave
+- [x] Link exactly one backend per target.
+- [x] Preserve the current synchronous public API with Asyncify for the PoC; leave
   conversion to an explicit asynchronous state machine until after the PoC.
-- [ ] Replace or supplement curl-specific result fields with transport-neutral
+- [x] Replace or supplement curl-specific result fields with transport-neutral
   status without changing native behavior.
 
 Exit condition: the existing C client API can complete an OpenRouter request in

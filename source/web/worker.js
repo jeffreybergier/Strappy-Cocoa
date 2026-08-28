@@ -1,11 +1,11 @@
 import createStrappyModule from "./strappy.js";
-import { makeOpenRouterTestRequest } from "./openrouter_transport.js";
 
 const helloMessage = "Hello from Strappy WebAssembly.";
 
 let apiKey = "";
 let activeRequest = null;
 let wasmReady = false;
+let strappyModule = null;
 
 function postKeyState() {
   self.postMessage({ type: "key-state", available: apiKey !== "" });
@@ -13,8 +13,12 @@ function postKeyState() {
 
 function cancelActiveRequest() {
   if (activeRequest) {
-    activeRequest.abort();
-    activeRequest = null;
+    strappyModule?.ccall(
+      "strappy_client_web_cancel_active_request",
+      null,
+      [],
+      [],
+    );
   }
 }
 
@@ -37,37 +41,48 @@ async function startTestRequest() {
     return;
   }
 
-  const controller = new AbortController();
-  activeRequest = controller;
+  const requestMarker = {};
+  activeRequest = requestMarker;
   self.postMessage({ type: "request-started" });
 
   try {
-    const response = await makeOpenRouterTestRequest(
-      apiKey,
-      controller.signal,
+    const succeeded = await strappyModule.ccall(
+      "strappy_web_client_test_request",
+      "number",
+      ["string"],
+      [apiKey],
+      { async: true },
     );
-    if (activeRequest === controller) {
+    if (activeRequest === requestMarker && succeeded === 1) {
       self.postMessage({
         type: "response-received",
-        httpStatus: response.httpStatus,
-        model: response.model,
-        status: response.status,
-        outputText: response.outputText,
+        httpStatus: strappyModule.ccall(
+          "strappy_web_client_result_http_status", "number", [], []),
+        model: strappyModule.ccall(
+          "strappy_web_client_result_model", "string", [], []),
+        status: strappyModule.ccall(
+          "strappy_web_client_result_status", "string", [], []),
+        outputText: strappyModule.ccall(
+          "strappy_web_client_result_output_text", "string", [], []),
       });
+    } else if (activeRequest === requestMarker) {
+      const message = strappyModule.ccall(
+        "strappy_web_client_result_error", "string", [], []);
+      if (message.includes("cancelled")) {
+        self.postMessage({ type: "request-cancelled" });
+      } else {
+        self.postMessage({ type: "request-error", message });
+      }
     }
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      self.postMessage({ type: "request-cancelled" });
-    } else {
-      self.postMessage({
-        type: "request-error",
-        message: error instanceof Error
-          ? error.message
-          : "The OpenRouter transport test failed.",
-      });
-    }
+    self.postMessage({
+      type: "request-error",
+      message: error instanceof Error
+        ? error.message
+        : "The OpenRouter transport test failed.",
+    });
   } finally {
-    if (activeRequest === controller) {
+    if (activeRequest === requestMarker) {
       activeRequest = null;
     }
   }
@@ -100,6 +115,7 @@ self.addEventListener("message", (event) => {
 
 try {
   const strappy = await createStrappyModule();
+  strappyModule = strappy;
   const utf8Length = new TextEncoder().encode(helloMessage).byteLength;
   const isValidUtf8 = strappy.ccall(
     "strappy_utf8_validate",

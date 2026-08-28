@@ -65,6 +65,7 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 	database_query_harness.c \
 	$(STRAPPY_PLATFORM_SOURCES) \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_client_curl.c \
 	$(SHARED_DIR)/strappy_sse.c \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
@@ -103,6 +104,7 @@ WEBVIEW_HARNESS_SOURCES = \
 RESPONSES_HARNESS_SOURCES = \
 	responses_harness.c \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_client_curl.c \
 	$(SHARED_DIR)/strappy_sse.c \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
@@ -135,6 +137,7 @@ PROMPT_GENERATOR_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_skills.c \
 	$(SHARED_DIR)/strappy_study.c \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_client_curl.c \
 	$(SHARED_DIR)/strappy_sse.c \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
@@ -173,6 +176,7 @@ OPENAI_OAUTH_HARNESS_SOURCES = \
 CHATGPT_ADAPTER_HARNESS_SOURCES = \
 	chatgpt_adapter_harness.c \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_client_curl.c \
 	$(SHARED_DIR)/strappy_sse.c \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
@@ -184,6 +188,7 @@ CHATGPT_ADAPTER_HARNESS_SOURCES = \
 CHATGPT_COMPATIBILITY_PROBE_SOURCES = \
 	chatgpt_compatibility_probe.c \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_client_curl.c \
 	$(SHARED_DIR)/strappy_sse.c \
 	$(SHARED_DIR)/strappy_openai_oauth.c \
 	$(SHARED_DIR)/strappy_identity.c \
@@ -196,6 +201,7 @@ CHATGPT_COMPATIBILITY_PROBE_SOURCES = \
 OTHER_OPENROUTER_COMPATIBILITY_PROBE_SOURCES = \
 	other_openrouter_compatibility_probe.c \
 	$(SHARED_DIR)/strappy_client.c \
+	$(SHARED_DIR)/strappy_client_curl.c \
 	$(SHARED_DIR)/strappy_sse.c \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
