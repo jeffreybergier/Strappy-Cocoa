@@ -81,9 +81,104 @@ async function waitForWorkerMessage(type, startIndex = 0) {
   );
 }
 
-await waitForWorkerMessage("ready");
-const initialMessageCount = workerMessages.length;
+const readyMessage = await waitForWorkerMessage("ready");
+if (
+  !readyMessage.appearanceCss?.includes("--accent:#8e1bcf") ||
+  !readyMessage.appearanceCss.includes("--selection:#89669a") ||
+  !readyMessage.appearanceCss.includes("--panel:#f0edf2")
+) {
+  throw new Error("The Worker did not publish the shared C Strappy appearance.");
+}
+const initialWorkspace = await waitForWorkerMessage("workspace-state");
+if (
+  initialWorkspace.sessions.length !== 1 ||
+  initialWorkspace.activeSessionId !== initialWorkspace.sessions[0].id
+) {
+  throw new Error("The Worker did not publish its initial database-backed session.");
+}
+const originalSessionId = initialWorkspace.activeSessionId;
+const workspaceOperationStart = workerMessages.length;
 const workerMessageListener = workerListeners.get("message");
+workerMessageListener({ data: { type: "create-session" } });
+const createdWorkspace = await waitForWorkerMessage(
+  "workspace-state",
+  workspaceOperationStart,
+);
+if (
+  createdWorkspace.sessions.length !== 2 ||
+  createdWorkspace.activeSessionId === originalSessionId
+) {
+  throw new Error("Creating a chat did not select a second persisted session.");
+}
+const createdSessionId = createdWorkspace.activeSessionId;
+const saveOperationStart = workerMessages.length;
+workerMessageListener({
+  data: {
+    type: "save-options",
+    scope: "session",
+    name: "Configured browser chat",
+    options: {
+      webProvider: "native",
+      webSearchEnabled: true,
+      limitToOneTool: true,
+      answerQualityEnabled: true,
+      roundLimit: 7,
+    },
+  },
+});
+await waitForWorkerMessage("preferences-saved", saveOperationStart);
+const configuredWorkspace = await waitForWorkerMessage(
+  "workspace-state",
+  saveOperationStart,
+);
+if (
+  configuredWorkspace.activeOptions.web_provider !== "native" ||
+  configuredWorkspace.activeOptions.limit_to_one_tool !== true ||
+  configuredWorkspace.activeOptions.answer_quality_enabled !== true ||
+  configuredWorkspace.activeOptions.round_limit !== 7 ||
+  configuredWorkspace.sessions.find((session) => session.id === createdSessionId)
+    ?.name !== "Configured browser chat"
+) {
+  throw new Error("The selected chat configuration was not read back from SQLite.");
+}
+const defaultsOperationStart = workerMessages.length;
+workerMessageListener({
+  data: {
+    type: "save-options",
+    scope: "defaults",
+    options: {
+      webProvider: "exa",
+      webSearchEnabled: true,
+      limitToOneTool: false,
+      answerQualityEnabled: true,
+      roundLimit: 9,
+    },
+  },
+});
+await waitForWorkerMessage("preferences-saved", defaultsOperationStart);
+const defaultsWorkspace = await waitForWorkerMessage(
+  "workspace-state",
+  defaultsOperationStart,
+);
+if (
+  defaultsWorkspace.defaultOptions.web_provider !== "exa" ||
+  defaultsWorkspace.defaultOptions.answer_quality_enabled !== true ||
+  defaultsWorkspace.defaultOptions.round_limit !== 9
+) {
+  throw new Error("New-chat defaults were not read back from SQLite.");
+}
+const selectOperationStart = workerMessages.length;
+workerMessageListener({
+  data: { type: "select-session", sessionId: originalSessionId },
+});
+const selectedWorkspace = await waitForWorkerMessage(
+  "workspace-state",
+  selectOperationStart,
+);
+if (selectedWorkspace.activeSessionId !== originalSessionId) {
+  throw new Error("The Worker did not switch back to the requested chat.");
+}
+const initialMessageCount = workerMessages.length;
 workerMessageListener({ data: { type: "set-key", key: canaryKey } });
 workerMessageListener({ data: { type: "submit-prompt", prompt } });
 await waitForWorkerMessage("response-complete", initialMessageCount);

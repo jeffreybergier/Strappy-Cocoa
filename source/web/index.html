@@ -3,66 +3,228 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Strappy WebAssembly</title>
+  <title>Strappy</title>
   <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-    body { margin: 0; min-height: 100vh; }
-    main { box-sizing: border-box; display: grid; gap: 1rem; margin: auto;
-      max-width: 64rem; min-height: 100vh; padding: 1rem; }
-    h1 { margin-bottom: 0; }
-    #wasm-detail { margin-top: 0; }
-    form, .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
-    label { flex: 1 1 18rem; }
-    input, textarea, button { box-sizing: border-box; font: inherit;
-      min-height: 2.5rem; padding: .5rem .75rem; }
-    input, textarea { display: block; margin-top: .35rem; width: 100%; }
-    textarea { min-height: 5rem; resize: vertical; }
-    #timeline { background: white; border: 1px solid #8886; border-radius: .5rem;
-      min-height: 24rem; width: 100%; }
+    :root {
+      color-scheme: light;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+      --background: Canvas; --panel: Canvas; --document: Canvas;
+      --line: transparent; --muted: GrayText; --text: CanvasText;
+      --control-text: CanvasText; --accent: LinkText; --accent-active: LinkText;
+      --accent-soft: Canvas; --selection: Highlight; --section: Canvas;
+      --section-header: GrayText; --surface: Canvas; --strong-surface: Canvas;
+      --strong-border: transparent; --danger: MarkText;
+      --danger-background: Mark; --control: Field;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; min-width: 58rem; overflow: hidden; color: var(--text);
+      background: var(--background); }
+    button, input, textarea, select { color: inherit; font: inherit; }
+    button { cursor: pointer; }
+    button:disabled, input:disabled, textarea:disabled, select:disabled {
+      cursor: default; opacity: .52;
+    }
+    .workspace { display: grid; grid-template-columns:
+      clamp(14rem, 18vw, 19rem) minmax(28rem, 1fr) clamp(17rem, 21vw, 22rem);
+      height: 100dvh; min-height: 34rem; }
+    .side-panel { min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+      background: var(--panel); scrollbar-color: var(--strong-border) var(--panel); }
+    .sessions-panel { border-right: 1px solid var(--line); }
+    .inspector-panel { border-left: 1px solid var(--line); }
+    .panel-heading { align-items: center; background: var(--accent-soft);
+      display: flex; gap: .75rem; justify-content: space-between; padding: 1rem;
+      position: sticky; top: 0; z-index: 2; }
+    .brand { font-size: 1.12rem; font-weight: 720; letter-spacing: -.02em;
+      margin: 0; }
+    .icon-button { align-items: center; background: var(--accent); border: 0;
+      border-radius: .5rem; color: white; display: inline-flex; font-weight: 650;
+      justify-content: center; min-height: 2.25rem; padding: .45rem .75rem; }
+    .session-list { display: grid; gap: .45rem; list-style: none; margin: 0;
+      padding: .8rem .65rem 1rem; }
+    .session-button { background: var(--surface); border: 0; border-radius: .65rem;
+      display: block; padding: .75rem; text-align: left; width: 100%; }
+    .session-button:hover { background: var(--section); }
+    .session-button[aria-current="true"] { background: var(--selection);
+      color: white; }
+    .session-name { display: block; font-weight: 650; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+    .session-date { color: var(--muted); display: block; font-size: .77rem;
+      margin-top: .25rem; }
+    .session-button[aria-current="true"] .session-date { color: #ffffffe0; }
+    .chat-document { background: var(--document); display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
+    .chat-header { padding: .85rem 1.15rem; }
+    .chat-title { font-size: 1rem; margin: 0; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+    .chat-subtitle { color: var(--muted); font-size: .78rem; margin: .2rem 0 0; }
+    #timeline { background: white; border: 0; display: block; height: 100%;
+      min-height: 0; width: 100%; }
+    .composer { padding: .8rem 1rem .65rem; }
+    #prompt-form { align-items: end; display: grid;
+      grid-template-columns: minmax(0, 1fr) auto; gap: .65rem; }
+    .sr-only { clip: rect(0, 0, 0, 0); clip-path: inset(50%); height: 1px;
+      overflow: hidden; position: absolute; white-space: nowrap; width: 1px; }
+    #prompt { background: var(--control); border: 0;
+      border-radius: .7rem; display: block; max-height: 12rem; min-height: 3rem;
+      padding: .7rem .8rem; resize: vertical; width: 100%; }
+    .actions { display: flex; gap: .45rem; }
+    .actions button { border: 0; border-radius: .55rem;
+      min-height: 2.75rem; padding: .5rem .8rem; }
+    #send-prompt { background: var(--accent); color: white; font-weight: 650; }
+    #conversation-status { color: var(--muted); font-size: .75rem;
+      margin: .45rem .1rem 0; min-height: 1rem; }
     [data-state="ready"], [data-state="complete"] { color: #16803c; }
-    [data-state="error"] { color: #c42b1c; }
-    .credential-note { font-size: .9rem; }
+    [data-state="error"] { color: var(--danger); }
+    .inspector-tabs { background: var(--accent-soft); display: grid; gap: 0;
+      grid-template-columns: 1fr 1fr; padding: 0 1rem .85rem; }
+    .inspector-tab { background: var(--surface); border: 0;
+      border-radius: .5rem; min-height: 2.2rem; padding: .35rem; }
+    .inspector-tab + .inspector-tab { border-radius: 0 .5rem .5rem 0; }
+    .inspector-tab:first-child { border-radius: .5rem 0 0 .5rem; }
+    .inspector-tab[aria-selected="true"] { background: var(--selection);
+      color: white; font-weight: 650; }
+    .inspector-form { display: grid; gap: 1rem; padding: 0 1rem 1.2rem; }
+    fieldset { background: var(--surface); border: 0;
+      border-radius: .65rem; display: grid; gap: .7rem; margin: 0;
+      padding: .85rem .75rem .75rem; }
+    legend { background: var(--section-header); border-radius: .3rem;
+      color: white; font-size: .72rem; font-weight: 750; letter-spacing: .08em;
+      padding: .22rem .5rem; text-transform: uppercase; }
+    .field { display: grid; font-size: .84rem; gap: .35rem; }
+    .field > span { color: var(--muted); }
+    .field input, .field select { background: var(--control);
+      border: 0; border-radius: .45rem; min-height: 2.35rem;
+      padding: .45rem .55rem; width: 100%; }
+    .check-field { align-items: start; display: grid; font-size: .84rem;
+      gap: .55rem; grid-template-columns: auto 1fr; }
+    .check-field input { margin-top: .18rem; }
+    input[type="checkbox"] { accent-color: var(--accent); }
+    .preferences-actions { align-items: center; display: flex; gap: .65rem; }
+    #save-preferences { background: var(--accent); border: 0; border-radius: .5rem;
+      color: white; font-weight: 650; min-height: 2.35rem; padding: .45rem .75rem; }
+    #delete-session { background: var(--danger-background); border: 0;
+      border-radius: .5rem; color: var(--danger); min-height: 2.35rem;
+      padding: .45rem .65rem; }
+    #preferences-status { color: var(--muted); font-size: .75rem; margin: 0; }
+    #key-form { display: grid; gap: .55rem; }
+    .credential-actions { display: flex; gap: .45rem; }
+    .credential-actions button { border: 0;
+      border-radius: .45rem; min-height: 2.2rem; padding: .35rem .6rem; }
+    #set-key { background: var(--accent); color: white; }
+    .credential-note { color: var(--muted); font-size: .74rem; line-height: 1.4;
+      margin: 0; }
+    #wasm-detail { color: var(--muted); font-size: .72rem; line-height: 1.4;
+      margin: 0; }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <h1>Strappy World Knowledge</h1>
-      <p id="status" role="status" aria-live="polite">Loading shared C code…</p>
-      <p id="wasm-detail" hidden></p>
-    </header>
+  <div class="workspace">
+    <aside class="side-panel sessions-panel" aria-label="Chats">
+      <div class="panel-heading">
+        <h1 class="brand">Strappy</h1>
+        <button id="new-session" class="icon-button" type="button" disabled>New chat</button>
+      </div>
+      <p id="status" class="sr-only" role="status" aria-live="polite">Loading shared C code…</p>
+      <nav aria-label="Session list"><ul id="session-list" class="session-list"></ul></nav>
+    </aside>
 
-    <section aria-label="OpenRouter credential">
-      <form id="key-form">
-        <label for="api-key">OpenRouter API key
-          <input id="api-key" name="api-key" type="password"
-                 autocomplete="off" autocapitalize="none" spellcheck="false"
-                 required>
-        </label>
-        <button id="set-key" type="submit" disabled>Use key</button>
-        <button id="clear-key" type="button" disabled>Clear key</button>
-      </form>
-      <p class="credential-note">The key stays only in volatile Worker memory
-        and is forgotten when this page reloads.</p>
-    </section>
+    <main class="chat-document" aria-label="Selected chat">
+      <header class="chat-header">
+        <h2 id="chat-title" class="chat-title">Loading chat…</h2>
+        <p id="chat-subtitle" class="chat-subtitle">World Knowledge</p>
+      </header>
+      <iframe id="timeline" title="Conversation transcript"></iframe>
+      <section class="composer" aria-label="Prompt composer">
+        <form id="prompt-form">
+          <label class="sr-only" for="prompt">Prompt</label>
+          <textarea id="prompt" name="prompt" placeholder="Ask anything…" required></textarea>
+          <div class="actions">
+            <button id="send-prompt" type="submit" disabled>Send</button>
+            <button id="cancel-request" type="button" disabled>Cancel</button>
+          </div>
+        </form>
+        <p id="conversation-status" role="status" aria-live="polite">Waiting for the Worker.</p>
+      </section>
+    </main>
 
-    <iframe id="timeline" title="Conversation transcript"></iframe>
+    <aside class="side-panel inspector-panel" aria-label="Configuration inspector">
+      <div class="panel-heading"><h2 class="brand">Configuration</h2></div>
+      <div class="inspector-tabs" role="tablist" aria-label="Configuration scope">
+        <button id="session-tab" class="inspector-tab" type="button" role="tab"
+                aria-selected="true">This chat</button>
+        <button id="defaults-tab" class="inspector-tab" type="button" role="tab"
+                aria-selected="false">New chats</button>
+      </div>
 
-    <section aria-label="Prompt composer">
-      <form id="prompt-form">
-        <label for="prompt">Prompt
-          <textarea id="prompt" name="prompt" required></textarea>
-        </label>
-        <div class="actions">
-          <button id="send-prompt" type="submit" disabled>Send</button>
-          <button id="cancel-request" type="button" disabled>Cancel</button>
+      <form id="preferences-form" class="inspector-form">
+        <fieldset>
+          <legend>Identity</legend>
+          <label id="session-name-field" class="field" for="session-name">
+            <span>Name</span><input id="session-name" name="session-name" maxlength="160">
+          </label>
+          <label class="field" for="assistant-set">
+            <span>Assistant</span><input id="assistant-set" value="World Knowledge" disabled>
+          </label>
+          <label class="field" for="session-model">
+            <span>Model</span><input id="session-model" disabled>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Tools</legend>
+          <label class="check-field" for="web-search-enabled">
+            <input id="web-search-enabled" type="checkbox"><span>Allow web search</span>
+          </label>
+          <label class="field" for="web-provider">
+            <span>Web-search mode</span>
+            <select id="web-provider">
+              <option value="none">None</option><option value="auto">Auto</option>
+              <option value="native">Native</option><option value="exa">Exa</option>
+              <option value="parallel">Parallel</option>
+            </select>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend>Limits</legend>
+          <label class="check-field" for="limit-to-one-tool">
+            <input id="limit-to-one-tool" type="checkbox"><span>Limit each round to one tool</span>
+          </label>
+          <label class="check-field" for="answer-quality-enabled">
+            <input id="answer-quality-enabled" type="checkbox"><span>Evaluate answer quality</span>
+          </label>
+          <label class="field" for="round-limit">
+            <span>Maximum rounds</span><input id="round-limit" type="number" min="1" max="100" step="1">
+          </label>
+        </fieldset>
+        <div class="preferences-actions">
+          <button id="save-preferences" type="submit" disabled>Save</button>
+          <button id="delete-session" type="button" disabled>Delete chat</button>
         </div>
+        <p id="preferences-status" role="status" aria-live="polite"></p>
       </form>
-      <p id="conversation-status" role="status" aria-live="polite">
-        Waiting for the Worker.
-      </p>
-    </section>
-  </main>
+
+      <section class="inspector-form" aria-label="OpenRouter credential">
+        <fieldset>
+          <legend>OpenRouter</legend>
+          <form id="key-form">
+            <label class="field" for="api-key">
+              <span>API key</span>
+              <input id="api-key" name="api-key" type="password"
+                     autocomplete="off" autocapitalize="none" spellcheck="false" required>
+            </label>
+            <div class="credential-actions">
+              <button id="set-key" type="submit" disabled>Use key</button>
+              <button id="clear-key" type="button" disabled>Clear key</button>
+            </div>
+          </form>
+          <p class="credential-note">The key stays only in volatile Worker memory
+            and is forgotten when this page reloads.</p>
+          <p id="wasm-detail" hidden></p>
+        </fieldset>
+      </section>
+    </aside>
+  </div>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

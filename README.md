@@ -282,11 +282,13 @@ Outputs:
 
 ### WebAssembly proof of concept
 
-The browser proof of concept supports one World Knowledge session through
-OpenRouter in a current Chromium browser. It is intended for local evaluation,
-not production deployment, and does not support other assistant sets, multiple
-sessions, model selection, ChatGPT accounts, OAuth, Bash, filesystem access, or
-personal databases.
+The browser proof of concept supports multiple World Knowledge sessions through
+OpenRouter in a current Chromium browser. Its three-column workspace includes a
+session list, the C-rendered selected conversation, and a configuration
+inspector for the selected session or new-session defaults. It is intended for
+local evaluation, not production deployment, and does not support other
+assistant sets, model selection, ChatGPT accounts, OAuth, Bash, filesystem
+access, or personal databases.
 
 Build the static application reproducibly with:
 
@@ -324,9 +326,9 @@ private file system. To erase them, stop the page, open Chromium DevTools for
 data**, and reload. Clearing browser data for that origin has the same effect.
 
 Known limitations include Asyncify-based synchronous C calls, one tab, one
-session, one OpenRouter account, no offline operation, and no Firefox or Safari
-validation. A reload always forgets the API key but retains SQLite data until
-site data is cleared.
+OpenRouter account, no offline operation, and no Firefox or Safari validation.
+A reload always forgets the API key but retains SQLite sessions, conversation
+history, memory, and preferences until site data is cleared.
 
 (Optional) Run the Linux-Based Tests for the C Backend:
 

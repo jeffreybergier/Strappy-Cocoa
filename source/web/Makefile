@@ -40,12 +40,14 @@ WEB_SOURCES := \
 	$(SHARED_DIR)/strappy_debug_capture.c \
 	strappy_sse_web.c \
 	strappy_web_client.c \
+	strappy_web_appearance.c \
 	strappy_web_database.c \
 	strappy_web_capabilities.c \
 	strappy_web_conversation.c
 
 WEB_HEADERS := \
 	$(SHARED_DIR)/strappy_core.h \
+	$(SHARED_DIR)/strappy_palette.h \
 	$(SHARED_DIR)/strappy_provider.h \
 	$(SHARED_DIR)/strappy_platform_profile.h \
 	$(SHARED_DIR)/strappy_assistant_sets.h \

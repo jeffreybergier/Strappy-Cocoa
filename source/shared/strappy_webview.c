@@ -1,6 +1,7 @@
 #include "strappy_webview.h"
 
 #include "strappy_cocoa.h"
+#include "strappy_palette.h"
 #include "strappy_tools.h"
 
 #include <cJSON.h>
@@ -58,25 +59,25 @@ typedef struct strappy_webview_palette_colors {
    pre-CSS-custom-property WebKit used by iOS 4. */
 static const strappy_webview_palette_colors
   g_strappy_webview_application_palette = {{
-    "#fbfafc",
-    "#302e31",
-    "#f0edf2",
-    "#676268",
-    "#5d5262",
-    "#d7d1d9",
-    "#fff",
-    "#a49da6",
-    "#b9b2bc",
-    "#716a73",
-    "#8e1bcf",
-    "#7216a6",
-    "#9a3e47",
-    "#e7c8cc",
-    "#755a00",
-    "#837b86",
-    "#f7f5f8",
-    "#2a282b",
-    "#ddd8e0"
+    STRAPPY_PALETTE_PAGE_BACKGROUND,
+    STRAPPY_PALETTE_PRIMARY_TEXT,
+    STRAPPY_PALETTE_PANEL_BACKGROUND,
+    STRAPPY_PALETTE_SECONDARY_TEXT,
+    STRAPPY_PALETTE_CONTROL_TEXT,
+    STRAPPY_PALETTE_SECTION_BACKGROUND,
+    STRAPPY_PALETTE_SURFACE_BACKGROUND,
+    STRAPPY_PALETTE_BORDER,
+    STRAPPY_PALETTE_STRONG_SURFACE,
+    STRAPPY_PALETTE_STRONG_BORDER,
+    STRAPPY_PRIMARY_TINT_HEX,
+    STRAPPY_DARK_TINT_HEX,
+    STRAPPY_PALETTE_ERROR,
+    STRAPPY_PALETTE_ERROR_BACKGROUND,
+    STRAPPY_PALETTE_WARNING,
+    STRAPPY_PALETTE_TERMINAL_BORDER,
+    STRAPPY_PALETTE_TERMINAL_BACKGROUND,
+    STRAPPY_PALETTE_TERMINAL_TEXT,
+    STRAPPY_PALETTE_TERMINAL_HEADER
   }};
 
 static const strappy_webview_palette_colors

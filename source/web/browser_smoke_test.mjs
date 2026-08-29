@@ -93,6 +93,13 @@ async function verifyStaticAssets() {
   if (!pageResponse.headers.get("cache-control")?.includes("no-store")) {
     throw new Error("Entry page is missing Cache-Control: no-store.");
   }
+  const pageHtml = await pageResponse.text();
+  if (
+    !pageHtml.includes("--line: transparent") ||
+    pageHtml.includes("--line: ButtonBorder")
+  ) {
+    throw new Error("The entry page can flash a dark separator before Wasm loads.");
+  }
   if (
     pageResponse.headers.has("cross-origin-opener-policy") ||
     pageResponse.headers.has("cross-origin-embedder-policy")
@@ -245,6 +252,206 @@ async function verifyBrowserExecution() {
       );
     }
 
+    const originalSessionId = persistentSessionState.id;
+    const layoutState = await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `
+          const workspace = document.querySelector(".workspace");
+          const left = document.querySelector(".sessions-panel");
+          const center = document.querySelector(".chat-document");
+          const right = document.querySelector(".inspector-panel");
+          const leftRect = left.getBoundingClientRect();
+          const centerRect = center.getBoundingClientRect();
+          const rightRect = right.getBoundingClientRect();
+          const selectedSession = document.querySelector(
+            '.session-button[aria-current="true"]');
+          const timelineBody = document.querySelector("#timeline")
+            .contentDocument?.body;
+          const timelineStyle = timelineBody
+            ? getComputedStyle(timelineBody)
+            : null;
+          const borderWidth = (selector, side) => getComputedStyle(
+            document.querySelector(selector))["border" + side + "Width"];
+          return {
+            columnCount: getComputedStyle(workspace).gridTemplateColumns
+              .split(" ").length,
+            ordered: leftRect.right <= centerRect.left &&
+              centerRect.right <= rightRect.left,
+            leftScroll: getComputedStyle(left).overflowY,
+            rightScroll: getComputedStyle(right).overflowY,
+            bodyScroll: getComputedStyle(document.body).overflow,
+            sessionRows: document.querySelectorAll(".session-button").length,
+            newDisabled: document.querySelector("#new-session").disabled,
+            appearanceSource: document.querySelector("#status")
+              .dataset.appearanceSource,
+            panelColor: getComputedStyle(left).backgroundColor,
+            barColor: getComputedStyle(document.querySelector(".panel-heading"))
+              .backgroundColor,
+            actionColor: getComputedStyle(document.querySelector("#new-session"))
+              .backgroundColor,
+            selectionColor: getComputedStyle(selectedSession).backgroundColor,
+            timelineBackground: timelineStyle?.backgroundColor || "",
+            timelineTextColor: timelineStyle?.color || "",
+            leftSeparatorWidth: borderWidth(".sessions-panel", "Right"),
+            leftSeparatorColor: getComputedStyle(left).borderRightColor,
+            rightSeparatorWidth: borderWidth(".inspector-panel", "Left"),
+            rightSeparatorColor: getComputedStyle(right).borderLeftColor,
+            unwantedBorders: [
+              borderWidth(".panel-heading", "Bottom"),
+              borderWidth('.session-button[aria-current="true"]', "Top"),
+              borderWidth(".chat-header", "Bottom"),
+              borderWidth(".composer", "Top"),
+              borderWidth(".inspector-tab", "Top"),
+              borderWidth("#preferences-form fieldset", "Top"),
+              borderWidth("#prompt", "Top")
+            ].filter((width) => width !== "0px"),
+            groupedCorner: getComputedStyle(
+              document.querySelector("#preferences-form fieldset"))
+              .borderRadius
+          };
+        `,
+        args: [],
+      },
+    );
+    if (
+      layoutState.columnCount !== 3 ||
+      !layoutState.ordered ||
+      layoutState.leftScroll !== "auto" ||
+      layoutState.rightScroll !== "auto" ||
+      layoutState.bodyScroll !== "hidden" ||
+      layoutState.sessionRows < 1 ||
+      layoutState.newDisabled ||
+      layoutState.appearanceSource !== "shared-c" ||
+      layoutState.panelColor !== "rgb(240, 237, 242)" ||
+      layoutState.barColor !== "rgb(216, 194, 229)" ||
+      layoutState.actionColor !== "rgb(142, 27, 207)" ||
+      layoutState.selectionColor !== "rgb(137, 102, 154)" ||
+      layoutState.timelineBackground !== "rgb(251, 250, 252)" ||
+      layoutState.timelineTextColor !== "rgb(48, 46, 49)" ||
+      layoutState.leftSeparatorWidth !== "1px" ||
+      layoutState.leftSeparatorColor !== "rgb(164, 157, 166)" ||
+      layoutState.rightSeparatorWidth !== "1px" ||
+      layoutState.rightSeparatorColor !== "rgb(164, 157, 166)" ||
+      layoutState.unwantedBorders.length !== 0 ||
+      layoutState.groupedCorner === "0px"
+    ) {
+      throw new Error(`Three-column workspace layout is invalid: ${JSON.stringify(layoutState)}`);
+    }
+
+    await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `document.querySelector("#new-session").click();`,
+        args: [],
+      },
+    );
+    const createDeadline = Date.now() + 5000;
+    let createdState;
+    while (Date.now() < createDeadline) {
+      createdState = await webdriverRequest(
+        `/session/${sessionId}/execute/sync`,
+        "POST",
+        {
+          script: `
+            return {
+              count: Number(document.querySelector("#status").dataset.sessionCount),
+              id: Number(document.querySelector("#status").dataset.sessionId),
+              rows: document.querySelectorAll(".session-button").length
+            };
+          `,
+          args: [],
+        },
+      );
+      if (
+        createdState.count === persistentSessionState.count + 1 &&
+        createdState.id !== originalSessionId &&
+        createdState.rows === createdState.count
+      ) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (
+      createdState.count !== persistentSessionState.count + 1 ||
+      createdState.id === originalSessionId ||
+      createdState.rows !== createdState.count
+    ) {
+      throw new Error("The browser UI did not create and select a second chat.");
+    }
+    persistentSessionState = { count: createdState.count, id: createdState.id };
+
+    await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `
+          document.querySelector("#session-name").value = "Browser configured chat";
+          document.querySelector("#web-provider").value = "native";
+          document.querySelector("#answer-quality-enabled").checked = true;
+          document.querySelector("#round-limit").value = "8";
+          document.querySelector("#preferences-form").requestSubmit();
+        `,
+        args: [],
+      },
+    );
+    const preferencesDeadline = Date.now() + 5000;
+    let preferencesSaved = false;
+    while (Date.now() < preferencesDeadline) {
+      preferencesSaved = await webdriverRequest(
+        `/session/${sessionId}/execute/sync`,
+        "POST",
+        {
+          script: `
+            return document.querySelector("#preferences-status").textContent
+              .includes("saved") &&
+              document.querySelector("#chat-title").textContent ===
+                "Browser configured chat" &&
+              document.querySelector("#web-provider").value === "native" &&
+              document.querySelector("#answer-quality-enabled").checked &&
+              document.querySelector("#round-limit").value === "8";
+          `,
+          args: [],
+        },
+      );
+      if (preferencesSaved) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (!preferencesSaved) {
+      throw new Error("The configuration inspector did not save and reload its values.");
+    }
+
+    await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `
+          const originalId = String(arguments[0]);
+          [...document.querySelectorAll(".session-button")]
+            .find((button) => button.dataset.sessionId === originalId)?.click();
+        `,
+        args: [originalSessionId],
+      },
+    );
+    const switchDeadline = Date.now() + 5000;
+    let switched = false;
+    while (Date.now() < switchDeadline) {
+      switched = await webdriverRequest(
+        `/session/${sessionId}/execute/sync`,
+        "POST",
+        {
+          script: `return Number(document.querySelector("#status").dataset.sessionId) === arguments[0];`,
+          args: [originalSessionId],
+        },
+      );
+      if (switched) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (!switched) {
+      throw new Error("The session list did not switch the main chat document.");
+    }
     const canaryKey = "not-a-real-browser-key";
     const keyState = await webdriverRequest(
       `/session/${sessionId}/execute/sync`,

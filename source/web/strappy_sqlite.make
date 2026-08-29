@@ -36,6 +36,7 @@ STRAPPY_SOURCES := \
   $(STRAPPY_CJSON_DIR)/cJSON.c \
   $(STRAPPY_WEB_DIR)/strappy_sse_web.c \
   $(STRAPPY_WEB_DIR)/strappy_web_client.c \
+  $(STRAPPY_WEB_DIR)/strappy_web_appearance.c \
   $(STRAPPY_WEB_DIR)/strappy_web_database.c \
   $(STRAPPY_WEB_DIR)/strappy_web_capabilities.c \
   $(STRAPPY_WEB_DIR)/strappy_web_conversation.c

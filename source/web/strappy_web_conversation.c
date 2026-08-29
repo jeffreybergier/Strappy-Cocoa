@@ -290,7 +290,7 @@ char *strappy_web_conversation_load_timeline(void)
     STRAPPY_WEB_RESOURCE_DIR,
     NULL,
     NULL,
-    STRAPPY_WEBVIEW_PALETTE_NEUTRAL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED,
     &message_count,
     &next_cursor,
     &error);

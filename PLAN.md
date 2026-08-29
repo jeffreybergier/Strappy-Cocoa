@@ -196,7 +196,7 @@ The PoC is complete when all of these are true:
   web build has no credential environment-variable convention.
 - [ ] Replace Asyncify with an explicit asynchronous request state machine.
 - [ ] Model catalog refresh and model selection.
-- [ ] Multiple sessions and full preferences UI.
+- [x] Multiple sessions and full preferences UI.
 - [ ] Firefox and Safari validation.
 - [ ] Multi-tab database coordination.
 - [ ] Session/database export and import.
