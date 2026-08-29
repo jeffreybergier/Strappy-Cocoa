@@ -43,6 +43,8 @@ int strappy_db_open(const char *db_path,
                     sqlite3 **db_out,
                     char **error_out);
 void strappy_db_release(sqlite3 *db);
+int strappy_db_connection_schema_is_ready(sqlite3 *db);
+void strappy_db_connection_mark_schema_ready(sqlite3 *db);
 int strappy_db_exec(sqlite3 *db,
                     const char *sql,
                     const char *error_prefix,

@@ -6,6 +6,28 @@ let apiKey = "";
 let activeRequest = null;
 let wasmReady = false;
 let strappyModule = null;
+let databasePersistent = false;
+let databaseSessionCount = 0;
+let databaseSessionId = 0;
+
+function databaseError() {
+  return strappyModule.ccall(
+    "strappy_web_database_error", "string", [], []);
+}
+
+function requireDatabaseCall(name) {
+  const succeeded = strappyModule.ccall(name, "number", [], []);
+  if (succeeded !== 1) {
+    throw new Error(databaseError() || `Database operation ${name} failed.`);
+  }
+}
+
+function readDatabaseState() {
+  databaseSessionCount = strappyModule.ccall(
+    "strappy_web_database_session_count", "number", [], []);
+  databaseSessionId = strappyModule.ccall(
+    "strappy_web_database_last_session_id", "number", [], []);
+}
 
 function postKeyState() {
   self.postMessage({ type: "key-state", available: apiKey !== "" });
@@ -114,7 +136,24 @@ self.addEventListener("message", (event) => {
 });
 
 try {
-  const strappy = await createStrappyModule();
+  const moduleOptions = {
+    locateFile(path) {
+      return path === "sqlite3.wasm"
+        ? new URL("./strappy.wasm", import.meta.url).href
+        : path;
+    },
+  };
+  if (globalThis.strappyTestWasmBinary instanceof Uint8Array) {
+    moduleOptions.instantiateWasm = function instantiateWasm(imports, onSuccess) {
+      return WebAssembly
+        .instantiate(globalThis.strappyTestWasmBinary, imports)
+        .then((result) => {
+          onSuccess(result.instance, result.module);
+          return result.instance.exports;
+        });
+    };
+  }
+  const strappy = await createStrappyModule(moduleOptions);
   strappyModule = strappy;
   const utf8Length = new TextEncoder().encode(helloMessage).byteLength;
   const isValidUtf8 = strappy.ccall(
@@ -128,11 +167,35 @@ try {
     throw new Error("Shared C code rejected the UTF-8 greeting.");
   }
 
+  requireDatabaseCall("strappy_web_database_initialize_temporary");
+  if (
+    typeof navigator !== "undefined" &&
+    typeof navigator.storage?.getDirectory === "function" &&
+    typeof strappy.installOpfsSAHPoolVfs === "function"
+  ) {
+    await strappy.installOpfsSAHPoolVfs({
+      directory: ".strappy-opfs-sahpool",
+      initialCapacity: 6,
+    });
+    requireDatabaseCall("strappy_web_database_initialize_persistent");
+    readDatabaseState();
+    if (databaseSessionCount === 0) {
+      requireDatabaseCall("strappy_web_database_create_session");
+      readDatabaseState();
+    }
+    databasePersistent = true;
+  }
+
   wasmReady = true;
   self.postMessage({
     type: "ready",
     message: helloMessage,
-    detail: "strappy_utf8_validate() returned success from shared C code.",
+    detail: databasePersistent
+      ? "Shared C and persistent SQLite OPFS are ready."
+      : "Shared C and temporary SQLite are ready.",
+    databasePersistent,
+    databaseSessionCount,
+    databaseSessionId,
   });
 } catch (error) {
   self.postMessage({

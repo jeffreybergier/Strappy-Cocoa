@@ -39,6 +39,12 @@ async function verifyStaticAssets() {
   if (!pageResponse.headers.get("cache-control")?.includes("no-store")) {
     throw new Error("Entry page is missing Cache-Control: no-store.");
   }
+  if (
+    pageResponse.headers.has("cross-origin-opener-policy") ||
+    pageResponse.headers.has("cross-origin-embedder-policy")
+  ) {
+    throw new Error("The single-tab SAH-pool build unexpectedly requires COOP/COEP.");
+  }
 
   const wasmResponse = await fetch(`${baseUrl}/strappy.wasm`);
   if (!wasmResponse.ok) {
@@ -93,19 +99,27 @@ async function verifyBrowserExecution() {
       alwaysMatch: {
         browserName: "chrome",
         "goog:chromeOptions": {
-          args: ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage"],
+          args: [
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            `--unsafely-treat-insecure-origin-as-secure=${baseUrl}`,
+          ],
         },
+        "goog:loggingPrefs": { browser: "ALL" },
       },
     },
   });
   const sessionId = session.sessionId;
+  let persistentSessionState;
 
   try {
     await webdriverRequest(`/session/${sessionId}/url`, "POST", {
       url: `${baseUrl}/`,
     });
 
-    const deadline = Date.now() + 20000;
+    const deadline = Date.now() + 60000;
+    let lastStartupState;
     while (Date.now() < deadline) {
       const result = await webdriverRequest(
         `/session/${sessionId}/execute/sync`,
@@ -117,12 +131,16 @@ async function verifyBrowserExecution() {
             return {
               state: status?.dataset.state || "loading",
               message: status?.textContent || "",
-              detail: detail?.textContent || ""
+              detail: detail?.textContent || "",
+              databasePersistent: status?.dataset.databasePersistent || "false",
+              sessionCount: Number(status?.dataset.sessionCount || 0),
+              sessionId: Number(status?.dataset.sessionId || 0)
             };
           `,
           args: [],
         },
       );
+      lastStartupState = result;
 
       if (result.state === "error") {
         throw new Error(`Browser application failed: ${result.detail}`);
@@ -131,15 +149,33 @@ async function verifyBrowserExecution() {
         if (result.message !== "Hello from Strappy WebAssembly.") {
           throw new Error("Browser rendered an unexpected Wasm greeting.");
         }
-        if (!result.detail.includes("strappy_utf8_validate() returned success")) {
-          throw new Error("Browser did not confirm the shared C function call.");
+        if (
+          !result.detail.includes("persistent SQLite OPFS") ||
+          result.databasePersistent !== "true" ||
+          result.sessionCount < 1 ||
+          result.sessionId < 1
+        ) {
+          throw new Error(
+            `Browser did not initialize persistent SQLite through shared C: ${JSON.stringify(result)}`,
+          );
         }
+        persistentSessionState = {
+          count: result.sessionCount,
+          id: result.sessionId,
+        };
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     if (Date.now() >= deadline) {
-      throw new Error("Timed out waiting for the WebAssembly Worker.");
+      const logs = await webdriverRequest(
+        `/session/${sessionId}/se/log`,
+        "POST",
+        { type: "browser" },
+      );
+      throw new Error(
+        `Timed out waiting for the WebAssembly Worker. Last state: ${JSON.stringify(lastStartupState)}. Browser logs: ${JSON.stringify(logs)}`,
+      );
     }
 
     const canaryKey = "not-a-real-browser-key";
@@ -258,7 +294,7 @@ async function verifyBrowserExecution() {
         args: [],
       },
     );
-    const restartDeadline = Date.now() + 20000;
+    const restartDeadline = Date.now() + 60000;
     let restartVerified = false;
     while (Date.now() < restartDeadline) {
       const restartReady = await webdriverRequest(
@@ -313,7 +349,7 @@ async function verifyBrowserExecution() {
     }
 
     await webdriverRequest(`/session/${sessionId}/refresh`, "POST", {});
-    const reloadDeadline = Date.now() + 20000;
+    const reloadDeadline = Date.now() + 60000;
     while (Date.now() < reloadDeadline) {
       const reloadState = await webdriverRequest(
         `/session/${sessionId}/execute/sync`,
@@ -325,7 +361,13 @@ async function verifyBrowserExecution() {
               testDisabled: document.querySelector("#test-request")?.disabled,
               keyValue: document.querySelector("#api-key")?.value || "",
               localStorageCount: localStorage.length,
-              sessionStorageCount: sessionStorage.length
+              sessionStorageCount: sessionStorage.length,
+              databasePersistent:
+                document.querySelector("#status")?.dataset.databasePersistent || "false",
+              databaseSessionCount: Number(
+                document.querySelector("#status")?.dataset.sessionCount || 0),
+              databaseSessionId: Number(
+                document.querySelector("#status")?.dataset.sessionId || 0)
             };
           `,
           args: [],
@@ -336,9 +378,16 @@ async function verifyBrowserExecution() {
           !reloadState.testDisabled ||
           reloadState.keyValue !== "" ||
           reloadState.localStorageCount !== 0 ||
-          reloadState.sessionStorageCount !== 0
+          reloadState.sessionStorageCount !== 0 ||
+          reloadState.databasePersistent !== "true"
         ) {
           throw new Error("Reload did not forget the API key.");
+        }
+        if (
+          reloadState.databaseSessionCount !== persistentSessionState.count ||
+          reloadState.databaseSessionId !== persistentSessionState.id
+        ) {
+          throw new Error("The C-created SQLite session did not survive reload.");
         }
         return;
       }
@@ -352,4 +401,6 @@ async function verifyBrowserExecution() {
 
 await verifyStaticAssets();
 await verifyBrowserExecution();
-console.log("PASS: browser loaded Wasm and preserved the volatile key boundary.");
+console.log(
+  "PASS: browser loaded Wasm, retained its SQLite OPFS session, and forgot its API key.",
+);

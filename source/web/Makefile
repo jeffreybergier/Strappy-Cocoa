@@ -8,14 +8,25 @@ RESOURCE_DIR := $(SHARED_DIR)/Resources
 BUILD_DIR := build-release
 RESOURCE_OUTPUT_DIR := $(BUILD_DIR)/Resources
 MODULE_NAME := strappy
+SQLITE_VERSION := 3530400
+SQLITE_BUILD_DIR := build-sqlite
+SQLITE_SOURCE_DIR := $(SQLITE_BUILD_DIR)/sqlite-src-$(SQLITE_VERSION)
+SQLITE_WASM_DIR := $(SQLITE_SOURCE_DIR)/ext/wasm
+SQLITE_MODULE_JS := $(SQLITE_WASM_DIR)/jswasm/esm/sqlite3.mjs
+SQLITE_MODULE_WASM := $(SQLITE_WASM_DIR)/jswasm/esm/sqlite3.wasm
 
 WEB_SOURCES := \
 	$(SHARED_DIR)/strappy_core.c \
 	$(SHARED_DIR)/strappy_provider.c \
 	$(SHARED_DIR)/strappy_client.c \
 	$(SHARED_DIR)/strappy_client_web.c \
+	$(SHARED_DIR)/strappy_db_connection_web.c \
+	$(SHARED_DIR)/strappy_db.c \
+	$(SHARED_DIR)/strappy_db_catalog.c \
+	$(SHARED_DIR)/strappy_db_sessions.c \
 	strappy_sse_web.c \
-	strappy_web_client.c
+	strappy_web_client.c \
+	strappy_web_database.c
 
 WEB_HEADERS := \
 	$(SHARED_DIR)/strappy_core.h \
@@ -23,9 +34,14 @@ WEB_HEADERS := \
 	$(SHARED_DIR)/strappy_config.h \
 	$(SHARED_DIR)/strappy_client.h \
 	$(SHARED_DIR)/strappy_client_transport.h \
-	$(SHARED_DIR)/strappy_sse.h
+	$(SHARED_DIR)/strappy_sse.h \
+	$(SHARED_DIR)/strappy_db.h \
+	$(SHARED_DIR)/strappy_db_internal.h
 
-WEB_BUILD_INPUTS := Makefile strappy_client_fetch.js $(WEB_SOURCES) $(WEB_HEADERS)
+WEB_BUILD_INPUTS := Makefile prepare_sqlite_wasm.sh strappy_client_fetch.js \
+	strappy_sqlite.make strappy_sqlite_exports.txt strappy_sqlite_post.js \
+	strappy_sqlite_pre.js \
+	$(WEB_SOURCES) $(WEB_HEADERS)
 
 WEB_JAVASCRIPT := $(BUILD_DIR)/$(MODULE_NAME).js
 WEB_WASM := $(BUILD_DIR)/$(MODULE_NAME).wasm
@@ -45,6 +61,7 @@ WORLD_KNOWLEDGE_RESOURCE_OUTPUTS := \
 	$(addprefix $(RESOURCE_OUTPUT_DIR)/,$(WORLD_KNOWLEDGE_RESOURCE_NAMES))
 TEST_SCRIPT := browser_smoke_test.mjs
 CLIENT_TEST_SCRIPT := client_transport_smoke_test.mjs
+WORKER_CLIENT_TEST_SCRIPT := worker_transport_smoke_test.mjs
 
 CPPFLAGS := -I$(SHARED_DIR)
 COMMON_CFLAGS := \
@@ -54,35 +71,29 @@ COMMON_CFLAGS := \
 	-Wconversion \
 	-Wsign-conversion \
 	-Wfloat-conversion
-RELEASE_CFLAGS := -O3
-EMSCRIPTEN_FLAGS := \
-	--no-entry \
-	-sWASM=1 \
-	-sFILESYSTEM=0 \
-	-sALLOW_MEMORY_GROWTH=1 \
-	-sASYNCIFY=1 \
-	-sMODULARIZE=1 \
-	-sEXPORT_ES6=1 \
-	-sEXPORT_NAME=createStrappyModule \
-	-sENVIRONMENT=web,worker,node \
-	-sEXPORTED_FUNCTIONS='["_strappy_utf8_validate","_strappy_web_client_test_request","_strappy_web_client_result_http_status","_strappy_web_client_result_model","_strappy_web_client_result_status","_strappy_web_client_result_output_text","_strappy_web_client_result_error","_strappy_client_web_cancel_active_request"]' \
-	-sEXPORTED_RUNTIME_METHODS='["ccall"]'
-
+# SQLite's canonical Wasm glue preserves external export names at -O1 without
+# requiring a separate WABT stripping pass in the pinned Emscripten image.
+RELEASE_CFLAGS := -O1
 .DEFAULT_GOAL := release
 
-.PHONY: clean release test
+.PHONY: clean distclean release test
 
 release: $(WEB_OUTPUTS) $(STATIC_OUTPUTS) $(WORLD_KNOWLEDGE_RESOURCE_OUTPUTS)
 
 test: release
 	$(NODE) $(CLIENT_TEST_SCRIPT)
+	$(NODE) $(WORKER_CLIENT_TEST_SCRIPT)
 	$(NODE) $(TEST_SCRIPT)
 
 # Emscripten creates the JavaScript loader and Wasm binary in one invocation.
 $(WEB_OUTPUTS) &: $(WEB_BUILD_INPUTS) | $(BUILD_DIR)
-	$(EMCC) $(CPPFLAGS) $(COMMON_CFLAGS) $(RELEASE_CFLAGS) \
-		$(EMSCRIPTEN_FLAGS) --js-library strappy_client_fetch.js \
-		$(WEB_SOURCES) -o $(WEB_JAVASCRIPT)
+	sh prepare_sqlite_wasm.sh $(SQLITE_BUILD_DIR)
+	$(MAKE) -C $(SQLITE_WASM_DIR) -f GNUmakefile \
+		-f $(abspath strappy_sqlite.make) clean
+	$(MAKE) -C $(SQLITE_WASM_DIR) -f GNUmakefile \
+		-f $(abspath strappy_sqlite.make) b-esm emcc_opt=$(RELEASE_CFLAGS)
+	cp $(SQLITE_MODULE_JS) $(WEB_JAVASCRIPT)
+	cp $(SQLITE_MODULE_WASM) $(WEB_WASM)
 
 $(BUILD_DIR)/%: % | $(BUILD_DIR)
 	cp $< $@
@@ -100,3 +111,6 @@ clean:
 	rm -f $(WEB_OUTPUTS) $(STATIC_OUTPUTS) \
 		$(BUILD_DIR)/openrouter_transport.js \
 		$(WORLD_KNOWLEDGE_RESOURCE_OUTPUTS)
+
+distclean: clean
+	rm -rf $(SQLITE_BUILD_DIR)

@@ -16,6 +16,7 @@ TEST_DIR := build-test
 export STRAPPY_INFO_PLIST_PATH
 STRAPPY_DB_SOURCES = \
 	$(SHARED_DIR)/strappy_provider.c \
+	$(SHARED_DIR)/strappy_db_connection_native.c \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_db_catalog.c \
 	$(SHARED_DIR)/strappy_db_sessions.c \

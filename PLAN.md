@@ -107,16 +107,16 @@ the Worker using Fetch, and native builds still use libcurl.
 
 ### 4. Bring up SQLite in Wasm
 
-- [ ] Compile SQLite into the Wasm module and first open a temporary database.
-- [ ] Separate POSIX connection policy from shared schema and query code.
-- [ ] Add a web connection policy that does not depend on `stat()` identity,
+- [x] Compile SQLite into the Wasm module and first open a temporary database.
+- [x] Separate POSIX connection policy from shared schema and query code.
+- [x] Add a web connection policy that does not depend on `stat()` identity,
   pthread concurrency, or mandatory WAL mode.
-- [ ] Run schema initialization and a minimal create/list session test.
-- [ ] Add SQLite's `opfs-sahpool` VFS and move `strappy.sqlite` to
+- [x] Run schema initialization and a minimal create/list session test.
+- [x] Add SQLite's `opfs-sahpool` VFS and move `strappy.sqlite` to
   origin-private persistent storage. This single-tab PoC choice avoids
   requiring COOP/COEP response headers.
-- [ ] Keep all SQLite access in the same Worker.
-- [ ] Verify that history survives reload while the API key does not.
+- [x] Keep all SQLite access in the same Worker.
+- [x] Verify that history survives reload while the API key does not.
 
 Exit condition: a session written through the existing C database APIs remains
 available after reload, with no credential data in the database.
