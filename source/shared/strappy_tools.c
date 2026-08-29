@@ -4,6 +4,7 @@
 #include "strappy_assistant_sets.h"
 #include "strappy_cocoa.h"
 #include "strappy_core.h"
+#include "strappy_platform_profile.h"
 #include "strappy_db.h"
 #include "strappy_file_edit.h"
 #include "strappy_file_read.h"
@@ -146,7 +147,9 @@ typedef char *(*strappy_tools_datetime_token_converter)(
   strappy_cocoa_timestamp_unit unit,
   char **error_out);
 
+#if !defined(STRAPPY_PLATFORM_WEB)
 static int strappy_tools_helper_is_space(char value);
+#endif
 
 static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_DATABASE_LIST, STRAPPY_TOOL_KIND_DATABASE },
@@ -229,19 +232,22 @@ int strappy_tools_is_helper(const char *tool_name)
   const strappy_tool_definition *definition;
 
   definition = strappy_tools_find_definition(tool_name);
-  return ((definition != NULL) &&
+  return (strappy_platform_allows_tool(tool_name) &&
+          (definition != NULL) &&
           (definition->kind == STRAPPY_TOOL_KIND_HELPER)) ? 1 : 0;
 }
 
 int strappy_tools_is_registered(const char *tool_name)
 {
-  return (strappy_tools_find_definition(tool_name) != NULL) ||
-    (strappy_tools_find_server_definition(tool_name) != NULL);
+  return strappy_platform_allows_tool(tool_name) &&
+    ((strappy_tools_find_definition(tool_name) != NULL) ||
+     (strappy_tools_find_server_definition(tool_name) != NULL));
 }
 
 int strappy_tools_is_server(const char *tool_name)
 {
-  return (strappy_tools_find_server_definition(tool_name) != NULL) ? 1 : 0;
+  return (strappy_platform_allows_tool(tool_name) &&
+          (strappy_tools_find_server_definition(tool_name) != NULL)) ? 1 : 0;
 }
 
 static void strappy_database_query_arguments_init(
@@ -1194,6 +1200,16 @@ static int strappy_tools_validate_guidance_root(cJSON *root,
 
 char *strappy_tools_request_json(const char *resource_dir, char **error_out)
 {
+#if defined(STRAPPY_PLATFORM_WEB)
+  size_t allowed_name_count;
+  const char * const *allowed_names;
+
+  allowed_names = strappy_platform_tool_allowlist(&allowed_name_count);
+  return strappy_tools_request_json_filtered(resource_dir,
+                                              allowed_names,
+                                              allowed_name_count,
+                                              error_out);
+#else
   cJSON *root;
   cJSON *tools;
   char *json;
@@ -1220,6 +1236,7 @@ char *strappy_tools_request_json(const char *resource_dir, char **error_out)
   }
 
   return json;
+#endif
 }
 
 static int strappy_tools_name_is_allowed(const char *name,
@@ -1229,6 +1246,9 @@ static int strappy_tools_name_is_allowed(const char *name,
   size_t index;
 
   if ((name == NULL) || (allowed_names == NULL) || (allowed_name_count == 0U)) {
+    return 0;
+  }
+  if (!strappy_platform_allows_tool(name)) {
     return 0;
   }
 
@@ -1256,6 +1276,7 @@ static int strappy_tools_server_schema_is_enabled(
   type = strappy_tools_server_schema_type(server_tool);
   definition = strappy_provider_for_kind(provider);
   if ((type == NULL) || (definition == NULL) ||
+      !strappy_platform_allows_tool(type) ||
       !strappy_provider_supports_hosted_tool(definition, type)) {
     return 0;
   }
@@ -1389,6 +1410,9 @@ char *strappy_tools_display_registry_json(const char *resource_dir,
     cJSON *copy;
 
     name = strappy_tools_tool_schema_name(tool);
+    if (!strappy_platform_allows_tool(name)) {
+      continue;
+    }
     display = cJSON_GetObjectItemCaseSensitive(
       tool,
       STRAPPY_TOOL_DISPLAY_METADATA_KEY);
@@ -1413,6 +1437,9 @@ char *strappy_tools_display_registry_json(const char *resource_dir,
     cJSON *copy;
 
     type = strappy_tools_server_schema_type(tool);
+    if (!strappy_platform_allows_tool(type)) {
+      continue;
+    }
     definition = strappy_tools_find_server_definition(type);
     display = cJSON_GetObjectItemCaseSensitive(
       tool,
@@ -1903,7 +1930,8 @@ char *strappy_tools_prompt_markdown_filtered_for_provider(
     const char *name;
 
     name = strappy_tools_tool_schema_name(tool);
-    if (((allowed_names == NULL) || (allowed_name_count == 0U) ||
+    if (strappy_platform_allows_tool(name) &&
+        ((allowed_names == NULL) || (allowed_name_count == 0U) ||
          strappy_tools_name_is_allowed(name,
                                        allowed_names,
                                        allowed_name_count)) &&
@@ -2004,6 +2032,7 @@ char *strappy_tools_tool_guidance_string(const char *resource_dir,
   return value;
 }
 
+#if !defined(STRAPPY_PLATFORM_WEB)
 static int strappy_tools_add_result_guidance(cJSON *result,
                                              const char *resource_dir,
                                              const char *tool_name,
@@ -6966,3 +6995,4 @@ char *strappy_tools_execute_for_function_call_with_cancellation(
                                         cancelled_out,
                                         error_out);
 }
+#endif

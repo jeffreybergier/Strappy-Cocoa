@@ -59,6 +59,9 @@ function handleWorkerMessage(event) {
         message.databasePersistent === true ? "true" : "false";
       statusElement.dataset.sessionCount = String(message.databaseSessionCount ?? 0);
       statusElement.dataset.sessionId = String(message.databaseSessionId ?? 0);
+      statusElement.dataset.capabilityProfile = JSON.stringify(
+        message.capabilityProfile ?? null,
+      );
       setTransportStatus("idle", "Enter an API key to enable the transport test.");
       break;
     case "key-state":

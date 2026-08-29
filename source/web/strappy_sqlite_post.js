@@ -47,6 +47,7 @@
     const sqlite3 = await strappySQLitePostLoadInit.apply(Module, args);
     delete Module.strappyRawWasmExports;
     sqlite3.ccall = Module.ccall.bind(Module);
+    sqlite3.FS = Module.FS;
     return sqlite3;
   };
 }

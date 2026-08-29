@@ -18,6 +18,9 @@ SQLITE_MODULE_WASM := $(SQLITE_WASM_DIR)/jswasm/esm/sqlite3.wasm
 WEB_SOURCES := \
 	$(SHARED_DIR)/strappy_core.c \
 	$(SHARED_DIR)/strappy_provider.c \
+	$(SHARED_DIR)/strappy_platform_profile.c \
+	$(SHARED_DIR)/strappy_assistant_sets.c \
+	$(SHARED_DIR)/strappy_tools.c \
 	$(SHARED_DIR)/strappy_client.c \
 	$(SHARED_DIR)/strappy_client_web.c \
 	$(SHARED_DIR)/strappy_db_connection_web.c \
@@ -26,11 +29,15 @@ WEB_SOURCES := \
 	$(SHARED_DIR)/strappy_db_sessions.c \
 	strappy_sse_web.c \
 	strappy_web_client.c \
-	strappy_web_database.c
+	strappy_web_database.c \
+	strappy_web_capabilities.c
 
 WEB_HEADERS := \
 	$(SHARED_DIR)/strappy_core.h \
 	$(SHARED_DIR)/strappy_provider.h \
+	$(SHARED_DIR)/strappy_platform_profile.h \
+	$(SHARED_DIR)/strappy_assistant_sets.h \
+	$(SHARED_DIR)/strappy_tools.h \
 	$(SHARED_DIR)/strappy_config.h \
 	$(SHARED_DIR)/strappy_client.h \
 	$(SHARED_DIR)/strappy_client_transport.h \

@@ -8,6 +8,20 @@ const expectedResources = [
   "GuidanceTools.json",
   "SystemPrompt.json",
 ];
+const expectedWebTools = [
+  "datetime_from_iso8601",
+  "datetime_to_iso8601",
+  "fontawesome_confirm",
+  "fontawesome_search",
+  "memory_delete",
+  "memory_read",
+  "memory_save",
+  "openrouter:web_fetch",
+  "openrouter:web_search",
+  "session_rename",
+  "skill_read",
+  "skills_list",
+];
 
 if (!baseUrl || !webdriverUrl) {
   throw new Error(
@@ -134,7 +148,9 @@ async function verifyBrowserExecution() {
               detail: detail?.textContent || "",
               databasePersistent: status?.dataset.databasePersistent || "false",
               sessionCount: Number(status?.dataset.sessionCount || 0),
-              sessionId: Number(status?.dataset.sessionId || 0)
+              sessionId: Number(status?.dataset.sessionId || 0),
+              capabilityProfile: JSON.parse(
+                status?.dataset.capabilityProfile || "null")
             };
           `,
           args: [],
@@ -163,6 +179,17 @@ async function verifyBrowserExecution() {
           count: result.sessionCount,
           id: result.sessionId,
         };
+        if (result.capabilityProfile?.defaultAssistantSet !== "world_knowledge") {
+          throw new Error("The C web profile did not default to World Knowledge.");
+        }
+        const actualTools = (result.capabilityProfile?.tools || []).map((tool) =>
+          tool.type === "function" ? tool.name : tool.type
+        ).sort();
+        if (JSON.stringify(actualTools) !== JSON.stringify(expectedWebTools)) {
+          throw new Error(
+            `The model-facing web tool schema is incorrect: ${JSON.stringify(actualTools)}`,
+          );
+        }
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -402,5 +429,5 @@ async function verifyBrowserExecution() {
 await verifyStaticAssets();
 await verifyBrowserExecution();
 console.log(
-  "PASS: browser loaded Wasm, retained its SQLite OPFS session, and forgot its API key.",
+  "PASS: browser enforced its C capability profile, retained its SQLite OPFS session, and forgot its API key.",
 );

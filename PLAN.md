@@ -123,17 +123,17 @@ available after reload, with no credential data in the database.
 
 ### 5. Enforce the browser capability profile
 
-- [ ] Add a web platform profile that exposes only `world_knowledge` and
+- [x] Add a web platform profile that exposes only `world_knowledge` and
   OpenRouter.
-- [ ] Make World Knowledge the effective default regardless of the native default.
-- [ ] Reject unsupported assistant-set and provider IDs at the C boundary.
-- [ ] Exclude database, Bash, file, study, OAuth, ChatGPT, and Keychain modules from
+- [x] Make World Knowledge the effective default regardless of the native default.
+- [x] Reject unsupported assistant-set and provider IDs at the C boundary.
+- [x] Exclude database, Bash, file, study, OAuth, ChatGPT, and Keychain modules from
   the web link.
-- [ ] Split `strappy_tools.c` only as much as required to link the browser-safe
+- [x] Split `strappy_tools.c` only as much as required to link the browser-safe
   tools without host-tool dependencies.
-- [ ] Retain World Knowledge's safe tools: memory, skills, session rename, datetime,
+- [x] Retain World Knowledge's safe tools: memory, skills, session rename, datetime,
   Font Awesome, and OpenRouter server web tools.
-- [ ] Confirm that unsupported tools are absent from model-facing tool schemas,
+- [x] Confirm that unsupported tools are absent from model-facing tool schemas,
   rather than present as failing stubs.
 
 Exit condition: generated World Knowledge requests contain only the intended

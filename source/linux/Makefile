@@ -22,6 +22,7 @@ STRAPPY_DB_SOURCES = \
 	$(SHARED_DIR)/strappy_db_sessions.c \
 	$(SHARED_DIR)/strappy_db_responses.c
 STRAPPY_PLATFORM_SOURCES = \
+	$(SHARED_DIR)/strappy_platform_profile.c \
 	$(SHARED_DIR)/strappy_cocoa.c \
 	$(SHARED_DIR)/strappy_calendar.c
 FONTAWESOME_GENERATOR := $(SHARED_DIR)/tools/generate_fontawesome_webview_map.py
@@ -214,6 +215,7 @@ OTHER_OPENROUTER_COMPATIBILITY_PROBE_SOURCES = \
 PROVIDER_REGISTRY_HARNESS_SOURCES = \
 	provider_registry_harness.c \
 	$(SHARED_DIR)/strappy_provider.c \
+	$(SHARED_DIR)/strappy_platform_profile.c \
 	$(SHARED_DIR)/strappy_core.c
 
 CALENDAR_HARNESS_SOURCES = \

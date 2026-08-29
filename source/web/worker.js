@@ -9,6 +9,41 @@ let strappyModule = null;
 let databasePersistent = false;
 let databaseSessionCount = 0;
 let databaseSessionId = 0;
+let capabilityProfile = null;
+
+async function installCapabilityResources(strappy) {
+  strappy.FS.mkdirTree("/Resources");
+  for (const resourceName of ["AssistantSets.json", "GuidanceTools.json"]) {
+    const response = await fetch(new URL(`./Resources/${resourceName}`, import.meta.url));
+    if (!response.ok) {
+      throw new Error(`Could not load ${resourceName} (HTTP ${response.status}).`);
+    }
+    strappy.FS.writeFile(
+      `/Resources/${resourceName}`,
+      new Uint8Array(await response.arrayBuffer()),
+    );
+  }
+}
+
+function initializeCapabilityProfile(strappy) {
+  const succeeded = strappy.ccall(
+    "strappy_web_capabilities_initialize",
+    "number",
+    ["string"],
+    ["/Resources"],
+  );
+  if (succeeded !== 1) {
+    const message = strappy.ccall(
+      "strappy_web_capabilities_last_error", "string", [], []);
+    throw new Error(message || "Could not initialize the web capability profile.");
+  }
+  capabilityProfile = {
+    defaultAssistantSet: strappy.ccall(
+      "strappy_web_capabilities_default_assistant_set", "string", [], []),
+    tools: JSON.parse(strappy.ccall(
+      "strappy_web_capabilities_tools", "string", [], [])),
+  };
+}
 
 function databaseError() {
   return strappyModule.ccall(
@@ -167,6 +202,9 @@ try {
     throw new Error("Shared C code rejected the UTF-8 greeting.");
   }
 
+  await installCapabilityResources(strappy);
+  initializeCapabilityProfile(strappy);
+
   requireDatabaseCall("strappy_web_database_initialize_temporary");
   if (
     typeof navigator !== "undefined" &&
@@ -196,6 +234,7 @@ try {
     databasePersistent,
     databaseSessionCount,
     databaseSessionId,
+    capabilityProfile,
   });
 } catch (error) {
   self.postMessage({

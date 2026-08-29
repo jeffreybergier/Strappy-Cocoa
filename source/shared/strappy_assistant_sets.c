@@ -1,6 +1,7 @@
 #include "strappy_assistant_sets.h"
 
 #include "strappy_core.h"
+#include "strappy_platform_profile.h"
 
 #include <cJSON.h>
 #include <stdio.h>
@@ -574,6 +575,7 @@ int strappy_assistant_sets_list(const char *resource_dir,
   }
   for (set = sets->child; set != NULL; set = set->next) {
     strappy_assistant_set_record *next;
+    cJSON *identifier;
     int user_selectable;
 
     if (!strappy_assistant_sets_required_boolean(set,
@@ -585,6 +587,11 @@ int strappy_assistant_sets_list(const char *resource_dir,
       return 0;
     }
     if (!user_selectable) {
+      continue;
+    }
+    identifier = cJSON_GetObjectItemCaseSensitive(set, "id");
+    if (cJSON_IsString(identifier) && (identifier->valuestring != NULL) &&
+        !strappy_platform_allows_assistant_set(identifier->valuestring)) {
       continue;
     }
 
@@ -651,7 +658,6 @@ int strappy_assistant_sets_load_profile(
   cJSON *root;
   cJSON *universal;
   cJSON *set;
-  cJSON *default_value;
   const char *selected_identifier;
   const char *display_name;
   const char *detail;
@@ -673,12 +679,17 @@ int strappy_assistant_sets_load_profile(
   if (root == NULL) {
     return 0;
   }
-  default_value = cJSON_GetObjectItemCaseSensitive(root, "default_set_id");
   selected_identifier = identifier;
   if ((selected_identifier == NULL) || (selected_identifier[0] == '\0')) {
-    selected_identifier = (cJSON_IsString(default_value) &&
-                           (default_value->valuestring != NULL)) ?
-      default_value->valuestring : STRAPPY_ASSISTANT_SET_DEFAULT;
+    selected_identifier = strappy_platform_default_assistant_set_id();
+  }
+  if (!strappy_platform_allows_assistant_set(selected_identifier)) {
+    cJSON_Delete(root);
+    strappy_set_formatted_error(
+      error_out,
+      "Assistant set is not supported on this platform: %s",
+      selected_identifier);
+    return 0;
   }
   universal = cJSON_GetObjectItemCaseSensitive(root, "universal");
   if (!cJSON_IsObject(universal)) {
@@ -793,6 +804,16 @@ int strappy_assistant_sets_load_profile(
         error_out,
         "Assistant-set preflight tool is not allowed: %s",
         profile->preflight_calls[index].tool_name);
+      strappy_assistant_set_profile_destroy(profile);
+      return 0;
+    }
+  }
+  for (index = 0U; index < profile->tool_name_count; index++) {
+    if (!strappy_platform_allows_tool(profile->tool_names[index])) {
+      strappy_set_formatted_error(
+        error_out,
+        "Assistant-set tool is not supported on this platform: %s",
+        profile->tool_names[index]);
       strappy_assistant_set_profile_destroy(profile);
       return 0;
     }

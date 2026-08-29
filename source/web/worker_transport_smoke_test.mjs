@@ -18,11 +18,21 @@ globalThis.self = {
   },
   close() {},
 };
-globalThis.fetch = async (_url, options) => new Promise((_resolve, reject) => {
-  options.signal.addEventListener("abort", () => {
-    reject(new DOMException("Cancelled", "AbortError"));
-  }, { once: true });
-});
+globalThis.fetch = async (url, options) => {
+  const parsedUrl = new URL(url);
+  if (parsedUrl.pathname.includes("/Resources/")) {
+    const resourceName = parsedUrl.pathname.split("/").at(-1);
+    const bytes = await readFile(
+      new URL(`./build-release/Resources/${resourceName}`, import.meta.url),
+    );
+    return new Response(bytes, { status: 200 });
+  }
+  return new Promise((_resolve, reject) => {
+    options.signal.addEventListener("abort", () => {
+      reject(new DOMException("Cancelled", "AbortError"));
+    }, { once: true });
+  });
+};
 
 await import("./build-release/worker.js?transport-cancellation-test");
 
@@ -39,7 +49,9 @@ async function waitForWorkerMessage(type) {
     });
     workerMessageWaiter = null;
   }
-  throw new Error(`Timed out waiting for Worker message: ${type}`);
+  throw new Error(
+    `Timed out waiting for Worker message: ${type}; received ${JSON.stringify(workerMessages)}`,
+  );
 }
 
 await waitForWorkerMessage("ready");

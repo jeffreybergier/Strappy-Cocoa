@@ -1,6 +1,7 @@
 #include "strappy_provider.h"
 
 #include "strappy_core.h"
+#include "strappy_platform_profile.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -99,7 +100,9 @@ int strappy_provider_price_per_million_to_per_token(const char *text,
 
 int strappy_provider_chatgpt_is_enabled(void)
 {
-#if STRAPPY_ENABLE_EXPERIMENTAL_CHATGPT
+#if defined(STRAPPY_PLATFORM_WEB)
+  return 0;
+#elif STRAPPY_ENABLE_EXPERIMENTAL_CHATGPT
   const char *disabled;
 
   disabled = getenv("STRAPPY_DISABLE_EXPERIMENTAL_CHATGPT");
@@ -346,8 +349,12 @@ static const strappy_provider_definition strappy_provider_registry[] = {
 
 size_t strappy_provider_count(void)
 {
+#if defined(STRAPPY_PLATFORM_WEB)
+  return 1U;
+#else
   return sizeof(strappy_provider_registry) /
     sizeof(strappy_provider_registry[0]);
+#endif
 }
 
 const strappy_provider_definition *strappy_provider_at(size_t index)
@@ -360,7 +367,7 @@ const strappy_provider_definition *strappy_provider_find(const char *provider_id
 {
   size_t index;
 
-  if ((provider_id == NULL) || (provider_id[0] == '\0')) {
+  if (!strappy_platform_allows_provider(provider_id)) {
     return NULL;
   }
   for (index = 0U; index < strappy_provider_count(); index++) {
