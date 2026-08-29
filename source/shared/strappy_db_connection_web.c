@@ -10,6 +10,7 @@
 static sqlite3 *strappy_db_connection = NULL;
 static char *strappy_db_connection_path = NULL;
 static int strappy_db_connection_schema_ready = 0;
+static int strappy_db_persistent_vfs_enabled = 0;
 
 static void strappy_db_close_connection(void)
 {
@@ -29,6 +30,17 @@ static void strappy_db_close_connection(void)
   free(strappy_db_connection_path);
   strappy_db_connection_path = NULL;
   strappy_db_connection_schema_ready = 0;
+}
+
+void strappy_db_web_set_persistent_vfs_enabled(int enabled)
+{
+  int next_enabled;
+
+  next_enabled = enabled ? 1 : 0;
+  if (strappy_db_persistent_vfs_enabled != next_enabled) {
+    strappy_db_close_connection();
+    strappy_db_persistent_vfs_enabled = next_enabled;
+  }
 }
 
 void strappy_db_release(sqlite3 *db)
@@ -75,7 +87,8 @@ int strappy_db_open(const char *db_path, sqlite3 **db_out, char **error_out)
   strappy_db_close_connection();
   db = NULL;
   flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
-  vfs_name = (db_path[0] == ':') ? NULL : "opfs-sahpool";
+  vfs_name = ((db_path[0] != ':') && strappy_db_persistent_vfs_enabled) ?
+    "opfs-sahpool" : NULL;
   rc = sqlite3_open_v2(db_path, &db, flags, vfs_name);
   if (rc != SQLITE_OK) {
     const char *message = (db != NULL) ? sqlite3_errmsg(db) :

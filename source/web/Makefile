@@ -27,10 +27,22 @@ WEB_SOURCES := \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_db_catalog.c \
 	$(SHARED_DIR)/strappy_db_sessions.c \
+	$(SHARED_DIR)/strappy_db_responses.c \
+	$(SHARED_DIR)/strappy_model_catalog.c \
+	$(SHARED_DIR)/strappy_prompt.c \
+	$(SHARED_DIR)/strappy_quality_policy.c \
+	$(SHARED_DIR)/strappy_responses.c \
+	$(SHARED_DIR)/strappy_session.c \
+	$(SHARED_DIR)/strappy_skills.c \
+	$(SHARED_DIR)/strappy_webview.c \
+	$(SHARED_DIR)/strappy_cocoa.c \
+	$(SHARED_DIR)/strappy_calendar.c \
+	$(SHARED_DIR)/strappy_debug_capture.c \
 	strappy_sse_web.c \
 	strappy_web_client.c \
 	strappy_web_database.c \
-	strappy_web_capabilities.c
+	strappy_web_capabilities.c \
+	strappy_web_conversation.c
 
 WEB_HEADERS := \
 	$(SHARED_DIR)/strappy_core.h \
@@ -69,6 +81,7 @@ WORLD_KNOWLEDGE_RESOURCE_OUTPUTS := \
 TEST_SCRIPT := browser_smoke_test.mjs
 CLIENT_TEST_SCRIPT := client_transport_smoke_test.mjs
 WORKER_CLIENT_TEST_SCRIPT := worker_transport_smoke_test.mjs
+WORKER_CONVERSATION_TEST_SCRIPT := worker_conversation_smoke_test.mjs
 
 CPPFLAGS := -I$(SHARED_DIR)
 COMMON_CFLAGS := \
@@ -90,6 +103,7 @@ release: $(WEB_OUTPUTS) $(STATIC_OUTPUTS) $(WORLD_KNOWLEDGE_RESOURCE_OUTPUTS)
 test: release
 	$(NODE) $(CLIENT_TEST_SCRIPT)
 	$(NODE) $(WORKER_CLIENT_TEST_SCRIPT)
+	$(NODE) $(WORKER_CONVERSATION_TEST_SCRIPT)
 	$(NODE) $(TEST_SCRIPT)
 
 # Emscripten creates the JavaScript loader and Wasm binary in one invocation.

@@ -232,20 +232,30 @@ async function verifyBrowserExecution() {
         {
           script: `
             return {
-              status: document.querySelector("#transport-status").textContent,
-              testDisabled: document.querySelector("#test-request").disabled,
-              bodyContainsKey: document.body.textContent.includes(arguments[0])
+              status: document.querySelector("#conversation-status").textContent,
+              sendDisabled: document.querySelector("#send-prompt").disabled,
+              bodyContainsKey: document.body.textContent.includes(arguments[0]),
+              timelineReady:
+                document.querySelector("#timeline").contentDocument
+                  ?.querySelector("#messages") !== null,
+              rendererReady: typeof document.querySelector("#timeline")
+                .contentWindow?.appendMessage === "function"
             };
           `,
           args: [canaryKey],
         },
       );
-      if (!storedState.testDisabled) {
+      if (!storedState.sendDisabled && storedState.timelineReady) {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    if (storedState.testDisabled || storedState.bodyContainsKey) {
+    if (
+      storedState.sendDisabled ||
+      storedState.bodyContainsKey ||
+      !storedState.timelineReady ||
+      !storedState.rendererReady
+    ) {
       throw new Error("Worker key handoff did not reach the expected volatile state.");
     }
 
@@ -266,80 +276,21 @@ async function verifyBrowserExecution() {
         {
           script: `
             return {
-              status: document.querySelector("#transport-status").textContent,
-              testDisabled: document.querySelector("#test-request").disabled
+              status: document.querySelector("#conversation-status").textContent,
+              sendDisabled: document.querySelector("#send-prompt").disabled
             };
           `,
           args: [],
         },
       );
-      if (clearState.testDisabled && clearState.status.includes("cleared")) {
+      if (clearState.sendDisabled && clearState.status.includes("cleared")) {
         clearVerified = true;
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     if (!clearVerified) {
-      throw new Error("Explicit key clearing did not disable the transport.");
-    }
-
-    await webdriverRequest(
-      `/session/${sessionId}/execute/sync`,
-      "POST",
-      {
-        script: `document.querySelector("#shutdown-worker").click();`,
-        args: [],
-      },
-    );
-    const shutdownState = await webdriverRequest(
-      `/session/${sessionId}/execute/sync`,
-      "POST",
-      {
-        script: `
-          return {
-            status: document.querySelector("#transport-status").textContent,
-            restartHidden: document.querySelector("#restart-worker").hidden,
-            testDisabled: document.querySelector("#test-request").disabled
-          };
-        `,
-        args: [],
-      },
-    );
-    if (
-      shutdownState.restartHidden ||
-      !shutdownState.testDisabled ||
-      !shutdownState.status.includes("shut down")
-    ) {
-      throw new Error("Worker shutdown did not clear and disable transport state.");
-    }
-
-    await webdriverRequest(
-      `/session/${sessionId}/execute/sync`,
-      "POST",
-      {
-        script: `document.querySelector("#restart-worker").click();`,
-        args: [],
-      },
-    );
-    const restartDeadline = Date.now() + 60000;
-    let restartVerified = false;
-    while (Date.now() < restartDeadline) {
-      const restartReady = await webdriverRequest(
-        `/session/${sessionId}/execute/sync`,
-        "POST",
-        {
-          script: `return document.querySelector("#status").dataset.state === "ready";`,
-          args: [],
-        },
-      );
-      if (restartReady) {
-        restartVerified = true;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    if (!restartVerified) {
-      throw new Error("Worker did not become ready after restart.");
+      throw new Error("Explicit key clearing did not disable prompt submission.");
     }
 
     await webdriverRequest(
@@ -357,22 +308,22 @@ async function verifyBrowserExecution() {
     const secondKeyDeadline = Date.now() + 5000;
     let secondKeySet = false;
     while (Date.now() < secondKeyDeadline) {
-      const testDisabled = await webdriverRequest(
+      const sendDisabled = await webdriverRequest(
         `/session/${sessionId}/execute/sync`,
         "POST",
         {
-          script: `return document.querySelector("#test-request").disabled;`,
+          script: `return document.querySelector("#send-prompt").disabled;`,
           args: [],
         },
       );
-      if (!testDisabled) {
+      if (!sendDisabled) {
         secondKeySet = true;
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     if (!secondKeySet) {
-      throw new Error("Restarted Worker did not accept a new volatile key.");
+      throw new Error("Worker did not accept a new volatile key.");
     }
 
     await webdriverRequest(`/session/${sessionId}/refresh`, "POST", {});
@@ -385,7 +336,7 @@ async function verifyBrowserExecution() {
           script: `
             return {
               ready: document.querySelector("#status")?.dataset.state === "ready",
-              testDisabled: document.querySelector("#test-request")?.disabled,
+              sendDisabled: document.querySelector("#send-prompt")?.disabled,
               keyValue: document.querySelector("#api-key")?.value || "",
               localStorageCount: localStorage.length,
               sessionStorageCount: sessionStorage.length,
@@ -402,7 +353,7 @@ async function verifyBrowserExecution() {
       );
       if (reloadState.ready) {
         if (
-          !reloadState.testDisabled ||
+          !reloadState.sendDisabled ||
           reloadState.keyValue !== "" ||
           reloadState.localStorageCount !== 0 ||
           reloadState.sessionStorageCount !== 0 ||

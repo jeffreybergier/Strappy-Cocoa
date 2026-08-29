@@ -2945,6 +2945,7 @@ static int strappy_responses_execute_tool_calls(
         strappy_responses_owned_items_destroy(outputs);
         return 0;
       }
+#if !defined(STRAPPY_PLATFORM_WEB)
       if (strcmp(call->name, STRAPPY_TOOL_BASH) == 0) {
         char *bash_error_output;
 
@@ -2960,6 +2961,7 @@ static int strappy_responses_execute_tool_calls(
           return 0;
         }
       }
+#endif
     }
 
     memset(&execution, 0, sizeof(execution));

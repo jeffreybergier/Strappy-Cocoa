@@ -48,6 +48,16 @@
     delete Module.strappyRawWasmExports;
     sqlite3.ccall = Module.ccall.bind(Module);
     sqlite3.FS = Module.FS;
+    sqlite3.UTF8ToString = Module.UTF8ToString.bind(Module);
+    Object.defineProperty(sqlite3, "strappyCopyCredential", {
+      configurable: true,
+      get() {
+        return Module.strappyCopyCredential;
+      },
+      set(callback) {
+        Module.strappyCopyCredential = callback;
+      },
+    });
     return sqlite3;
   };
 }

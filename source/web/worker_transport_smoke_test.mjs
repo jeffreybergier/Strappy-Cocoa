@@ -50,7 +50,14 @@ async function waitForWorkerMessage(type) {
     workerMessageWaiter = null;
   }
   throw new Error(
-    `Timed out waiting for Worker message: ${type}; received ${JSON.stringify(workerMessages)}`,
+    `Timed out waiting for Worker message: ${type}; received ${JSON.stringify(
+      workerMessages.map((message) => ({
+        type: message.type,
+        kind: message.kind,
+        message: message.message,
+      })),
+      (_key, value) => typeof value === "bigint" ? value.toString() : value,
+    )}`,
   );
 }
 

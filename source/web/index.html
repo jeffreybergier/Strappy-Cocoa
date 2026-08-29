@@ -5,110 +5,62 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Strappy WebAssembly</title>
   <style>
-    :root {
-      color-scheme: light dark;
-      font-family: system-ui, sans-serif;
-    }
-
-    body {
-      display: grid;
-      min-height: 100vh;
-      margin: 0;
-      place-items: center;
-    }
-
-    main {
-      box-sizing: border-box;
-      max-width: 42rem;
-      padding: 2rem;
-      width: 100%;
-    }
-
-    h1,
-    #wasm-detail {
-      text-align: center;
-    }
-
-    form,
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      margin-block: 1rem;
-    }
-
-    label {
-      flex: 1 1 18rem;
-    }
-
-    input,
-    button {
-      box-sizing: border-box;
-      font: inherit;
-      min-height: 2.5rem;
-      padding: 0.5rem 0.75rem;
-    }
-
-    input {
-      display: block;
-      margin-top: 0.35rem;
-      width: 100%;
-    }
-
-    #status[data-state="ready"],
-    #transport-status[data-state="ready"],
-    #transport-status[data-state="complete"] {
-      color: #16803c;
-    }
-
-    #status[data-state="error"],
-    #transport-status[data-state="error"] {
-      color: #c42b1c;
-    }
-
-    #response {
-      border: 1px solid currentColor;
-      border-radius: 0.35rem;
-      box-sizing: border-box;
-      min-height: 8rem;
-      overflow-wrap: anywhere;
-      padding: 1rem;
-      white-space: pre-wrap;
-    }
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; min-height: 100vh; }
+    main { box-sizing: border-box; display: grid; gap: 1rem; margin: auto;
+      max-width: 64rem; min-height: 100vh; padding: 1rem; }
+    h1 { margin-bottom: 0; }
+    #wasm-detail { margin-top: 0; }
+    form, .actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+    label { flex: 1 1 18rem; }
+    input, textarea, button { box-sizing: border-box; font: inherit;
+      min-height: 2.5rem; padding: .5rem .75rem; }
+    input, textarea { display: block; margin-top: .35rem; width: 100%; }
+    textarea { min-height: 5rem; resize: vertical; }
+    #timeline { background: white; border: 1px solid #8886; border-radius: .5rem;
+      min-height: 24rem; width: 100%; }
+    [data-state="ready"], [data-state="complete"] { color: #16803c; }
+    [data-state="error"] { color: #c42b1c; }
+    .credential-note { font-size: .9rem; }
   </style>
 </head>
 <body>
   <main>
-    <h1>Strappy WebAssembly</h1>
-    <p id="status" role="status" aria-live="polite">Loading shared C code…</p>
-    <p id="wasm-detail" hidden></p>
+    <header>
+      <h1>Strappy World Knowledge</h1>
+      <p id="status" role="status" aria-live="polite">Loading shared C code…</p>
+      <p id="wasm-detail" hidden></p>
+    </header>
 
-    <section aria-labelledby="transport-heading">
-      <h2 id="transport-heading">OpenRouter transport test</h2>
-      <p>
-        The key is sent directly to this page's Worker and is never saved. The
-        test uses the free router and requests one short JSON response.
-      </p>
+    <section aria-label="OpenRouter credential">
       <form id="key-form">
-        <label for="api-key">
-          OpenRouter API key
+        <label for="api-key">OpenRouter API key
           <input id="api-key" name="api-key" type="password"
                  autocomplete="off" autocapitalize="none" spellcheck="false"
                  required>
         </label>
-        <button id="set-key" type="submit" disabled>Send key to Worker</button>
-      </form>
-      <div class="actions">
-        <button id="test-request" type="button" disabled>Run test request</button>
-        <button id="cancel-request" type="button" disabled>Cancel</button>
+        <button id="set-key" type="submit" disabled>Use key</button>
         <button id="clear-key" type="button" disabled>Clear key</button>
-        <button id="shutdown-worker" type="button" disabled>Shut down Worker</button>
-        <button id="restart-worker" type="button" hidden>Restart Worker</button>
-      </div>
-      <p id="transport-status" role="status" aria-live="polite">
+      </form>
+      <p class="credential-note">The key stays only in volatile Worker memory
+        and is forgotten when this page reloads.</p>
+    </section>
+
+    <iframe id="timeline" title="Conversation transcript"></iframe>
+
+    <section aria-label="Prompt composer">
+      <form id="prompt-form">
+        <label for="prompt">Prompt
+          <textarea id="prompt" name="prompt" required></textarea>
+        </label>
+        <div class="actions">
+          <button id="send-prompt" type="submit" disabled>Send</button>
+          <button id="cancel-request" type="button" disabled>Cancel</button>
+        </div>
+      </form>
+      <p id="conversation-status" role="status" aria-live="polite">
         Waiting for the Worker.
       </p>
-      <pre id="response" aria-label="OpenRouter response" hidden></pre>
     </section>
   </main>
   <script type="module" src="./app.js"></script>

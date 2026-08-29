@@ -22,11 +22,23 @@ STRAPPY_SOURCES := \
   $(STRAPPY_SHARED_DIR)/strappy_db.c \
   $(STRAPPY_SHARED_DIR)/strappy_db_catalog.c \
   $(STRAPPY_SHARED_DIR)/strappy_db_sessions.c \
+  $(STRAPPY_SHARED_DIR)/strappy_db_responses.c \
+  $(STRAPPY_SHARED_DIR)/strappy_model_catalog.c \
+  $(STRAPPY_SHARED_DIR)/strappy_prompt.c \
+  $(STRAPPY_SHARED_DIR)/strappy_quality_policy.c \
+  $(STRAPPY_SHARED_DIR)/strappy_responses.c \
+  $(STRAPPY_SHARED_DIR)/strappy_session.c \
+  $(STRAPPY_SHARED_DIR)/strappy_skills.c \
+  $(STRAPPY_SHARED_DIR)/strappy_webview.c \
+  $(STRAPPY_SHARED_DIR)/strappy_cocoa.c \
+  $(STRAPPY_SHARED_DIR)/strappy_calendar.c \
+  $(STRAPPY_SHARED_DIR)/strappy_debug_capture.c \
   $(STRAPPY_CJSON_DIR)/cJSON.c \
   $(STRAPPY_WEB_DIR)/strappy_sse_web.c \
   $(STRAPPY_WEB_DIR)/strappy_web_client.c \
   $(STRAPPY_WEB_DIR)/strappy_web_database.c \
-  $(STRAPPY_WEB_DIR)/strappy_web_capabilities.c
+  $(STRAPPY_WEB_DIR)/strappy_web_capabilities.c \
+  $(STRAPPY_WEB_DIR)/strappy_web_conversation.c
 
 $(STRAPPY_COMBINED_EXPORTS): $(EXPORTED_FUNCTIONS.api) $(STRAPPY_EXPORTS)
 	@mkdir -p $(dir $@)
@@ -43,7 +55,7 @@ override emcc.jsflags := $(filter-out \
 override emcc.jsflags += \
   -sASYNCIFY=1 \
   -sEXPORTED_FUNCTIONS=@$(STRAPPY_COMBINED_EXPORTS) \
-  -sEXPORTED_RUNTIME_METHODS=wasmMemory,ccall,FS \
+  -sEXPORTED_RUNTIME_METHODS=wasmMemory,ccall,FS,UTF8ToString \
   --js-library $(STRAPPY_WEB_DIR)/strappy_client_fetch.js
 
 override emcc.environment.esm = web,worker,node

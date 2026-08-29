@@ -6,6 +6,9 @@
 #include "strappy_core.h"
 #include "strappy_platform_profile.h"
 #include "strappy_db.h"
+#if defined(STRAPPY_PLATFORM_WEB)
+#include "strappy_db_internal.h"
+#endif
 #include "strappy_file_edit.h"
 #include "strappy_file_read.h"
 #include "strappy_file_write.h"
@@ -147,9 +150,7 @@ typedef char *(*strappy_tools_datetime_token_converter)(
   strappy_cocoa_timestamp_unit unit,
   char **error_out);
 
-#if !defined(STRAPPY_PLATFORM_WEB)
 static int strappy_tools_helper_is_space(char value);
-#endif
 
 static const strappy_tool_definition strappy_tool_definitions[] = {
   { STRAPPY_TOOL_DATABASE_LIST, STRAPPY_TOOL_KIND_DATABASE },
@@ -2032,7 +2033,6 @@ char *strappy_tools_tool_guidance_string(const char *resource_dir,
   return value;
 }
 
-#if !defined(STRAPPY_PLATFORM_WEB)
 static int strappy_tools_add_result_guidance(cJSON *result,
                                              const char *resource_dir,
                                              const char *tool_name,
@@ -3454,6 +3454,9 @@ static int strappy_tools_open_helper_info_database(const char *session_db_path,
                                                   sqlite3 **db_out,
                                                   char **error_out)
 {
+#if defined(STRAPPY_PLATFORM_WEB)
+  return strappy_db_open(session_db_path, db_out, error_out);
+#else
   sqlite3 *db;
   int rc;
 
@@ -3497,6 +3500,16 @@ static int strappy_tools_open_helper_info_database(const char *session_db_path,
   sqlite3_busy_timeout(db, 5000);
   *db_out = db;
   return 1;
+#endif
+}
+
+static void strappy_tools_close_helper_info_database(sqlite3 *db)
+{
+#if defined(STRAPPY_PLATFORM_WEB)
+  strappy_db_release(db);
+#else
+  sqlite3_close(db);
+#endif
 }
 
 static int strappy_tools_copy_active_assistant_set_id(
@@ -6102,7 +6115,7 @@ static char *strappy_tools_execute_memory_read(
   }
 
   json = strappy_tools_read_user_info(db, assistant_set_id, error_out);
-  sqlite3_close(db);
+  strappy_tools_close_helper_info_database(db);
   free(assistant_set_id);
   return json;
 }
@@ -6151,7 +6164,7 @@ static char *strappy_tools_execute_memory_save(
                                             provider_call_id,
                                             &source_item_id,
                                             error_out)) {
-    sqlite3_close(db);
+    strappy_tools_close_helper_info_database(db);
     free(assistant_set_id);
     strappy_memory_save_arguments_destroy(&arguments);
     return NULL;
@@ -6161,7 +6174,7 @@ static char *strappy_tools_execute_memory_save(
                                           &arguments,
                                           source_item_id,
                                           error_out);
-  sqlite3_close(db);
+  strappy_tools_close_helper_info_database(db);
   free(assistant_set_id);
   strappy_memory_save_arguments_destroy(&arguments);
   return json;
@@ -6205,7 +6218,7 @@ static char *strappy_tools_execute_memory_delete(
                                         assistant_set_id,
                                         arguments.id,
                                         error_out);
-  sqlite3_close(db);
+  strappy_tools_close_helper_info_database(db);
   free(assistant_set_id);
   return json;
 }
@@ -6757,7 +6770,14 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
     strappy_set_error(error_out, "Tool name is empty.");
     return NULL;
   }
+  if (!strappy_platform_allows_tool(tool_name)) {
+    strappy_set_formatted_error(error_out,
+                                "Tool is not available: %s",
+                                tool_name);
+    return NULL;
+  }
 
+#if !defined(STRAPPY_PLATFORM_WEB)
   if (strcmp(tool_name, STRAPPY_TOOL_BASH) == 0) {
     return strappy_bash_execute(session_db_path,
                                 active_session_id,
@@ -6803,6 +6823,7 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                                 arguments_json,
                                                 error_out);
   }
+#endif
 
   if (strcmp(tool_name, STRAPPY_TOOL_DATETIME_TO_ISO8601) == 0) {
     return strappy_tools_execute_datetime_to_iso8601(arguments_json,
@@ -6859,6 +6880,7 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                                            error_out);
   }
 
+#if !defined(STRAPPY_PLATFORM_WEB)
   if (strcmp(tool_name, STRAPPY_TOOL_DATABASE_CONTEXT) == 0) {
     return strappy_tools_execute_database_context(session_db_path,
                                                   resource_dir,
@@ -6874,6 +6896,7 @@ static char *strappy_tools_execute_internal(const char *session_db_path,
                                                                arguments_json,
                                                                error_out);
   }
+#endif
 
   if (strcmp(tool_name, STRAPPY_TOOL_FONTAWESOME_SEARCH) == 0) {
     return strappy_tools_execute_fontawesome_search(resource_dir,
@@ -6919,6 +6942,7 @@ char *strappy_tools_execute_preflight(const char *session_db_path,
                                       const char *arguments_json,
                                       char **error_out)
 {
+#if !defined(STRAPPY_PLATFORM_WEB)
   if ((tool_name != NULL) &&
       (strcmp(tool_name, STRAPPY_TOOL_BASH) == 0)) {
     return strappy_bash_execute_preflight(session_db_path,
@@ -6926,6 +6950,7 @@ char *strappy_tools_execute_preflight(const char *session_db_path,
                                           arguments_json,
                                           error_out);
   }
+#endif
   return strappy_tools_execute(session_db_path,
                                active_session_id,
                                resource_dir,
@@ -6995,4 +7020,3 @@ char *strappy_tools_execute_for_function_call_with_cancellation(
                                         cancelled_out,
                                         error_out);
 }
-#endif

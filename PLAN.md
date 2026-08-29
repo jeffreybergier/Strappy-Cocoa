@@ -141,16 +141,16 @@ browser-safe local tools and OpenRouter server tools.
 
 ### 6. Connect the complete Strappy conversation path
 
-- [ ] Export small C entry points for store initialization, session creation,
+- [x] Export small C entry points for store initialization, session creation,
   prompt submission, cancellation, timeline loading, and string cleanup.
-- [ ] Install a web credential callback that supplies a temporary OpenRouter key
+- [x] Install a web credential callback that supplies a temporary OpenRouter key
   copy to the Responses runtime.
-- [ ] Route Responses events from C to the Worker and then to the main thread.
-- [ ] Use the existing C webview renderer for the initial page and incremental
+- [x] Route Responses events from C to the Worker and then to the main thread.
+- [x] Use the existing C webview renderer for the initial page and incremental
   updates.
-- [ ] Add the minimum UI: key entry, one session, transcript, prompt input, send,
+- [x] Add the minimum UI: key entry, one session, transcript, prompt input, send,
   cancel, processing status, and visible errors.
-- [ ] Use the existing default OpenRouter model for the PoC; defer model selection
+- [x] Use the existing default OpenRouter model for the PoC; defer model selection
   and catalog refresh UI.
 
 Exit condition: the user can enter a key, create a World Knowledge session,

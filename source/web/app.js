@@ -3,18 +3,19 @@ const wasmDetailElement = document.querySelector("#wasm-detail");
 const keyForm = document.querySelector("#key-form");
 const apiKeyInput = document.querySelector("#api-key");
 const setKeyButton = document.querySelector("#set-key");
-const testRequestButton = document.querySelector("#test-request");
-const cancelRequestButton = document.querySelector("#cancel-request");
 const clearKeyButton = document.querySelector("#clear-key");
-const shutdownWorkerButton = document.querySelector("#shutdown-worker");
-const restartWorkerButton = document.querySelector("#restart-worker");
-const transportStatusElement = document.querySelector("#transport-status");
-const responseElement = document.querySelector("#response");
+const promptForm = document.querySelector("#prompt-form");
+const promptInput = document.querySelector("#prompt");
+const sendButton = document.querySelector("#send-prompt");
+const cancelButton = document.querySelector("#cancel-request");
+const conversationStatus = document.querySelector("#conversation-status");
+const timelineFrame = document.querySelector("#timeline");
 
 let worker = null;
 let workerReady = false;
 let keyAvailable = false;
 let requestActive = false;
+let timelineReady = false;
 
 function showWasmError(message) {
   statusElement.dataset.state = "error";
@@ -23,23 +24,59 @@ function showWasmError(message) {
   wasmDetailElement.textContent = message;
 }
 
-function setTransportStatus(state, message) {
-  transportStatusElement.dataset.state = state;
-  transportStatusElement.textContent = message;
+function setConversationStatus(state, message) {
+  conversationStatus.dataset.state = state;
+  conversationStatus.textContent = message;
 }
 
 function updateControls() {
   setKeyButton.disabled = !workerReady || requestActive;
-  testRequestButton.disabled = !workerReady || !keyAvailable || requestActive;
-  cancelRequestButton.disabled = !workerReady || !requestActive;
   clearKeyButton.disabled = !workerReady || !keyAvailable;
-  shutdownWorkerButton.disabled = !workerReady;
-  restartWorkerButton.hidden = worker !== null;
+  promptInput.disabled = !workerReady || requestActive;
+  sendButton.disabled = !workerReady || !keyAvailable || requestActive;
+  cancelButton.disabled = !workerReady || !requestActive;
 }
 
-function clearResponse() {
-  responseElement.hidden = true;
-  responseElement.textContent = "";
+function loadTimelinePage(html) {
+  timelineReady = false;
+  timelineFrame.addEventListener("load", () => {
+    timelineReady = true;
+  }, { once: true });
+  timelineFrame.srcdoc = html;
+}
+
+function applyTimelineScript(script) {
+  if (!timelineReady || !script) {
+    worker?.postMessage({ type: "reload-timeline" });
+    return;
+  }
+  try {
+    timelineFrame.contentWindow.eval(script);
+  } catch {
+    timelineReady = false;
+    worker?.postMessage({ type: "reload-timeline" });
+  }
+}
+
+function handleConversationEvent(message) {
+  switch (message.kind) {
+    case "timeline-script":
+      applyTimelineScript(message.payload);
+      break;
+    case "timeline-reload":
+      worker?.postMessage({ type: "reload-timeline" });
+      if (message.payload) {
+        setConversationStatus("error", message.payload);
+      }
+      break;
+    case "processing-status":
+      if (message.payload) {
+        setConversationStatus("running", `Processing: ${message.payload}`);
+      }
+      break;
+    default:
+      break;
+  }
 }
 
 function handleWorkerMessage(event) {
@@ -47,7 +84,6 @@ function handleWorkerMessage(event) {
   if (!message || typeof message.type !== "string") {
     return;
   }
-
   switch (message.type) {
     case "ready":
       workerReady = true;
@@ -62,11 +98,17 @@ function handleWorkerMessage(event) {
       statusElement.dataset.capabilityProfile = JSON.stringify(
         message.capabilityProfile ?? null,
       );
-      setTransportStatus("idle", "Enter an API key to enable the transport test.");
+      setConversationStatus("idle", "Enter an API key, then send a prompt.");
+      break;
+    case "timeline-page":
+      loadTimelinePage(message.html);
+      break;
+    case "conversation-event":
+      handleConversationEvent(message);
       break;
     case "key-state":
       keyAvailable = message.available === true;
-      setTransportStatus(
+      setConversationStatus(
         keyAvailable ? "ready" : "idle",
         keyAvailable
           ? "The API key is held in volatile Worker memory."
@@ -75,36 +117,20 @@ function handleWorkerMessage(event) {
       break;
     case "request-started":
       requestActive = true;
-      clearResponse();
-      setTransportStatus("running", "Connecting directly to OpenRouter…");
+      setConversationStatus("running", "Strappy is processing the prompt…");
       break;
-    case "response-received": {
+    case "response-complete":
       requestActive = false;
-      const completed = message.status === "completed";
-      setTransportStatus(
-        completed ? "complete" : "idle",
-        completed
-          ? `OpenRouter returned a complete JSON response (HTTP ${message.httpStatus}).`
-          : `OpenRouter returned a JSON response with status “${message.status}”.`,
-      );
-      const details = [
-        `Model: ${message.model || "not reported"}`,
-        `Status: ${message.status}`,
-      ];
-      if (message.outputText) {
-        details.push("", message.outputText);
-      }
-      responseElement.textContent = details.join("\n");
-      responseElement.hidden = false;
+      setConversationStatus("complete", "Response complete and saved.");
+      promptInput.focus();
       break;
-    }
     case "request-cancelled":
       requestActive = false;
-      setTransportStatus("idle", "The request was cancelled.");
+      setConversationStatus("idle", "The request was cancelled.");
       break;
     case "request-error":
       requestActive = false;
-      setTransportStatus("error", message.message);
+      setConversationStatus("error", message.message);
       break;
     case "error":
       showWasmError(message.message);
@@ -122,7 +148,7 @@ function handleWorkerFailure() {
   requestActive = false;
   worker = null;
   showWasmError("The WebAssembly Worker stopped unexpectedly.");
-  setTransportStatus("error", "The Worker is not running and its key was forgotten.");
+  setConversationStatus("error", "The Worker stopped and its key was forgotten.");
   updateControls();
 }
 
@@ -131,13 +157,6 @@ function startWorker() {
     showWasmError("This browser does not support Web Workers.");
     return;
   }
-
-  workerReady = false;
-  keyAvailable = false;
-  requestActive = false;
-  statusElement.dataset.state = "loading";
-  statusElement.textContent = "Loading shared C code…";
-  setTransportStatus("idle", "Waiting for the Worker.");
   worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   worker.addEventListener("message", handleWorkerMessage);
   worker.addEventListener("error", handleWorkerFailure, { once: true });
@@ -149,39 +168,27 @@ keyForm.addEventListener("submit", (event) => {
   if (!workerReady || requestActive || apiKeyInput.value.trim() === "") {
     return;
   }
-
   worker.postMessage({ type: "set-key", key: apiKeyInput.value });
   apiKeyInput.value = "";
 });
 
-testRequestButton.addEventListener("click", () => {
-  worker?.postMessage({ type: "start-test" });
+promptForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const prompt = promptInput.value.trim();
+  if (!workerReady || !keyAvailable || requestActive || prompt === "") {
+    return;
+  }
+  promptInput.value = "";
+  worker.postMessage({ type: "submit-prompt", prompt });
 });
 
-cancelRequestButton.addEventListener("click", () => {
+cancelButton.addEventListener("click", () => {
   worker?.postMessage({ type: "cancel-request" });
 });
 
 clearKeyButton.addEventListener("click", () => {
   apiKeyInput.value = "";
   worker?.postMessage({ type: "clear-key" });
-});
-
-shutdownWorkerButton.addEventListener("click", () => {
-  apiKeyInput.value = "";
-  worker?.postMessage({ type: "shutdown" });
-  worker?.terminate();
-  worker = null;
-  workerReady = false;
-  keyAvailable = false;
-  requestActive = false;
-  setTransportStatus("idle", "The Worker was shut down and its key was forgotten.");
-  updateControls();
-});
-
-restartWorkerButton.addEventListener("click", () => {
-  clearResponse();
-  startWorker();
 });
 
 window.addEventListener("pagehide", () => {
