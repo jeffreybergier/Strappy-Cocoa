@@ -70,6 +70,22 @@ static void strappy_client_secure_free(char *value)
   }
 }
 
+static void strappy_client_redact_secret(char *value, const char *secret)
+{
+  char *match;
+  size_t secret_length;
+
+  if ((value == NULL) || (secret == NULL) || (secret[0] == '\0')) {
+    return;
+  }
+  secret_length = strlen(secret);
+  match = strstr(value, secret);
+  while (match != NULL) {
+    memset(match, '*', secret_length);
+    match = strstr(match + secret_length, secret);
+  }
+}
+
 static void strappy_client_header_list_init(strappy_client_header_list *headers)
 {
   if (headers != NULL) {
@@ -987,6 +1003,10 @@ int strappy_client_send_provider_responses_json_with_transport(
   request.write_complete_context = uses_sse ? (void *)&sse_context : NULL;
   strappy_client_transport_result_init(&transport);
   ok = strappy_client_transport_execute(&request, &transport, error_out);
+  strappy_client_redact_secret(transport.error_message, token);
+  if ((error_out != NULL) && (*error_out != NULL)) {
+    strappy_client_redact_secret(*error_out, token);
+  }
   result->completed_at_ms = strappy_client_now_ms();
   result->transport_code = transport.transport_code;
   result->curl_code = transport.transport_code;
@@ -1038,6 +1058,7 @@ int strappy_client_send_provider_responses_json_with_transport(
           sse_context.raw_response.data : "") :
         ((response_buffer.data != NULL) ? response_buffer.data : ""));
   }
+  strappy_client_redact_secret(result->response_json, token);
 #if STRAPPY_RAW_JSON_DEBUG_CAPTURE
   {
     const strappy_http_buffer *raw_response;
@@ -1063,6 +1084,27 @@ int strappy_client_send_provider_responses_json_with_transport(
   result->response_headers = strappy_string_duplicate(
     (header_context.raw_headers.data != NULL) ?
       header_context.raw_headers.data : "");
+#if defined(__EMSCRIPTEN__)
+  /* Web credentials must never enter OPFS diagnostics, even if a provider
+   * reflects one in its response body. Native debug capture remains the exact
+   * transport payload required by its diagnostic contract. */
+  strappy_client_redact_secret(result->raw_response_body, token);
+#endif
+  strappy_client_redact_secret(result->response_headers, token);
+  strappy_client_redact_secret(result->effective_url, token);
+  strappy_client_redact_secret(result->transport_error, token);
+  strappy_client_redact_secret(result->content_type, token);
+  strappy_client_redact_secret(result->request_id, token);
+  strappy_client_redact_secret(result->generation_id, token);
+  strappy_client_redact_secret(result->rate_limit_limit, token);
+  strappy_client_redact_secret(result->rate_limit_remaining, token);
+  strappy_client_redact_secret(result->rate_limit_reset, token);
+  strappy_client_redact_secret(result->rate_limit_limit_requests, token);
+  strappy_client_redact_secret(result->rate_limit_remaining_requests, token);
+  strappy_client_redact_secret(result->rate_limit_reset_requests, token);
+  strappy_client_redact_secret(result->rate_limit_limit_tokens, token);
+  strappy_client_redact_secret(result->rate_limit_remaining_tokens, token);
+  strappy_client_redact_secret(result->rate_limit_reset_tokens, token);
   if (uses_sse) {
     result->response_bytes =
       (sse_context.parser.stream_bytes <= (size_t)LLONG_MAX) ?

@@ -159,39 +159,41 @@ timeline rendered by existing Strappy C code.
 
 ### 7. Verify the PoC contract
 
-- [ ] Add an offline browser test for Wasm loading, SQLite persistence, resource
+- [x] Add an offline browser test for Wasm loading, SQLite persistence, resource
   loading, assistant/provider filtering, rendering, and credential clearing.
-- [ ] Add an explicitly opted-in live OpenRouter browser test with one bounded
-  request and secret-free output.
-- [ ] Test cancellation and invalid/expired keys.
-- [ ] Test a current-information prompt that exercises OpenRouter web search and
-  produces source links.
-- [ ] Run the existing Linux suite and required clean native builds to detect
+- [x] Test cancellation and invalid/expired keys with offline mocked transport
+  and complete Worker conversation paths.
+- [x] Manually test a current-information prompt that exercises OpenRouter web
+  search and produces source links.
+- [x] Run the existing Linux suite and required clean native builds to detect
   regressions.
-- [ ] Document the local server command, supported browser, known limitations, and
+- [x] Document the local server command, supported browser, known limitations, and
   how to clear the OPFS database.
 
 ## PoC completion checklist
 
 The PoC is complete when all of these are true:
 
-- [ ] It builds reproducibly with one web command.
-- [ ] `docker compose up web` runs the application on the documented, fixed
+- [x] It builds reproducibly with one web command.
+- [x] `docker compose up web` runs the application on the documented, fixed
   localhost origin without an application backend.
-- [ ] The static web container receives no API key, prompt, response, session,
+- [x] The static web container receives no API key, prompt, response, session,
   memory, or SQLite data.
-- [ ] Only World Knowledge and OpenRouter are reachable.
-- [ ] The page never persists the OpenRouter key and requires it again after reload.
-- [ ] A real prompt completes through the shared Responses runtime.
-- [ ] The existing C renderer displays the resulting timeline.
-- [ ] Session history and World Knowledge memory survive reload through SQLite
+- [x] Only World Knowledge and OpenRouter are reachable.
+- [x] The page never persists the OpenRouter key and requires it again after reload.
+- [x] A real prompt completes through the shared Responses runtime.
+- [x] The existing C renderer displays the resulting timeline.
+- [x] Session history and World Knowledge memory survive reload through SQLite
   OPFS.
-- [ ] No Bash, file, user-database, OAuth, ChatGPT, or Keychain code is linked.
-- [ ] Offline browser tests, the Linux shared-core suite, and clean native builds
+- [x] No Bash, file, user-database, OAuth, ChatGPT, or Keychain code is linked.
+- [x] Offline browser tests, the Linux shared-core suite, and clean native builds
   pass without warnings.
 
 ## Deferred until after the PoC
 
+- [ ] Add an explicitly opted-in live OpenRouter browser test with one bounded
+  request and secret-free output. Until then, live validation is manual and the
+  web build has no credential environment-variable convention.
 - [ ] Replace Asyncify with an explicit asynchronous request state machine.
 - [ ] Model catalog refresh and model selection.
 - [ ] Multiple sessions and full preferences UI.

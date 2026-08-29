@@ -82,6 +82,7 @@ TEST_SCRIPT := browser_smoke_test.mjs
 CLIENT_TEST_SCRIPT := client_transport_smoke_test.mjs
 WORKER_CLIENT_TEST_SCRIPT := worker_transport_smoke_test.mjs
 WORKER_CONVERSATION_TEST_SCRIPT := worker_conversation_smoke_test.mjs
+WORKER_ERROR_TEST_SCRIPT := worker_error_smoke_test.mjs
 
 CPPFLAGS := -I$(SHARED_DIR)
 COMMON_CFLAGS := \
@@ -96,14 +97,17 @@ COMMON_CFLAGS := \
 RELEASE_CFLAGS := -O1
 .DEFAULT_GOAL := release
 
-.PHONY: clean distclean release test
+.PHONY: clean distclean release test offline-test
 
 release: $(WEB_OUTPUTS) $(STATIC_OUTPUTS) $(WORLD_KNOWLEDGE_RESOURCE_OUTPUTS)
 
-test: release
+test: offline-test
+
+offline-test: release
 	$(NODE) $(CLIENT_TEST_SCRIPT)
 	$(NODE) $(WORKER_CLIENT_TEST_SCRIPT)
 	$(NODE) $(WORKER_CONVERSATION_TEST_SCRIPT)
+	$(NODE) $(WORKER_ERROR_TEST_SCRIPT)
 	$(NODE) $(TEST_SCRIPT)
 
 # Emscripten creates the JavaScript loader and Wasm binary in one invocation.

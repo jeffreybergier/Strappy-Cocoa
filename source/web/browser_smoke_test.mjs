@@ -45,6 +45,46 @@ async function webdriverRequest(path, method = "GET", body) {
   return payload.value;
 }
 
+async function browserStorageContains(sessionId, canary) {
+  return webdriverRequest(
+    `/session/${sessionId}/execute/async`,
+    "POST",
+    {
+      script: `
+        const canary = arguments[0];
+        const done = arguments[arguments.length - 1];
+        const containsBytes = (bytes, needle) => {
+          if (needle.length === 0) return false;
+          outer: for (let offset = 0; offset <= bytes.length - needle.length; offset += 1) {
+            for (let index = 0; index < needle.length; index += 1) {
+              if (bytes[offset + index] !== needle[index]) continue outer;
+            }
+            return true;
+          }
+          return false;
+        };
+        (async () => {
+          const needle = new TextEncoder().encode(canary);
+          const root = await navigator.storage.getDirectory();
+          const scanDirectory = async (directory) => {
+            for await (const entry of directory.values()) {
+              if (entry.kind === "directory") {
+                if (await scanDirectory(entry)) return true;
+                continue;
+              }
+              const bytes = new Uint8Array(await (await entry.getFile()).arrayBuffer());
+              if (containsBytes(bytes, needle)) return true;
+            }
+            return false;
+          };
+          done(await scanDirectory(root));
+        })().catch((error) => done({ error: String(error) }));
+      `,
+      args: [canary],
+    },
+  );
+}
+
 async function verifyStaticAssets() {
   const pageResponse = await fetch(`${baseUrl}/`);
   if (!pageResponse.ok) {
@@ -239,7 +279,10 @@ async function verifyBrowserExecution() {
                 document.querySelector("#timeline").contentDocument
                   ?.querySelector("#messages") !== null,
               rendererReady: typeof document.querySelector("#timeline")
-                .contentWindow?.appendMessage === "function"
+                .contentWindow?.appendMessage === "function",
+              rendererOwnsPage:
+                document.querySelector("#timeline").contentDocument
+                  ?.querySelector("meta[name=viewport]") !== null
             };
           `,
           args: [canaryKey],
@@ -254,7 +297,8 @@ async function verifyBrowserExecution() {
       storedState.sendDisabled ||
       storedState.bodyContainsKey ||
       !storedState.timelineReady ||
-      !storedState.rendererReady
+      !storedState.rendererReady ||
+      !storedState.rendererOwnsPage
     ) {
       throw new Error("Worker key handoff did not reach the expected volatile state.");
     }
@@ -366,6 +410,13 @@ async function verifyBrowserExecution() {
           reloadState.databaseSessionId !== persistentSessionState.id
         ) {
           throw new Error("The C-created SQLite session did not survive reload.");
+        }
+        const persistedCanary = await browserStorageContains(sessionId, canaryKey);
+        if (persistedCanary?.error) {
+          throw new Error(`Could not inspect OPFS credential state: ${persistedCanary.error}`);
+        }
+        if (persistedCanary === true) {
+          throw new Error("The API key was found in origin-private file storage.");
         }
         return;
       }

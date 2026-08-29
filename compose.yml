@@ -109,7 +109,7 @@ services:
       browser-test:
         condition: service_healthy
     entrypoint: ["make", "-C", "source/web"]
-    command: ["test"]
+    command: ["offline-test"]
 
 volumes:
   cache:

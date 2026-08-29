@@ -280,6 +280,54 @@ Outputs:
 - `source/iOS/build-release/Strappy-rootless.deb` for rootless jailbreaks
 - `source/macOS/build-release/Strappy.zip`
 
+### WebAssembly proof of concept
+
+The browser proof of concept supports one World Knowledge session through
+OpenRouter in a current Chromium browser. It is intended for local evaluation,
+not production deployment, and does not support other assistant sets, multiple
+sessions, model selection, ChatGPT accounts, OAuth, Bash, filesystem access, or
+personal databases.
+
+Build the static application reproducibly with:
+
+```sh
+docker compose run --rm wasm-build clean release
+```
+
+Then serve it on the fixed, loopback-only origin and open
+`http://localhost:8765` in Chromium:
+
+```sh
+docker compose up web
+```
+
+Enter the OpenRouter API key in the page. The key is transferred directly to
+volatile Worker memory, is never supplied to Docker Compose or the static web
+container, and must be entered again after a reload.
+
+Run the unconditionally offline browser and shared-runtime tests with:
+
+```sh
+docker compose run --rm web-test
+```
+
+There is no automated live-test target and no web credential environment
+variable. For manual live validation, enter a key in the page, confirm that an
+invalid or expired key produces a visible error, cancel an in-progress request,
+and ask a current-information question that requires web search. Confirm that
+the completed answer contains titled HTTP or HTTPS source links. Do not paste
+keys, response payloads, or browser storage contents into test logs.
+
+Session history and World Knowledge memory are stored in SQLite in the origin's
+private file system. To erase them, stop the page, open Chromium DevTools for
+`http://localhost:8765`, select **Application > Storage**, choose **Clear site
+data**, and reload. Clearing browser data for that origin has the same effect.
+
+Known limitations include Asyncify-based synchronous C calls, one tab, one
+session, one OpenRouter account, no offline operation, and no Firefox or Safari
+validation. A reload always forgets the API key but retains SQLite data until
+site data is cleared.
+
 (Optional) Run the Linux-Based Tests for the C Backend:
 
 ```sh

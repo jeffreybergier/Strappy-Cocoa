@@ -2831,17 +2831,17 @@ static char *strappy_responses_failure_message(
                        sizeof(buffer),
                        "Responses request failed: %s",
                        http->transport_error);
-  } else if ((analysis != NULL) && (analysis->error_message != NULL)) {
-    written = snprintf(buffer,
-                       sizeof(buffer),
-                       "Responses API failed: %s",
-                       analysis->error_message);
   } else if ((http != NULL) &&
              ((http->http_status < 200L) || (http->http_status >= 300L))) {
     written = snprintf(buffer,
                        sizeof(buffer),
                        "Responses API failed with HTTP %ld.",
                        http->http_status);
+  } else if ((analysis != NULL) && (analysis->error_message != NULL)) {
+    written = snprintf(buffer,
+                       sizeof(buffer),
+                       "Responses API failed: %s",
+                       analysis->error_message);
   } else if ((analysis == NULL) || !analysis->valid_json) {
     written = snprintf(buffer,
                        sizeof(buffer),

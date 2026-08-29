@@ -1577,7 +1577,8 @@ typedef enum harness_responses_server_scenario {
   HARNESS_RESPONSES_SERVER_ROUND_LIMIT = 17,
   HARNESS_RESPONSES_SERVER_ANSWER_QUALITY_DISABLED = 18,
   HARNESS_RESPONSES_SERVER_NATIVE_WEB_SEARCH = 19,
-  HARNESS_RESPONSES_SERVER_OTHER_GENERIC = 20
+  HARNESS_RESPONSES_SERVER_OTHER_GENERIC = 20,
+  HARNESS_RESPONSES_SERVER_CREDENTIAL_REFLECTION = 21
 } harness_responses_server_scenario;
 
 static int harness_headers_have_exact_authorization(
@@ -4630,6 +4631,26 @@ static int harness_run_slow_server(int listener_fd)
   return (selected > 0) && (received == 0);
 }
 
+static int harness_run_credential_reflection_server(int listener_fd)
+{
+  static const char *response =
+    "{\"error\":{\"code\":\"invalid_api_key\","
+    "\"message\":\"Expired credential test-token\"}}";
+  char *body;
+  int client_fd;
+  int ok;
+
+  body = NULL;
+  if (!harness_accept_request(listener_fd, &body, &client_fd)) {
+    return 0;
+  }
+  ok = (body != NULL) &&
+    harness_send_json_response(client_fd, 401L, response);
+  free(body);
+  close(client_fd);
+  return ok;
+}
+
 static int harness_open_listener(unsigned short *port_out)
 {
   struct sockaddr_in address;
@@ -4735,6 +4756,8 @@ static int harness_start_server(harness_responses_server_scenario scenario,
       ok = harness_run_retry_after_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_SLOW) {
       ok = harness_run_slow_server(listener_fd);
+    } else if (scenario == HARNESS_RESPONSES_SERVER_CREDENTIAL_REFLECTION) {
+      ok = harness_run_credential_reflection_server(listener_fd);
     } else if (scenario == HARNESS_RESPONSES_SERVER_EMPTY_ANSWER) {
       ok = harness_run_empty_answer_server(listener_fd);
     } else if (scenario ==
@@ -4764,6 +4787,58 @@ static int harness_wait_for_server(pid_t pid, int terminate)
   } while ((waited < 0) && (errno == EINTR));
   return (waited == pid) && WIFEXITED(status) &&
     (WEXITSTATUS(status) == 0);
+}
+
+static int harness_test_credential_reflection_redaction(void)
+{
+  static const char *request_json =
+    "{\"model\":\"openrouter/free\",\"input\":[],\"stream\":false}";
+  char endpoint[128];
+  char *error;
+  strappy_config config;
+  strappy_responses_http_result result;
+  pid_t server_pid;
+  int server_ok;
+  int ok;
+
+  error = NULL;
+  strappy_config_init(&config);
+  strappy_responses_http_result_init(&result);
+  if (!harness_start_server(HARNESS_RESPONSES_SERVER_CREDENTIAL_REFLECTION,
+                            endpoint,
+                            sizeof(endpoint),
+                            &server_pid)) {
+    strappy_config_destroy(&config);
+    return harness_fail("Could not start credential-reflection server.");
+  }
+  config.api_endpoint = strappy_string_duplicate(endpoint);
+  ok = (config.api_endpoint != NULL) &&
+    strappy_client_send_provider_responses_json(
+      &config,
+      STRAPPY_PROVIDER_KIND_OPENROUTER,
+      "test-token",
+      NULL,
+      NULL,
+      request_json,
+      &result,
+      NULL,
+      NULL,
+      &error);
+  server_ok = harness_wait_for_server(server_pid, !ok);
+  ok = ok && server_ok && (result.http_status == 401L) &&
+    (result.response_json != NULL) &&
+    (strstr(result.response_json, "test-token") == NULL) &&
+    (strstr(result.response_json, "**********") != NULL) &&
+    ((error == NULL) || (strstr(error, "test-token") == NULL));
+  if (!ok) {
+    fprintf(stderr,
+            "Credential-reflection redaction failed: %s\n",
+            (error != NULL) ? error : "response mismatch");
+  }
+  free(error);
+  strappy_responses_http_result_destroy(&result);
+  strappy_config_destroy(&config);
+  return ok;
 }
 
 static int harness_create_session_database_with_answer_quality(
@@ -10026,6 +10101,7 @@ int main(void)
       harness_test_raw_json_debug_capture() &&
 #endif
       harness_test_unicode_emoji_scan() &&
+      harness_test_credential_reflection_redaction() &&
       harness_test_working_directory_selection() &&
       harness_test_request_surfaces() &&
       harness_test_ledger() &&
