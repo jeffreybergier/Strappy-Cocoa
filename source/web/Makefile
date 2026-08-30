@@ -57,7 +57,8 @@ WEB_HEADERS := \
 	$(SHARED_DIR)/strappy_client_transport.h \
 	$(SHARED_DIR)/strappy_sse.h \
 	$(SHARED_DIR)/strappy_db.h \
-	$(SHARED_DIR)/strappy_db_internal.h
+	$(SHARED_DIR)/strappy_db_internal.h \
+	$(SHARED_DIR)/strappy_webview.h
 
 WEB_BUILD_INPUTS := Makefile prepare_sqlite_wasm.sh strappy_client_fetch.js \
 	strappy_sqlite.make strappy_sqlite_exports.txt strappy_sqlite_post.js \
@@ -80,6 +81,9 @@ WORLD_KNOWLEDGE_RESOURCE_INPUTS := \
 	$(addprefix $(RESOURCE_DIR)/,$(WORLD_KNOWLEDGE_RESOURCE_NAMES))
 WORLD_KNOWLEDGE_RESOURCE_OUTPUTS := \
 	$(addprefix $(RESOURCE_OUTPUT_DIR)/,$(WORLD_KNOWLEDGE_RESOURCE_NAMES))
+LOCALIZATION_NAMES := en ja
+LOCALIZATION_OUTPUTS := \
+	$(addsuffix .lproj/Localizable.strings,$(addprefix $(RESOURCE_OUTPUT_DIR)/,$(LOCALIZATION_NAMES)))
 TEST_SCRIPT := browser_smoke_test.mjs
 CLIENT_TEST_SCRIPT := client_transport_smoke_test.mjs
 WORKER_CLIENT_TEST_SCRIPT := worker_transport_smoke_test.mjs
@@ -101,7 +105,8 @@ RELEASE_CFLAGS := -O1
 
 .PHONY: clean distclean release test offline-test
 
-release: $(WEB_OUTPUTS) $(STATIC_OUTPUTS) $(WORLD_KNOWLEDGE_RESOURCE_OUTPUTS)
+release: $(WEB_OUTPUTS) $(STATIC_OUTPUTS) $(WORLD_KNOWLEDGE_RESOURCE_OUTPUTS) \
+	$(LOCALIZATION_OUTPUTS)
 
 test: offline-test
 
@@ -128,6 +133,11 @@ $(BUILD_DIR)/%: % | $(BUILD_DIR)
 $(RESOURCE_OUTPUT_DIR)/%.json: $(RESOURCE_DIR)/%.json | $(RESOURCE_OUTPUT_DIR)
 	cp $< $@
 
+$(RESOURCE_OUTPUT_DIR)/%.lproj/Localizable.strings: \
+  $(RESOURCE_DIR)/%.lproj/Localizable.strings | $(RESOURCE_OUTPUT_DIR)
+	mkdir -p $(@D)
+	cp $< $@
+
 $(BUILD_DIR):
 	mkdir -p $@
 
@@ -137,7 +147,9 @@ $(RESOURCE_OUTPUT_DIR): | $(BUILD_DIR)
 clean:
 	rm -f $(WEB_OUTPUTS) $(STATIC_OUTPUTS) \
 		$(BUILD_DIR)/openrouter_transport.js \
-		$(WORLD_KNOWLEDGE_RESOURCE_OUTPUTS)
+		$(WORLD_KNOWLEDGE_RESOURCE_OUTPUTS) \
+		$(LOCALIZATION_OUTPUTS)
+	rm -rf $(BUILD_DIR)/Fonts
 
 distclean: clean
 	rm -rf $(SQLITE_BUILD_DIR)

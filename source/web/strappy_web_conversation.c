@@ -3,6 +3,7 @@
 #include "strappy_provider.h"
 #include "strappy_responses.h"
 #include "strappy_session.h"
+#include "strappy_webview.h"
 
 #include <emscripten/emscripten.h>
 #include <stdlib.h>
@@ -235,6 +236,9 @@ int strappy_web_conversation_initialize(long long session_id)
     strappy_web_conversation_set_error("A browser session is not available.");
     return 0;
   }
+  strappy_webview_set_font_url_dir(
+    "https://cdn.jsdelivr.net/npm/@fortawesome/"
+    "fontawesome-free@7.2.0/webfonts");
   free(strappy_web_conversation_timeline_cursor);
   strappy_web_conversation_timeline_cursor = NULL;
   strappy_session_webview_render_context_destroy(

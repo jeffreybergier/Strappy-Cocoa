@@ -145,6 +145,26 @@ async function verifyStaticAssets() {
     }
   }
 
+  const fontAwesomeBaseUrl =
+    "https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.2.0/webfonts";
+  if (
+    !pageHtml.includes(`${fontAwesomeBaseUrl}/fa-solid-900.woff2`) ||
+    pageHtml.includes("./Fonts/")
+  ) {
+    throw new Error("The entry page does not use pinned CDN Font Awesome fonts.");
+  }
+  const japaneseResponse = await fetch(
+    `${baseUrl}/Resources/ja.lproj/Localizable.strings`,
+  );
+  const japaneseSource = await japaneseResponse.text();
+  if (
+    !japaneseResponse.ok ||
+    !japaneseSource.includes('"Session Options" = "セッションオプション"') ||
+    !japaneseSource.includes('"Cost In (1M)" = "入力コスト (100万)"')
+  ) {
+    throw new Error("The browser UI is missing its macOS-aligned Japanese strings.");
+  }
+
   const databaseGuidanceResponse = await fetch(
     `${baseUrl}/Resources/GuidanceDatabase.json`,
   );
@@ -164,6 +184,7 @@ async function verifyBrowserExecution() {
             "--headless=new",
             "--no-sandbox",
             "--disable-dev-shm-usage",
+            "--host-resolver-rules=MAP cdn.jsdelivr.net ~NOTFOUND",
             `--unsafely-treat-insecure-origin-as-secure=${baseUrl}`,
           ],
         },
@@ -229,6 +250,9 @@ async function verifyBrowserExecution() {
         if (result.capabilityProfile?.defaultAssistantSet !== "world_knowledge") {
           throw new Error("The C web profile did not default to World Knowledge.");
         }
+        if ((result.capabilityProfile?.systemPrompt?.length || 0) < 100) {
+          throw new Error("The C web profile did not publish its generated system prompt.");
+        }
         const actualTools = (result.capabilityProfile?.tools || []).map((tool) =>
           tool.type === "function" ? tool.name : tool.type
         ).sort();
@@ -289,8 +313,6 @@ async function verifyBrowserExecution() {
             panelColor: getComputedStyle(left).backgroundColor,
             barColor: getComputedStyle(document.querySelector(".panel-heading"))
               .backgroundColor,
-            actionColor: getComputedStyle(document.querySelector("#new-session"))
-              .backgroundColor,
             selectionColor: getComputedStyle(selectedSession).backgroundColor,
             timelineBackground: timelineStyle?.backgroundColor || "",
             timelineTextColor: timelineStyle?.color || "",
@@ -301,15 +323,42 @@ async function verifyBrowserExecution() {
             unwantedBorders: [
               borderWidth(".panel-heading", "Bottom"),
               borderWidth('.session-button[aria-current="true"]', "Top"),
-              borderWidth(".chat-header", "Bottom"),
               borderWidth(".composer", "Top"),
-              borderWidth(".inspector-tab", "Top"),
+              borderWidth(".preferences-tab", "Top"),
               borderWidth("#preferences-form fieldset", "Top"),
               borderWidth("#prompt", "Top")
             ].filter((width) => width !== "0px"),
             groupedCorner: getComputedStyle(
               document.querySelector("#preferences-form fieldset"))
-              .borderRadius
+              .borderRadius,
+            preferenceTabs: document.querySelectorAll(".preferences-tab").length,
+            preferencesOpen: document.querySelector("#preferences-window").open,
+            authenticationVisible:
+              !document.querySelector("#authentication-pane").hidden,
+            defaultsHidden: document.querySelector("#defaults-pane").hidden,
+            modelsHidden: document.querySelector("#models-pane").hidden,
+            promptsHidden: document.querySelector("#prompts-pane").hidden,
+            closeIconFamily: getComputedStyle(
+              document.querySelector("#close-preferences .fa-solid")).fontFamily,
+            backdropFilter: getComputedStyle(
+              document.querySelector("#preferences-window"), "::backdrop")
+              .backdropFilter,
+            gearDisabled: document.querySelector("#preferences-button").disabled,
+            gearFamily: getComputedStyle(
+              document.querySelector("#preferences-button .fa-solid")).fontFamily,
+            modelSelectorEnabled: !document.querySelector("#session-model").disabled,
+            modelChoices: document.querySelector("#session-model").options.length,
+            composerControls: ["#sidebar-toggle", "#close-chat", "#options-toggle",
+              "#send-prompt"].every((selector) => document.querySelector(selector)),
+            composerStatusAbsent: document.querySelector("#conversation-status") === null,
+            missingKeyTooltip: document.querySelector("#send-prompt").title,
+            sidebarControlsAtBottom: document.querySelector(".session-toolbar")
+              .contains(document.querySelector("#new-session")) &&
+              document.querySelector(".session-toolbar")
+                .contains(document.querySelector("#delete-session")),
+            inspectorTitle: document.querySelector(".inspector-panel h2").textContent,
+            preferenceLabels: [...document.querySelectorAll(".preferences-tab")]
+              .map((tab) => tab.textContent)
           };
         `,
         args: [],
@@ -326,7 +375,6 @@ async function verifyBrowserExecution() {
       layoutState.appearanceSource !== "shared-c" ||
       layoutState.panelColor !== "rgb(240, 237, 242)" ||
       layoutState.barColor !== "rgb(216, 194, 229)" ||
-      layoutState.actionColor !== "rgb(142, 27, 207)" ||
       layoutState.selectionColor !== "rgb(137, 102, 154)" ||
       layoutState.timelineBackground !== "rgb(251, 250, 252)" ||
       layoutState.timelineTextColor !== "rgb(48, 46, 49)" ||
@@ -335,10 +383,185 @@ async function verifyBrowserExecution() {
       layoutState.rightSeparatorWidth !== "1px" ||
       layoutState.rightSeparatorColor !== "rgb(164, 157, 166)" ||
       layoutState.unwantedBorders.length !== 0 ||
-      layoutState.groupedCorner === "0px"
+      layoutState.groupedCorner === "0px" ||
+      layoutState.preferenceTabs !== 4 ||
+      !layoutState.preferencesOpen ||
+      !layoutState.authenticationVisible ||
+      !layoutState.defaultsHidden ||
+      !layoutState.modelsHidden ||
+      !layoutState.promptsHidden ||
+      !layoutState.closeIconFamily.includes("FA7S") ||
+      layoutState.backdropFilter !== "none" ||
+      layoutState.gearDisabled ||
+      !layoutState.gearFamily.includes("FA7S") ||
+      !layoutState.modelSelectorEnabled ||
+      layoutState.modelChoices < 1 ||
+      !layoutState.composerControls ||
+      !layoutState.composerStatusAbsent ||
+      layoutState.missingKeyTooltip !== "Enter OpenRouter API Key to Send" ||
+      !layoutState.sidebarControlsAtBottom ||
+      layoutState.inspectorTitle !== "Session Options" ||
+      JSON.stringify(layoutState.preferenceLabels) !==
+        JSON.stringify(["Accounts", "Models", "Defaults", "Prompts"])
     ) {
       throw new Error(`Three-column workspace layout is invalid: ${JSON.stringify(layoutState)}`);
     }
+    const windowControlState = await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `
+          const options = document.querySelector("#options-toggle");
+          const sidebar = document.querySelector("#sidebar-toggle");
+          const chat = document.querySelector(".chat-document");
+          const expandedChatRect = chat.getBoundingClientRect();
+          options.click();
+          const inspectorCollapsed = getComputedStyle(
+            document.querySelector(".inspector-panel")).display === "none";
+          options.click();
+          sidebar.click();
+          const sidebarCollapsed = getComputedStyle(
+            document.querySelector(".sessions-panel")).display === "none";
+          const collapsedChatRect = chat.getBoundingClientRect();
+          const chatExpandedIntoSidebar = collapsedChatRect.left < 1 &&
+            collapsedChatRect.width > expandedChatRect.width;
+          sidebar.click();
+          const row = document.querySelector('.session-button[aria-current="true"]');
+          row.dispatchEvent(new MouseEvent("contextmenu", {
+            bubbles: true, clientX: 20, clientY: 20
+          }));
+          const contextActions = [...document.querySelectorAll(
+            "#session-context-menu button")].map((button) => button.textContent);
+          const contextVisible = !document.querySelector(
+            "#session-context-menu").hidden;
+          document.body.click();
+          return { inspectorCollapsed, sidebarCollapsed, chatExpandedIntoSidebar,
+            collapsedChatWidth: collapsedChatRect.width, contextActions, contextVisible };
+        `,
+        args: [],
+      },
+    );
+    if (
+      !windowControlState.inspectorCollapsed || !windowControlState.sidebarCollapsed ||
+      !windowControlState.chatExpandedIntoSidebar ||
+      !windowControlState.contextVisible ||
+      JSON.stringify(windowControlState.contextActions) !==
+        JSON.stringify(["Copy Title", "Copy Last Message"])
+    ) {
+      throw new Error(`The browser window controls are invalid: ${JSON.stringify(windowControlState)}`);
+    }
+
+    const modelPaneState = await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `
+          document.querySelector("#models-tab").click();
+          const timelineHtml = document.querySelector("#timeline").srcdoc;
+          return {
+            windowOpen: document.querySelector("#preferences-window").open,
+            catalogVisible: !document.querySelector("#models-pane").hidden,
+            defaultsHidden: document.querySelector("#defaults-pane").hidden,
+            authenticationHidden:
+              document.querySelector("#authentication-pane").hidden,
+            rows: document.querySelectorAll("#model-list tr[data-model-id]").length,
+            fetchDisabled: document.querySelector("#fetch-models").disabled,
+            columns: [...document.querySelectorAll("#model-table thead button")]
+              .map((button) => button.textContent),
+            initialSort: [...document.querySelectorAll("#model-table thead th")]
+              .map((header) => header.getAttribute("aria-sort")),
+            timelineFonts: timelineHtml.includes(
+              "https://cdn.jsdelivr.net/npm/@fortawesome/" +
+              "fontawesome-free@7.2.0/webfonts/fa-solid-900.woff2") &&
+              timelineHtml.includes(
+                "fontawesome-free@7.2.0/webfonts/fa-regular-400.woff2") &&
+              timelineHtml.includes(
+                "fontawesome-free@7.2.0/webfonts/fa-brands-400.woff2") &&
+              !timelineHtml.includes("file://https://cdn.jsdelivr.net")
+          };
+        `,
+        args: [],
+      },
+    );
+    if (
+      !modelPaneState.windowOpen || !modelPaneState.catalogVisible ||
+      !modelPaneState.defaultsHidden || !modelPaneState.authenticationHidden ||
+      modelPaneState.rows < 1 ||
+      !modelPaneState.fetchDisabled || !modelPaneState.timelineFonts
+      || JSON.stringify(modelPaneState.columns) !== JSON.stringify([
+        "Use", "Provider", "Model", "ID", "Context", "Cost In (1M)",
+        "Cost Out (1M)"])
+      || modelPaneState.initialSort[0] !== "descending"
+      || modelPaneState.initialSort[1] !== "ascending"
+    ) {
+      throw new Error(`The browser Models preference pane is invalid: ${JSON.stringify(modelPaneState)}`);
+    }
+    const promptPaneState = await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `
+          document.querySelector('#model-table button[data-sort="model_name"]').click();
+          const nameSort = document.querySelector(
+            '#model-table button[data-sort="model_name"]').closest("th")
+              .getAttribute("aria-sort");
+          document.querySelector("#prompts-tab").click();
+          return {
+            promptsVisible: !document.querySelector("#prompts-pane").hidden,
+            modelsHidden: document.querySelector("#models-pane").hidden,
+            promptLength: document.querySelector("#system-prompt").value.length,
+            readOnly: document.querySelector("#system-prompt").readOnly,
+            nameSort
+          };`,
+        args: [],
+      },
+    );
+    if (
+      !promptPaneState.promptsVisible || !promptPaneState.modelsHidden ||
+      promptPaneState.promptLength < 100 || !promptPaneState.readOnly ||
+      promptPaneState.nameSort !== "ascending"
+    ) {
+      throw new Error(`The browser Prompts/sort UI is invalid: ${JSON.stringify(promptPaneState)}`);
+    }
+    await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `
+          document.querySelector("#defaults-tab").click();
+          document.querySelector("#default-answer-quality-enabled").checked = true;
+          document.querySelector("#default-round-limit").value = "70";
+          document.querySelector("#default-round-limit").dispatchEvent(
+            new Event("change", { bubbles: true }));
+        `,
+        args: [],
+      },
+    );
+    const defaultsDeadline = Date.now() + 5000;
+    let defaultsSaved = false;
+    while (Date.now() < defaultsDeadline) {
+      defaultsSaved = await webdriverRequest(
+        `/session/${sessionId}/execute/sync`,
+        "POST",
+        {
+          script: `return document.querySelector("#default-answer-quality-enabled").checked &&
+            document.querySelector("#default-round-limit").value === "70" &&
+            document.querySelector("#defaults-status").textContent ===
+              "Session defaults apply to new sessions";`,
+          args: [],
+        },
+      );
+      if (defaultsSaved) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    if (!defaultsSaved) {
+      throw new Error("The Preferences window did not save session defaults.");
+    }
+    await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      { script: `document.querySelector("#close-preferences").click();`, args: [] },
+    );
 
     await webdriverRequest(
       `/session/${sessionId}/execute/sync`,
@@ -381,6 +604,20 @@ async function verifyBrowserExecution() {
     ) {
       throw new Error("The browser UI did not create and select a second chat.");
     }
+    const inheritedDefaults = await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `return {
+          answerQuality: document.querySelector("#answer-quality-enabled").checked,
+          roundLimit: document.querySelector("#round-limit").value
+        };`,
+        args: [],
+      },
+    );
+    if (!inheritedDefaults.answerQuality || inheritedDefaults.roundLimit !== "70") {
+      throw new Error(`A new chat did not inherit modal defaults: ${JSON.stringify(inheritedDefaults)}`);
+    }
     persistentSessionState = { count: createdState.count, id: createdState.id };
 
     await webdriverRequest(
@@ -388,11 +625,11 @@ async function verifyBrowserExecution() {
       "POST",
       {
         script: `
-          document.querySelector("#session-name").value = "Browser configured chat";
           document.querySelector("#web-provider").value = "native";
           document.querySelector("#answer-quality-enabled").checked = true;
-          document.querySelector("#round-limit").value = "8";
-          document.querySelector("#preferences-form").requestSubmit();
+          document.querySelector("#round-limit").value = "80";
+          document.querySelector("#round-limit").dispatchEvent(
+            new Event("change", { bubbles: true }));
         `,
         args: [],
       },
@@ -405,13 +642,11 @@ async function verifyBrowserExecution() {
         "POST",
         {
           script: `
-            return document.querySelector("#preferences-status").textContent
-              .includes("saved") &&
-              document.querySelector("#chat-title").textContent ===
-                "Browser configured chat" &&
+            return document.querySelector("#preferences-status").textContent ===
+              "Changes apply to the selected chat." &&
               document.querySelector("#web-provider").value === "native" &&
               document.querySelector("#answer-quality-enabled").checked &&
-              document.querySelector("#round-limit").value === "8";
+              document.querySelector("#round-limit").value === "80";
           `,
           args: [],
         },
@@ -479,8 +714,8 @@ async function verifyBrowserExecution() {
         {
           script: `
             return {
-              status: document.querySelector("#conversation-status").textContent,
               sendDisabled: document.querySelector("#send-prompt").disabled,
+              sendTooltip: document.querySelector("#send-prompt").title,
               bodyContainsKey: document.body.textContent.includes(arguments[0]),
               timelineReady:
                 document.querySelector("#timeline").contentDocument
@@ -495,19 +730,67 @@ async function verifyBrowserExecution() {
           args: [canaryKey],
         },
       );
-      if (!storedState.sendDisabled && storedState.timelineReady) {
+      if (storedState.timelineReady && storedState.sendTooltip === "") {
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     if (
-      storedState.sendDisabled ||
+      !storedState.sendDisabled ||
+      storedState.sendTooltip !== "" ||
       storedState.bodyContainsKey ||
       !storedState.timelineReady ||
       !storedState.rendererReady ||
       !storedState.rendererOwnsPage
     ) {
       throw new Error("Worker key handoff did not reach the expected volatile state.");
+    }
+    const keyedPromptState = await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `
+          const prompt = document.querySelector("#prompt");
+          const send = document.querySelector("#send-prompt");
+          prompt.value = "Test prompt";
+          prompt.dispatchEvent(new Event("input", { bubbles: true }));
+          const result = { disabled: send.disabled, tooltip: send.title };
+          prompt.value = "";
+          prompt.dispatchEvent(new Event("input", { bubbles: true }));
+          return result;
+        `,
+        args: [],
+      },
+    );
+    if (keyedPromptState.disabled || keyedPromptState.tooltip !== "") {
+      throw new Error(`The keyed Send control is invalid: ${JSON.stringify(keyedPromptState)}`);
+    }
+    const providerEditorState = await webdriverRequest(
+      `/session/${sessionId}/execute/sync`,
+      "POST",
+      {
+        script: `
+          document.querySelector("#models-tab").click();
+          document.querySelector("#fetch-models").click();
+          const result = {
+            open: document.querySelector("#model-provider-dialog").open,
+            title: document.querySelector("#model-provider-dialog h2").textContent,
+            provider: document.querySelector(".provider-row span").textContent,
+            fetchEnabled: !document.querySelector("#fetch-openrouter-models").disabled
+          };
+          document.querySelector("#close-model-provider-dialog").click();
+          return result;
+        `,
+        args: [],
+      },
+    );
+    if (
+      !providerEditorState.open ||
+      providerEditorState.title !== "Edit Model Providers" ||
+      providerEditorState.provider !== "OpenRouter" ||
+      !providerEditorState.fetchEnabled
+    ) {
+      throw new Error(`The model-provider editor is invalid: ${JSON.stringify(providerEditorState)}`);
     }
 
     await webdriverRequest(
@@ -527,14 +810,15 @@ async function verifyBrowserExecution() {
         {
           script: `
             return {
-              status: document.querySelector("#conversation-status").textContent,
-              sendDisabled: document.querySelector("#send-prompt").disabled
+              sendDisabled: document.querySelector("#send-prompt").disabled,
+              sendTooltip: document.querySelector("#send-prompt").title
             };
           `,
           args: [],
         },
       );
-      if (clearState.sendDisabled && clearState.status.includes("cleared")) {
+      if (clearState.sendDisabled &&
+          clearState.sendTooltip === "Enter OpenRouter API Key to Send") {
         clearVerified = true;
         break;
       }
@@ -559,15 +843,18 @@ async function verifyBrowserExecution() {
     const secondKeyDeadline = Date.now() + 5000;
     let secondKeySet = false;
     while (Date.now() < secondKeyDeadline) {
-      const sendDisabled = await webdriverRequest(
+      const sendState = await webdriverRequest(
         `/session/${sessionId}/execute/sync`,
         "POST",
         {
-          script: `return document.querySelector("#send-prompt").disabled;`,
+          script: `
+            const send = document.querySelector("#send-prompt");
+            return { disabled: send.disabled, tooltip: send.title };
+          `,
           args: [],
         },
       );
-      if (!sendDisabled) {
+      if (sendState.disabled && sendState.tooltip === "") {
         secondKeySet = true;
         break;
       }

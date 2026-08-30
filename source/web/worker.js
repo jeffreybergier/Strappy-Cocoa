@@ -12,6 +12,7 @@ const resourceNames = [
 
 let apiKey = "";
 let activeRequest = null;
+let modelRefreshActive = false;
 let wasmReady = false;
 let strappyModule = null;
 let databasePersistent = false;
@@ -51,6 +52,8 @@ function initializeCapabilityProfile(strappy) {
       "strappy_web_capabilities_default_assistant_set", "string", [], []),
     tools: JSON.parse(strappy.ccall(
       "strappy_web_capabilities_tools", "string", [], [])),
+    systemPrompt: strappy.ccall(
+      "strappy_web_capabilities_system_prompt", "string", [], []),
   };
 }
 
@@ -100,6 +103,7 @@ function loadWorkspaceState() {
   }
   return {
     sessions,
+    models: readAllocatedJson("strappy_web_database_list_models"),
     activeSessionId: Number(databaseSessionId),
     activeOptions: readAllocatedJson(
       "strappy_web_database_load_session_options",
@@ -137,7 +141,7 @@ function requireIdleWorkspace() {
   if (!wasmReady) {
     throw new Error("The Worker is not ready.");
   }
-  if (activeRequest) {
+  if (activeRequest || modelRefreshActive) {
     throw new Error("Wait for the active prompt to finish or cancel it first.");
   }
 }
@@ -210,11 +214,16 @@ function saveOptions(message) {
     throw new Error("Session options are missing.");
   }
   const roundLimit = Number(options.roundLimit);
-  if (!Number.isInteger(roundLimit) || roundLimit < 1 || roundLimit > 100) {
-    throw new Error("Round limit must be between 1 and 100.");
+  if (!Number.isInteger(roundLimit) || roundLimit < 20 || roundLimit > 200 ||
+      roundLimit % 10 !== 0) {
+    throw new Error("Round limit must be between 20 and 200 in steps of 10.");
   }
   const editsDefaults = message.scope === "defaults";
-  if (!editsDefaults) {
+  const modelId = typeof options.modelId === "string" ? options.modelId.trim() : "";
+  if (modelId === "") {
+    throw new Error("Choose a model.");
+  }
+  if (!editsDefaults && typeof message.name === "string") {
     const normalizedName = typeof message.name === "string" ? message.name.trim() : "";
     if (normalizedName === "") {
       throw new Error("Enter a session name.");
@@ -232,9 +241,10 @@ function saveOptions(message) {
     ? "strappy_web_database_update_default_options"
     : "strappy_web_database_update_session_options";
   const argumentTypes = editsDefaults
-    ? ["string", "number", "number", "number", "number"]
-    : ["number", "string", "number", "number", "number", "number"];
+    ? ["string", "string", "number", "number", "number", "number"]
+    : ["number", "string", "string", "number", "number", "number", "number"];
   const values = [
+    modelId,
     String(options.webProvider || "auto"),
     options.webSearchEnabled ? 1 : 0,
     options.limitToOneTool ? 1 : 0,
@@ -252,6 +262,75 @@ function saveOptions(message) {
     type: "preferences-saved",
     scope: editsDefaults ? "defaults" : "session",
   });
+}
+
+function setModelsAllowed(changes) {
+  requireIdleWorkspace();
+  if (!Array.isArray(changes) || changes.length === 0) {
+    throw new Error("No models were selected.");
+  }
+  for (const change of changes) {
+    const normalizedId = typeof change?.modelId === "string" ?
+      change.modelId.trim() : "";
+    if (normalizedId === "" || strappyModule.ccall(
+      "strappy_web_database_set_model_allowed",
+      "number",
+      ["string", "number"],
+      [normalizedId, change.allowed ? 1 : 0],
+    ) !== 1) {
+      throw new Error(databaseError() || "Could not update the model whitelist.");
+    }
+  }
+  postWorkspaceState();
+  self.postMessage({ type: "model-allowed-saved" });
+}
+
+function setModelAllowed(modelId, allowed) {
+  requireIdleWorkspace();
+  const normalizedId = typeof modelId === "string" ? modelId.trim() : "";
+  if (normalizedId === "") {
+    throw new Error("The selected model is invalid.");
+  }
+  if (strappyModule.ccall(
+    "strappy_web_database_set_model_allowed",
+    "number",
+    ["string", "number"],
+    [normalizedId, allowed ? 1 : 0],
+  ) !== 1) {
+    throw new Error(databaseError() || "Could not update the model whitelist.");
+  }
+  postWorkspaceState();
+  self.postMessage({ type: "model-allowed-saved" });
+}
+
+async function refreshModels() {
+  try {
+    requireIdleWorkspace();
+    if (apiKey === "") {
+      throw new Error("Enter an OpenRouter API key before fetching models.");
+    }
+    modelRefreshActive = true;
+    self.postMessage({ type: "model-refresh-started" });
+    const succeeded = await strappyModule.ccall(
+      "strappy_web_database_refresh_openrouter_models",
+      "number",
+      [],
+      [],
+      { async: true },
+    );
+    if (succeeded !== 1) {
+      throw new Error(databaseError() || "Could not fetch OpenRouter models.");
+    }
+    postWorkspaceState();
+    self.postMessage({ type: "model-refresh-complete" });
+  } catch (error) {
+    self.postMessage({
+      type: "model-refresh-error",
+      message: error instanceof Error ? error.message : "Could not fetch OpenRouter models.",
+    });
+  } finally {
+    modelRefreshActive = false;
+  }
 }
 
 function runWorkspaceOperation(operation) {
@@ -311,7 +390,7 @@ async function submitPrompt(prompt) {
     self.postMessage({ type: "request-error", message: "Enter a prompt first." });
     return;
   }
-  if (activeRequest) {
+  if (activeRequest || modelRefreshActive) {
     return;
   }
 
@@ -396,6 +475,15 @@ self.addEventListener("message", (event) => {
       break;
     case "save-options":
       runWorkspaceOperation(() => saveOptions(message));
+      break;
+    case "set-model-allowed":
+      runWorkspaceOperation(() => setModelAllowed(message.modelId, message.allowed));
+      break;
+    case "set-models-allowed":
+      runWorkspaceOperation(() => setModelsAllowed(message.changes));
+      break;
+    case "refresh-models":
+      void refreshModels();
       break;
     case "clear-key":
       clearKey();

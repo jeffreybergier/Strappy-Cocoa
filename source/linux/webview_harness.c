@@ -2109,6 +2109,32 @@ static int harness_check_fontawesome_rendering(void)
        harness_expect_contains(page_html, "faIconHTML(st,n,m)");
 
   strappy_webview_free(page_html);
+  strappy_webview_set_font_url_dir(
+    "https://cdn.jsdelivr.net/npm/@fortawesome/"
+    "fontawesome-free@7.2.0/webfonts");
+  page_html = strappy_webview_messages_page_html(
+    "", "{}", NULL, 0U, "", NULL,
+    STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED);
+  if (page_html == NULL) {
+    fprintf(stderr, "Could not generate URL-font Font Awesome page HTML.\n");
+    return 0;
+  }
+  ok = ok &&
+       harness_expect_contains(
+         page_html,
+         "https://cdn.jsdelivr.net/npm/@fortawesome/"
+         "fontawesome-free@7.2.0/webfonts/fa-solid-900.woff2") &&
+       harness_expect_contains(
+         page_html,
+         "https://cdn.jsdelivr.net/npm/@fortawesome/"
+         "fontawesome-free@7.2.0/webfonts/fa-regular-400.woff2") &&
+       harness_expect_contains(
+         page_html,
+         "https://cdn.jsdelivr.net/npm/@fortawesome/"
+         "fontawesome-free@7.2.0/webfonts/fa-brands-400.woff2") &&
+       harness_expect_not_contains(page_html,
+                                   "file://https://cdn.jsdelivr.net");
+  strappy_webview_free(page_html);
   strappy_webview_set_font_dir(NULL);
   return ok;
 }

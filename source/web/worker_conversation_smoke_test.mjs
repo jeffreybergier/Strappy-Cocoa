@@ -11,6 +11,7 @@ const workerListeners = new Map();
 const workerMessages = [];
 let workerMessageWaiter = null;
 let capturedRequest = null;
+let capturedModelRequest = null;
 globalThis.self = {
   addEventListener(type, listener) {
     workerListeners.set(type, listener);
@@ -29,6 +30,30 @@ globalThis.fetch = async (url, options) => {
       new URL(`./build-release/Resources/${resourceName}`, import.meta.url),
     );
     return new Response(bytes, { status: 200 });
+  }
+  if (parsedUrl.pathname.endsWith("/models/user")) {
+    capturedModelRequest = { url, options };
+    return new Response(JSON.stringify({
+      data: [{
+        id: "test/provider-model",
+        name: "Fetched test model",
+        description: "A model used by the offline browser test.",
+        context_length: 64000,
+        created: 1700000000,
+        architecture: {
+          modality: "text->text",
+          tokenizer: "Test",
+          input_modalities: ["text"],
+          output_modalities: ["text"],
+        },
+        pricing: { prompt: "0.000001", completion: "0.000002" },
+        top_provider: { context_length: 64000, max_completion_tokens: 8192 },
+        supported_parameters: ["tools"],
+      }],
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }
   capturedRequest = { url, options };
   return new Response(JSON.stringify({
@@ -97,6 +122,7 @@ if (
   throw new Error("The Worker did not publish its initial database-backed session.");
 }
 const originalSessionId = initialWorkspace.activeSessionId;
+const builtInModelId = initialWorkspace.activeOptions.model_id;
 const workspaceOperationStart = workerMessages.length;
 const workerMessageListener = workerListeners.get("message");
 workerMessageListener({ data: { type: "create-session" } });
@@ -118,11 +144,12 @@ workerMessageListener({
     scope: "session",
     name: "Configured browser chat",
     options: {
+      modelId: builtInModelId,
       webProvider: "native",
       webSearchEnabled: true,
       limitToOneTool: true,
       answerQualityEnabled: true,
-      roundLimit: 7,
+      roundLimit: 70,
     },
   },
 });
@@ -135,7 +162,7 @@ if (
   configuredWorkspace.activeOptions.web_provider !== "native" ||
   configuredWorkspace.activeOptions.limit_to_one_tool !== true ||
   configuredWorkspace.activeOptions.answer_quality_enabled !== true ||
-  configuredWorkspace.activeOptions.round_limit !== 7 ||
+  configuredWorkspace.activeOptions.round_limit !== 70 ||
   configuredWorkspace.sessions.find((session) => session.id === createdSessionId)
     ?.name !== "Configured browser chat"
 ) {
@@ -147,11 +174,12 @@ workerMessageListener({
     type: "save-options",
     scope: "defaults",
     options: {
+      modelId: builtInModelId,
       webProvider: "exa",
       webSearchEnabled: true,
       limitToOneTool: false,
       answerQualityEnabled: true,
-      roundLimit: 9,
+      roundLimit: 90,
     },
   },
 });
@@ -163,9 +191,75 @@ const defaultsWorkspace = await waitForWorkerMessage(
 if (
   defaultsWorkspace.defaultOptions.web_provider !== "exa" ||
   defaultsWorkspace.defaultOptions.answer_quality_enabled !== true ||
-  defaultsWorkspace.defaultOptions.round_limit !== 9
+  defaultsWorkspace.defaultOptions.round_limit !== 90
 ) {
   throw new Error("New-chat defaults were not read back from SQLite.");
+}
+const refreshOperationStart = workerMessages.length;
+workerMessageListener({ data: { type: "set-key", key: canaryKey } });
+workerMessageListener({ data: { type: "refresh-models" } });
+await waitForWorkerMessage("model-refresh-complete", refreshOperationStart);
+const refreshedWorkspace = await waitForWorkerMessage(
+  "workspace-state",
+  refreshOperationStart,
+);
+const fetchedModel = refreshedWorkspace.models.find(
+  (model) => model.wire_model_id === "test/provider-model",
+);
+if (!fetchedModel || fetchedModel.allowed || capturedModelRequest === null) {
+  throw new Error("The OpenRouter model refresh did not persist a disabled model.");
+}
+const modelHeaders = new Headers(capturedModelRequest.options.headers);
+if (
+  !capturedModelRequest.url.endsWith("/api/v1/models/user") ||
+  modelHeaders.get("Authorization") !== `Bearer ${canaryKey}` ||
+  capturedModelRequest.options.body !== undefined
+) {
+  throw new Error("The OpenRouter model refresh request is invalid.");
+}
+const allowOperationStart = workerMessages.length;
+workerMessageListener({
+  data: {
+    type: "set-models-allowed",
+    changes: [{ modelId: fetchedModel.id, allowed: true }],
+  },
+});
+await waitForWorkerMessage("model-allowed-saved", allowOperationStart);
+const allowedWorkspace = await waitForWorkerMessage("workspace-state", allowOperationStart);
+if (!allowedWorkspace.models.find((model) => model.id === fetchedModel.id)?.allowed) {
+  throw new Error("The fetched model was not added to the whitelist.");
+}
+const fetchedDefaultStart = workerMessages.length;
+workerMessageListener({
+  data: {
+    type: "save-options",
+    scope: "defaults",
+    options: {
+      modelId: fetchedModel.id,
+      webProvider: "auto",
+      webSearchEnabled: true,
+      limitToOneTool: false,
+      answerQualityEnabled: false,
+      roundLimit: 50,
+    },
+  },
+});
+await waitForWorkerMessage("preferences-saved", fetchedDefaultStart);
+const selectedDefaultWorkspace = await waitForWorkerMessage(
+  "workspace-state",
+  fetchedDefaultStart,
+);
+if (selectedDefaultWorkspace.defaultOptions.model_id !== fetchedModel.id) {
+  throw new Error("The fetched model was not saved as the new-chat default.");
+}
+const inheritedSessionStart = workerMessages.length;
+workerMessageListener({ data: { type: "create-session" } });
+const inheritedWorkspace = await waitForWorkerMessage(
+  "workspace-state",
+  inheritedSessionStart,
+);
+if (inheritedWorkspace.activeOptions.model_id !== fetchedModel.id) {
+  throw new Error("A new chat did not inherit the selected default model.");
 }
 const selectOperationStart = workerMessages.length;
 workerMessageListener({
@@ -179,7 +273,6 @@ if (selectedWorkspace.activeSessionId !== originalSessionId) {
   throw new Error("The Worker did not switch back to the requested chat.");
 }
 const initialMessageCount = workerMessages.length;
-workerMessageListener({ data: { type: "set-key", key: canaryKey } });
 workerMessageListener({ data: { type: "submit-prompt", prompt } });
 await waitForWorkerMessage("response-complete", initialMessageCount);
 

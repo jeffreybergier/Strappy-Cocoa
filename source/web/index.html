@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Strappy</title>
   <style>
+    @font-face { font-family: "FA7S"; font-style: normal; font-weight: 900;
+      src: url("https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@7.2.0/webfonts/fa-solid-900.woff2") format("woff2"); }
     :root {
       color-scheme: light;
       font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont,
@@ -26,21 +28,28 @@
     button:disabled, input:disabled, textarea:disabled, select:disabled {
       cursor: default; opacity: .52;
     }
+    [hidden] { display: none !important; }
+    .fa-solid { font-family: "FA7S"; font-style: normal; font-weight: 900;
+      line-height: 1; }
     .workspace { display: grid; grid-template-columns:
       clamp(14rem, 18vw, 19rem) minmax(28rem, 1fr) clamp(17rem, 21vw, 22rem);
       height: 100dvh; min-height: 34rem; }
     .side-panel { min-height: 0; overflow-y: auto; overscroll-behavior: contain;
       background: var(--panel); scrollbar-color: var(--strong-border) var(--panel); }
-    .sessions-panel { border-right: 1px solid var(--line); }
-    .inspector-panel { border-left: 1px solid var(--line); }
+    .sessions-panel { border-right: 1px solid var(--line); grid-column: 1; }
+    .chat-document { grid-column: 2; }
+    .inspector-panel { border-left: 1px solid var(--line); grid-column: 3; }
     .panel-heading { align-items: center; background: var(--accent-soft);
       display: flex; gap: .75rem; justify-content: space-between; padding: 1rem;
       position: sticky; top: 0; z-index: 2; }
     .brand { font-size: 1.12rem; font-weight: 720; letter-spacing: -.02em;
       margin: 0; }
+    .heading-actions { align-items: center; display: flex; gap: .45rem; }
     .icon-button { align-items: center; background: var(--accent); border: 0;
       border-radius: .5rem; color: white; display: inline-flex; font-weight: 650;
       justify-content: center; min-height: 2.25rem; padding: .45rem .75rem; }
+    .gear-button { background: var(--surface); color: var(--control-text);
+      font-size: 1rem; min-width: 2.25rem; padding: .45rem; }
     .session-list { display: grid; gap: .45rem; list-style: none; margin: 0;
       padding: .8rem .65rem 1rem; }
     .session-button { background: var(--surface); border: 0; border-radius: .65rem;
@@ -49,16 +58,12 @@
     .session-button[aria-current="true"] { background: var(--selection);
       color: white; }
     .session-name { display: block; font-weight: 650; overflow: hidden;
-      text-overflow: ellipsis; white-space: nowrap; }
+      text-overflow: ellipsis; }
     .session-date { color: var(--muted); display: block; font-size: .77rem;
       margin-top: .25rem; }
     .session-button[aria-current="true"] .session-date { color: #ffffffe0; }
     .chat-document { background: var(--document); display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
-    .chat-header { padding: .85rem 1.15rem; }
-    .chat-title { font-size: 1rem; margin: 0; overflow: hidden;
-      text-overflow: ellipsis; white-space: nowrap; }
-    .chat-subtitle { color: var(--muted); font-size: .78rem; margin: .2rem 0 0; }
+      grid-template-rows: minmax(0, 1fr) auto; min-height: 0; min-width: 0; }
     #timeline { background: white; border: 0; display: block; height: 100%;
       min-height: 0; width: 100%; }
     .composer { padding: .8rem 1rem .65rem; }
@@ -69,23 +74,10 @@
     #prompt { background: var(--control); border: 0;
       border-radius: .7rem; display: block; max-height: 12rem; min-height: 3rem;
       padding: .7rem .8rem; resize: vertical; width: 100%; }
-    .actions { display: flex; gap: .45rem; }
-    .actions button { border: 0; border-radius: .55rem;
-      min-height: 2.75rem; padding: .5rem .8rem; }
     #send-prompt { background: var(--accent); color: white; font-weight: 650; }
-    #conversation-status { color: var(--muted); font-size: .75rem;
-      margin: .45rem .1rem 0; min-height: 1rem; }
     [data-state="ready"], [data-state="complete"] { color: #16803c; }
     [data-state="error"] { color: var(--danger); }
-    .inspector-tabs { background: var(--accent-soft); display: grid; gap: 0;
-      grid-template-columns: 1fr 1fr; padding: 0 1rem .85rem; }
-    .inspector-tab { background: var(--surface); border: 0;
-      border-radius: .5rem; min-height: 2.2rem; padding: .35rem; }
-    .inspector-tab + .inspector-tab { border-radius: 0 .5rem .5rem 0; }
-    .inspector-tab:first-child { border-radius: .5rem 0 0 .5rem; }
-    .inspector-tab[aria-selected="true"] { background: var(--selection);
-      color: white; font-weight: 650; }
-    .inspector-form { display: grid; gap: 1rem; padding: 0 1rem 1.2rem; }
+    .inspector-form { display: grid; gap: 1rem; padding: 1rem 1rem 1.2rem; }
     fieldset { background: var(--surface); border: 0;
       border-radius: .65rem; display: grid; gap: .7rem; margin: 0;
       padding: .85rem .75rem .75rem; }
@@ -101,12 +93,6 @@
       gap: .55rem; grid-template-columns: auto 1fr; }
     .check-field input { margin-top: .18rem; }
     input[type="checkbox"] { accent-color: var(--accent); }
-    .preferences-actions { align-items: center; display: flex; gap: .65rem; }
-    #save-preferences { background: var(--accent); border: 0; border-radius: .5rem;
-      color: white; font-weight: 650; min-height: 2.35rem; padding: .45rem .75rem; }
-    #delete-session { background: var(--danger-background); border: 0;
-      border-radius: .5rem; color: var(--danger); min-height: 2.35rem;
-      padding: .45rem .65rem; }
     #preferences-status { color: var(--muted); font-size: .75rem; margin: 0; }
     #key-form { display: grid; gap: .55rem; }
     .credential-actions { display: flex; gap: .45rem; }
@@ -117,114 +103,297 @@
       margin: 0; }
     #wasm-detail { color: var(--muted); font-size: .72rem; line-height: 1.4;
       margin: 0; }
+    .model-catalog { display: grid; gap: .75rem; padding: 0 1rem 1.2rem; }
+    .model-catalog-actions { align-items: end; display: grid;
+      gap: .55rem; grid-template-columns: minmax(0, 1fr) auto; }
+    #fetch-models { background: var(--accent); border: 0; border-radius: .5rem;
+      color: white; font-weight: 650; min-height: 2.35rem; padding: .45rem .75rem; }
+    #model-catalog-status { color: var(--muted); font-size: .75rem; margin: 0; }
+    .preferences-window { background: var(--panel); border: 1px solid
+      var(--strong-border); border-radius: .75rem; color: var(--text);
+      height: min(44rem, calc(100dvh - 4rem)); padding: 0;
+      width: min(48rem, calc(100vw - 4rem)); }
+    .preferences-window::backdrop { background: rgba(28, 22, 31, .35); }
+    .preferences-window[open] { display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr); }
+    .preferences-titlebar { align-items: center; background: var(--accent-soft);
+      display: flex; justify-content: space-between; padding: .7rem 1rem; }
+    .preferences-titlebar h2 { font-size: .95rem; margin: 0; }
+    .dialog-close { background: transparent; border: 0; border-radius: .4rem;
+      color: var(--control-text); min-height: 2rem; min-width: 2rem; padding: .4rem; }
+    .preferences-toolbar { background: var(--accent-soft); display: flex;
+      gap: .5rem; justify-content: center; padding: .1rem .8rem .8rem; }
+    .preferences-tab { background: transparent; border: 0; border-radius: .5rem;
+      min-width: 6.5rem; padding: .5rem .8rem; }
+    .preferences-tab[aria-selected="true"] { background: var(--selection);
+      color: white; font-weight: 650; }
+    .preferences-content { min-height: 0; overflow-y: auto; padding: 1rem; }
+    .preferences-pane { margin: 0 auto; max-width: 38rem; }
+    .preferences-pane .inspector-form, .preferences-pane.model-catalog {
+      padding: 0; }
+    .preferences-pane .inspector-form { gap: 1rem; }
+    .preferences-pane .model-list { padding-bottom: .5rem; }
+    .preferences-pane #wasm-detail { margin-top: .45rem; }
+    .workspace.sidebar-collapsed { grid-template-columns: 0 minmax(28rem, 1fr)
+      clamp(17rem, 21vw, 22rem); }
+    .workspace.inspector-collapsed { grid-template-columns:
+      clamp(14rem, 18vw, 19rem) minmax(28rem, 1fr) 0; }
+    .workspace.sidebar-collapsed.inspector-collapsed {
+      grid-template-columns: 0 minmax(28rem, 1fr) 0; }
+    .workspace.sidebar-collapsed .sessions-panel,
+    .workspace.inspector-collapsed .inspector-panel { display: none; }
+    .session-section { color: var(--muted); font-size: .72rem; font-weight: 700;
+      margin: .7rem .9rem .15rem; text-transform: uppercase; }
+    .session-empty { color: var(--muted); padding: .8rem 1rem; }
+    .session-empty strong, .session-empty span { display: block; }
+    .session-empty span { font-size: .78rem; margin-top: .3rem; }
+    .session-toolbar { align-items: center; display: flex; gap: .35rem;
+      margin-top: auto; padding: .4rem; position: sticky; bottom: 0;
+      background: var(--panel); }
+    .session-toolbar button, .composer-button { background: var(--surface);
+      border: 0; border-radius: .45rem; min-height: 2.2rem; min-width: 2.2rem;
+      padding: .4rem .6rem; }
+    .sessions-panel { display: flex; flex-direction: column; }
+    .sessions-panel nav { flex: 1; }
+    .session-name { white-space: normal; display: -webkit-box;
+      -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+    .session-running::before { content: "\21bb"; display: inline-block;
+      margin-right: .3rem; }
+    #prompt-form { grid-template-columns: auto minmax(0, 1fr) auto; }
+    .composer-actions { display: flex; gap: .2rem; }
+    #send-prompt { min-width: 5.2rem; }
+    .round-control { align-items: center; display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto auto; gap: .5rem; }
+    .round-control output { min-width: 2rem; text-align: right; }
+    .model-table-wrap { border: 1px solid var(--strong-border); overflow: auto;
+      max-height: 29rem; }
+    .model-table { border-collapse: collapse; font-size: .78rem; width: 100%; }
+    .model-table th { background: var(--section); position: sticky; top: 0;
+      text-align: left; z-index: 1; }
+    .model-table th, .model-table td { border-bottom: 1px solid var(--line);
+      padding: .4rem .45rem; }
+    .model-table th button { background: transparent; border: 0; font-weight: 700;
+      padding: 0; white-space: nowrap; }
+    .model-table .numeric { text-align: right; white-space: nowrap; }
+    .model-table tbody tr[aria-selected="true"] { background: var(--selection);
+      color: white; }
+    .model-table .model-id-cell { color: var(--muted); max-width: 15rem;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .model-table tbody tr[aria-selected="true"] .model-id-cell { color: inherit; }
+    .prompts-text { background: var(--control); border: 1px solid var(--strong-border);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; line-height: 1.45;
+      min-height: 30rem; padding: .75rem; resize: none; width: 100%; }
+    .context-menu { background: var(--panel); border: 1px solid var(--strong-border);
+      border-radius: .35rem; box-shadow: 0 .3rem 1rem #0003; display: grid;
+      padding: .25rem; position: fixed; z-index: 20; }
+    .context-menu button { background: transparent; border: 0; padding: .35rem .65rem;
+      text-align: left; }
+    .provider-dialog { background: var(--panel); border: 1px solid var(--strong-border);
+      border-radius: .6rem; color: var(--text); min-width: 28rem; padding: 1rem; }
+    .provider-dialog header, .provider-dialog footer { align-items: center;
+      display: flex; justify-content: space-between; gap: .7rem; }
+    .provider-row { align-items: center; display: flex; justify-content: space-between;
+      margin: 1rem 0; padding: .8rem; background: var(--surface); }
   </style>
 </head>
 <body>
   <div class="workspace">
-    <aside class="side-panel sessions-panel" aria-label="Chats">
+    <aside class="side-panel sessions-panel" aria-label="Conversations">
       <div class="panel-heading">
         <h1 class="brand">Strappy</h1>
-        <button id="new-session" class="icon-button" type="button" disabled>New chat</button>
+        <div class="heading-actions">
+          <button id="preferences-button" class="icon-button gear-button" type="button"
+                  aria-label="Preferences" title="Preferences" disabled>
+            <span class="fa-solid" aria-hidden="true">&#xf013;</span>
+          </button>
+        </div>
       </div>
       <p id="status" class="sr-only" role="status" aria-live="polite">Loading shared C code…</p>
+      <h2 class="session-section" data-l10n="Conversations">Conversations</h2>
       <nav aria-label="Session list"><ul id="session-list" class="session-list"></ul></nav>
+      <div class="session-toolbar">
+        <button id="delete-session" type="button" aria-label="Delete Chat"
+                title="Delete Chat" disabled><span class="fa-solid" aria-hidden="true">&#xf068;</span></button>
+        <button id="new-session" type="button" aria-label="New Chat"
+                title="New Chat" disabled><span class="fa-solid" aria-hidden="true">&#xf067;</span></button>
+      </div>
     </aside>
 
     <main class="chat-document" aria-label="Selected chat">
-      <header class="chat-header">
-        <h2 id="chat-title" class="chat-title">Loading chat…</h2>
-        <p id="chat-subtitle" class="chat-subtitle">World Knowledge</p>
-      </header>
+      <h2 id="chat-title" class="sr-only">Untitled Session</h2>
       <iframe id="timeline" title="Conversation transcript"></iframe>
       <section class="composer" aria-label="Prompt composer">
         <form id="prompt-form">
+          <button id="sidebar-toggle" class="composer-button" type="button"
+                  aria-label="Hide Sidebar" title="Hide Sidebar"><span class="fa-solid" aria-hidden="true">&#xf053;</span></button>
           <label class="sr-only" for="prompt">Prompt</label>
-          <textarea id="prompt" name="prompt" placeholder="Ask anything…" required></textarea>
-          <div class="actions">
-            <button id="send-prompt" type="submit" disabled>Send</button>
-            <button id="cancel-request" type="button" disabled>Cancel</button>
+          <textarea id="prompt" name="prompt" required></textarea>
+          <div class="composer-actions">
+            <button id="close-chat" class="composer-button" type="button"
+                    aria-label="Close Chat" title="Close Chat"><span class="fa-solid" aria-hidden="true">&#xf057;</span></button>
+            <button id="options-toggle" class="composer-button" type="button"
+                    aria-label="Session Options" title="Session Options"><span class="fa-solid" aria-hidden="true">&#xf013;</span></button>
+            <button id="send-prompt" class="composer-button" type="submit" disabled>Send</button>
           </div>
         </form>
-        <p id="conversation-status" role="status" aria-live="polite">Waiting for the Worker.</p>
       </section>
     </main>
 
     <aside class="side-panel inspector-panel" aria-label="Configuration inspector">
-      <div class="panel-heading"><h2 class="brand">Configuration</h2></div>
-      <div class="inspector-tabs" role="tablist" aria-label="Configuration scope">
-        <button id="session-tab" class="inspector-tab" type="button" role="tab"
-                aria-selected="true">This chat</button>
-        <button id="defaults-tab" class="inspector-tab" type="button" role="tab"
-                aria-selected="false">New chats</button>
-      </div>
+      <div class="panel-heading"><h2 class="brand" data-l10n="Session Options">Session Options</h2></div>
 
       <form id="preferences-form" class="inspector-form">
         <fieldset>
-          <legend>Identity</legend>
-          <label id="session-name-field" class="field" for="session-name">
-            <span>Name</span><input id="session-name" name="session-name" maxlength="160">
-          </label>
-          <label class="field" for="assistant-set">
-            <span>Assistant</span><input id="assistant-set" value="World Knowledge" disabled>
-          </label>
+          <legend data-l10n="Assistant">Assistant</legend>
           <label class="field" for="session-model">
-            <span>Model</span><input id="session-model" disabled>
+            <span data-l10n="Model">Model</span><select id="session-model"></select>
           </label>
         </fieldset>
         <fieldset>
-          <legend>Tools</legend>
+          <legend data-l10n="Tools">Tools</legend>
           <label class="check-field" for="web-search-enabled">
-            <input id="web-search-enabled" type="checkbox"><span>Allow web search</span>
-          </label>
-          <label class="field" for="web-provider">
-            <span>Web-search mode</span>
-            <select id="web-provider">
-              <option value="none">None</option><option value="auto">Auto</option>
-              <option value="native">Native</option><option value="exa">Exa</option>
-              <option value="parallel">Parallel</option>
-            </select>
+            <input id="web-search-enabled" type="checkbox"><span data-l10n="Enable Web Search">Enable Web Search</span>
           </label>
         </fieldset>
         <fieldset>
-          <legend>Limits</legend>
+          <legend data-l10n="Limits">Limits</legend>
           <label class="check-field" for="limit-to-one-tool">
-            <input id="limit-to-one-tool" type="checkbox"><span>Limit each round to one tool</span>
+            <input id="limit-to-one-tool" type="checkbox"><span data-l10n="Limit to 1 Tool">Limit to 1 Tool</span>
           </label>
           <label class="check-field" for="answer-quality-enabled">
-            <input id="answer-quality-enabled" type="checkbox"><span>Evaluate answer quality</span>
+            <input id="answer-quality-enabled" type="checkbox"><span data-l10n="Check Answer Quality">Check Answer Quality</span>
           </label>
-          <label class="field" for="round-limit">
-            <span>Maximum rounds</span><input id="round-limit" type="number" min="1" max="100" step="1">
+          <label class="field" for="round-limit"><span data-l10n="Round Limit">Round Limit</span>
+            <span class="round-control"><small>20</small><input id="round-limit" type="range" min="20" max="200" step="10"><small>200</small><output id="round-limit-value">50</output></span>
           </label>
         </fieldset>
-        <div class="preferences-actions">
-          <button id="save-preferences" type="submit" disabled>Save</button>
-          <button id="delete-session" type="button" disabled>Delete chat</button>
-        </div>
+        <fieldset><legend data-l10n="Search Provider">Search Provider</legend>
+          <label class="field" for="web-provider"><span data-l10n="Provider">Provider</span>
+          <select id="web-provider"><option value="none" disabled>None</option><option value="auto">Auto</option><option value="native">Native</option><option value="exa">Exa</option><option value="parallel">Parallel</option></select></label>
+        </fieldset>
         <p id="preferences-status" role="status" aria-live="polite"></p>
       </form>
 
-      <section class="inspector-form" aria-label="OpenRouter credential">
-        <fieldset>
-          <legend>OpenRouter</legend>
-          <form id="key-form">
-            <label class="field" for="api-key">
-              <span>API key</span>
-              <input id="api-key" name="api-key" type="password"
-                     autocomplete="off" autocapitalize="none" spellcheck="false" required>
-            </label>
-            <div class="credential-actions">
-              <button id="set-key" type="submit" disabled>Use key</button>
-              <button id="clear-key" type="button" disabled>Clear key</button>
-            </div>
-          </form>
-          <p class="credential-note">The key stays only in volatile Worker memory
-            and is forgotten when this page reloads.</p>
-          <p id="wasm-detail" hidden></p>
-        </fieldset>
-      </section>
     </aside>
   </div>
+
+  <dialog id="preferences-window" class="preferences-window" aria-labelledby="preferences-title">
+      <header class="preferences-titlebar">
+        <h2 id="preferences-title" data-l10n="Preferences">Preferences</h2>
+        <button id="close-preferences" class="dialog-close" type="button"
+                aria-label="Close Preferences" title="Close Preferences">
+          <span class="fa-solid" aria-hidden="true">&#xf00d;</span>
+        </button>
+      </header>
+      <nav class="preferences-toolbar" role="tablist" aria-label="Preferences panes">
+        <button id="authentication-tab" class="preferences-tab" type="button" role="tab"
+                aria-controls="authentication-pane" aria-selected="true" data-l10n="Accounts">Accounts</button>
+        <button id="models-tab" class="preferences-tab" type="button" role="tab"
+                aria-controls="models-pane" aria-selected="false" data-l10n="Models">Models</button>
+        <button id="defaults-tab" class="preferences-tab" type="button" role="tab"
+                aria-controls="defaults-pane" aria-selected="false" data-l10n="Defaults">Defaults</button>
+        <button id="prompts-tab" class="preferences-tab" type="button" role="tab"
+                aria-controls="prompts-pane" aria-selected="false" data-l10n="Prompts">Prompts</button>
+      </nav>
+      <div class="preferences-content">
+        <section id="authentication-pane" class="preferences-pane" role="tabpanel"
+                 aria-labelledby="authentication-tab">
+          <form id="key-form" class="inspector-form">
+            <fieldset>
+              <legend>OpenRouter</legend>
+              <label class="field" for="api-key">
+                <span>API key</span>
+                <input id="api-key" name="api-key" type="password"
+                       autocomplete="off" autocapitalize="none" spellcheck="false" required>
+              </label>
+              <div class="credential-actions">
+                <button id="set-key" type="submit" disabled>Use key</button>
+                <button id="clear-key" type="button" disabled>Clear key</button>
+              </div>
+              <p class="credential-note">The key stays only in volatile Worker memory
+                and is forgotten when this page reloads.</p>
+              <p id="wasm-detail" hidden></p>
+            </fieldset>
+          </form>
+        </section>
+
+        <section id="defaults-pane" class="preferences-pane" role="tabpanel"
+                 aria-labelledby="defaults-tab" hidden>
+          <form id="defaults-form" class="inspector-form">
+            <fieldset>
+              <legend data-l10n="Assistant">Assistant</legend>
+              <label class="field" for="default-model">
+                <span data-l10n="Model">Model</span><select id="default-model"></select>
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend data-l10n="Tools & Search">Tools &amp; Search</legend>
+              <label class="check-field" for="default-web-search-enabled">
+                <input id="default-web-search-enabled" type="checkbox"><span data-l10n="Enable Web Search">Enable Web Search</span>
+              </label>
+              <label class="field" for="default-web-provider">
+                <span data-l10n="Provider">Provider</span>
+                <select id="default-web-provider">
+                  <option value="none" disabled>None</option><option value="auto">Auto</option><option value="native">Native</option><option value="exa">Exa</option>
+                  <option value="parallel">Parallel</option>
+                </select>
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend data-l10n="Limits">Limits</legend>
+              <label class="check-field" for="default-limit-to-one-tool">
+                <input id="default-limit-to-one-tool" type="checkbox"><span data-l10n="Limit to 1 Tool">Limit to 1 Tool</span>
+              </label>
+              <label class="check-field" for="default-answer-quality-enabled">
+                <input id="default-answer-quality-enabled" type="checkbox"><span data-l10n="Check Answer Quality">Check Answer Quality</span>
+              </label>
+              <label class="field" for="default-round-limit">
+                <span data-l10n="Round Limit">Round Limit</span><span class="round-control"><small>20</small><input id="default-round-limit" type="range" min="20" max="200" step="10"><small>200</small><output id="default-round-limit-value">50</output></span>
+              </label>
+            </fieldset>
+            <p id="defaults-status" role="status" aria-live="polite" data-l10n="Session defaults apply to new sessions">Session defaults apply to new sessions</p>
+          </form>
+        </section>
+
+        <section id="models-pane" class="preferences-pane model-catalog" role="tabpanel"
+                 aria-labelledby="models-tab" hidden>
+          <div class="model-catalog-actions">
+            <label class="field" for="model-search">
+              <span data-l10n="Search">Search</span>
+              <input id="model-search" type="search" placeholder="Search">
+            </label>
+            <button id="fetch-models" type="button" disabled data-l10n="Fetch">Fetch</button>
+          </div>
+          <p id="model-catalog-status" role="status" aria-live="polite"></p>
+          <div class="model-table-wrap"><table id="model-table" class="model-table">
+            <thead><tr>
+              <th><button type="button" data-sort="model_allowed" data-l10n="Use">Use</button></th>
+              <th><button type="button" data-sort="model_provider" data-l10n="Provider">Provider</button></th>
+              <th><button type="button" data-sort="model_name" data-l10n="Model">Model</button></th>
+              <th><button type="button" data-sort="model_id" data-l10n="ID">ID</button></th>
+              <th class="numeric"><button type="button" data-sort="model_context" data-l10n="Context">Context</button></th>
+              <th class="numeric"><button type="button" data-sort="model_prompt_price" data-l10n="Cost In (1M)">Cost In (1M)</button></th>
+              <th class="numeric"><button type="button" data-sort="model_completion_price" data-l10n="Cost Out (1M)">Cost Out (1M)</button></th>
+            </tr></thead><tbody id="model-list"></tbody>
+          </table></div>
+        </section>
+        <section id="prompts-pane" class="preferences-pane" role="tabpanel"
+                 aria-labelledby="prompts-tab" hidden>
+          <textarea id="system-prompt" class="prompts-text" readonly></textarea>
+        </section>
+      </div>
+  </dialog>
+  <div id="session-context-menu" class="context-menu" hidden>
+    <button id="copy-session-title" type="button">Copy Title</button>
+    <button id="copy-last-message" type="button">Copy Last Message</button>
+  </div>
+  <dialog id="model-provider-dialog" class="provider-dialog">
+    <header><h2>Edit Model Providers</h2></header>
+    <div class="provider-row"><span>OpenRouter</span>
+      <button id="fetch-openrouter-models" type="button">Fetch Models</button></div>
+    <footer><span id="provider-dialog-status" role="status"></span>
+      <button id="close-model-provider-dialog" type="button">Done</button></footer>
+  </dialog>
   <script type="module" src="./app.js"></script>
 </body>
 </html>

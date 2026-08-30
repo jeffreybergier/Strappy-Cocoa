@@ -285,10 +285,15 @@ Outputs:
 The browser proof of concept supports multiple World Knowledge sessions through
 OpenRouter in a current Chromium browser. Its three-column workspace includes a
 session list, the C-rendered selected conversation, and a configuration
-inspector for the selected session or new-session defaults. It is intended for
-local evaluation, not production deployment, and does not support other
-assistant sets, model selection, ChatGPT accounts, OAuth, Bash, filesystem
-access, or personal databases.
+inspector for the selected session. Its composer and conversation toolbar use
+the macOS app's sidebar, close-chat, session-options, send/cancel, new, and
+delete arrangement. Preferences provides macOS-aligned Accounts, Models,
+Defaults, and Prompts panes, including the sortable allowed-model table and
+provider fetch sheet. The window opens to Accounts on each fresh load because
+browser credentials are volatile.
+It is intended for local
+evaluation, not production deployment, and does not support other assistant
+sets, ChatGPT accounts, OAuth, Bash, filesystem access, or personal databases.
 
 Build the static application reproducibly with:
 
@@ -303,7 +308,7 @@ Then serve it on the fixed, loopback-only origin and open
 docker compose up web
 ```
 
-Enter the OpenRouter API key in the page. The key is transferred directly to
+Open **Preferences > Authentication** to enter the OpenRouter API key. The key is transferred directly to
 volatile Worker memory, is never supplied to Docker Compose or the static web
 container, and must be entered again after a reload.
 

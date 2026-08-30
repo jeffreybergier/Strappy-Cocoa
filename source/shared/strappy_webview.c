@@ -104,6 +104,7 @@ static const strappy_webview_palette_colors
   }};
 
 static char *g_strappy_webview_font_dir = NULL;
+static int g_strappy_webview_font_dir_is_url = 0;
 
 typedef enum strappy_webview_label_index {
   STRAPPY_WEBVIEW_LABEL_AGENT = 0,
@@ -478,6 +479,38 @@ static int strappy_webview_append_url_path_escaped(
     cursor++;
   }
 
+  return 1;
+}
+
+static int strappy_webview_append_remote_url_escaped(
+  strappy_webview_buffer *buffer,
+  const char *url)
+{
+  static const char hex[] = "0123456789ABCDEF";
+  const unsigned char *cursor;
+  char escaped[3];
+
+  if (url == NULL) {
+    return 1;
+  }
+
+  escaped[0] = '%';
+  cursor = (const unsigned char *)url;
+  while (*cursor != '\0') {
+    if (((*cursor >= 0x21U) && (*cursor <= 0x7EU)) &&
+        (*cursor != '\'') && (*cursor != '\\')) {
+      if (!strappy_webview_buffer_append_char(buffer, (char)*cursor)) {
+        return 0;
+      }
+    } else {
+      escaped[1] = hex[*cursor >> 4];
+      escaped[2] = hex[*cursor & 15U];
+      if (!strappy_webview_buffer_append(buffer, escaped, sizeof(escaped))) {
+        return 0;
+      }
+    }
+    cursor++;
+  }
   return 1;
 }
 
@@ -2235,11 +2268,12 @@ static int strappy_webview_append_font_faces(strappy_webview_buffer *buffer)
 {
   static const struct {
     const char *family;
-    const char *file_name;
+    const char *local_file_name;
+    const char *remote_file_name;
   } faces[] = {
-    { "FA7S", "FA7-Solid-900.otf" },
-    { "FA7R", "FA7-Regular-400.otf" },
-    { "FA7B", "FA7-Brands-400.otf" }
+    { "FA7S", "FA7-Solid-900.otf", "fa-solid-900.woff2" },
+    { "FA7R", "FA7-Regular-400.otf", "fa-regular-400.woff2" },
+    { "FA7B", "FA7-Brands-400.otf", "fa-brands-400.woff2" }
   };
   size_t index;
 
@@ -2251,14 +2285,24 @@ static int strappy_webview_append_font_faces(strappy_webview_buffer *buffer)
     if (!strappy_webview_buffer_append_cstring(buffer,
           "@font-face{font-family:'") ||
         !strappy_webview_buffer_append_cstring(buffer, faces[index].family) ||
-        !strappy_webview_buffer_append_cstring(buffer,
-          "';src:url('file://") ||
-        !strappy_webview_append_url_path_escaped(buffer,
-                                                 g_strappy_webview_font_dir) ||
+        !strappy_webview_buffer_append_cstring(buffer, "';src:url('") ||
+        (!g_strappy_webview_font_dir_is_url &&
+         !strappy_webview_buffer_append_cstring(buffer, "file://")) ||
+        !(g_strappy_webview_font_dir_is_url
+          ? strappy_webview_append_remote_url_escaped(
+              buffer, g_strappy_webview_font_dir)
+          : strappy_webview_append_url_path_escaped(
+              buffer, g_strappy_webview_font_dir)) ||
         !strappy_webview_buffer_append_cstring(buffer, "/") ||
-        !strappy_webview_buffer_append_cstring(buffer, faces[index].file_name) ||
+        !strappy_webview_buffer_append_cstring(
+          buffer,
+          g_strappy_webview_font_dir_is_url
+            ? faces[index].remote_file_name
+            : faces[index].local_file_name) ||
         !strappy_webview_buffer_append_cstring(buffer,
-          "') format('opentype');}")) {
+          g_strappy_webview_font_dir_is_url
+            ? "') format('woff2');}"
+            : "') format('opentype');}")) {
       return 0;
     }
   }
@@ -3989,26 +4033,39 @@ char *strappy_webview_script_batch_finish_js(
   return strappy_webview_buffer_finish(&batch->buffer);
 }
 
-void strappy_webview_set_font_dir(const char *abs_dir)
+static void strappy_webview_set_font_location(const char *location,
+                                               int is_url)
 {
   size_t length;
   char *copy;
 
   free(g_strappy_webview_font_dir);
   g_strappy_webview_font_dir = NULL;
+  g_strappy_webview_font_dir_is_url = 0;
 
-  if ((abs_dir == NULL) || (abs_dir[0] == '\0')) {
+  if ((location == NULL) || (location[0] == '\0')) {
     return;
   }
 
-  length = strlen(abs_dir);
+  length = strlen(location);
   copy = (char *)malloc(length + 1U);
   if (copy == NULL) {
     return;
   }
 
-  memcpy(copy, abs_dir, length + 1U);
+  memcpy(copy, location, length + 1U);
   g_strappy_webview_font_dir = copy;
+  g_strappy_webview_font_dir_is_url = is_url ? 1 : 0;
+}
+
+void strappy_webview_set_font_dir(const char *abs_dir)
+{
+  strappy_webview_set_font_location(abs_dir, 0);
+}
+
+void strappy_webview_set_font_url_dir(const char *url_dir)
+{
+  strappy_webview_set_font_location(url_dir, 1);
 }
 
 char *strappy_webview_status_html(const char *text,

@@ -1,6 +1,7 @@
 #include "strappy_assistant_sets.h"
 #include "strappy_core.h"
 #include "strappy_platform_profile.h"
+#include "strappy_prompt.h"
 #include "strappy_provider.h"
 #include "strappy_tools.h"
 
@@ -9,13 +10,16 @@
 #include <string.h>
 
 static char *strappy_web_capabilities_tools_json = NULL;
+static char *strappy_web_capabilities_system_prompt_text = NULL;
 static char *strappy_web_capabilities_error = NULL;
 
 static void strappy_web_capabilities_clear(void)
 {
   free(strappy_web_capabilities_tools_json);
+  free(strappy_web_capabilities_system_prompt_text);
   free(strappy_web_capabilities_error);
   strappy_web_capabilities_tools_json = NULL;
+  strappy_web_capabilities_system_prompt_text = NULL;
   strappy_web_capabilities_error = NULL;
 }
 
@@ -112,8 +116,16 @@ int strappy_web_capabilities_initialize(const char *resource_dir)
       STRAPPY_PROVIDER_KIND_OPENROUTER,
       STRAPPY_WEB_PROVIDER_NATIVE,
       &strappy_web_capabilities_error);
+  if (strappy_web_capabilities_tools_json != NULL) {
+    strappy_web_capabilities_system_prompt_text = strappy_prompt_build(
+      resource_dir,
+      &profile,
+      STRAPPY_WEB_PROVIDER_AUTO,
+      &strappy_web_capabilities_error);
+  }
   strappy_assistant_set_profile_destroy(&profile);
-  return (strappy_web_capabilities_tools_json != NULL) ? 1 : 0;
+  return ((strappy_web_capabilities_tools_json != NULL) &&
+          (strappy_web_capabilities_system_prompt_text != NULL)) ? 1 : 0;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -127,6 +139,13 @@ const char *strappy_web_capabilities_tools(void)
 {
   return (strappy_web_capabilities_tools_json != NULL) ?
     strappy_web_capabilities_tools_json : "";
+}
+
+EMSCRIPTEN_KEEPALIVE
+const char *strappy_web_capabilities_system_prompt(void)
+{
+  return (strappy_web_capabilities_system_prompt_text != NULL) ?
+    strappy_web_capabilities_system_prompt_text : "";
 }
 
 EMSCRIPTEN_KEEPALIVE
