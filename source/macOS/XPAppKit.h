@@ -56,6 +56,7 @@
 #endif
 
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
+  #define XPBezelStyleTexturedRounded NSBezelStyleTexturedRounded
   #define XPBezelStyleRounded        NSBezelStyleRounded
   #define XPBezelStyleTexturedSquare NSBezelStyleTexturedSquare
   #define XPBezelStyleSmallSquare    NSBezelStyleSmallSquare
@@ -64,6 +65,7 @@
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorStyleSpinning
   #define XPPasteboardStringType     NSPasteboardTypeString
 #elif defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 1050
+  #define XPBezelStyleTexturedRounded NSTexturedRoundedBezelStyle
   #define XPBezelStyleRounded        NSRoundedBezelStyle
   #define XPBezelStyleTexturedSquare NSTexturedSquareBezelStyle
   #define XPBezelStyleSmallSquare    NSSmallSquareBezelStyle
@@ -72,6 +74,7 @@
   #define XPProgressIndicatorStyleSpinning NSProgressIndicatorSpinningStyle
   #define XPPasteboardStringType     NSStringPboardType
 #else
+  #define XPBezelStyleTexturedRounded NSTexturedRoundedBezelStyle
   #define XPBezelStyleRounded        NSRoundedBezelStyle
   #define XPBezelStyleTexturedSquare NSTexturedSquareBezelStyle
   #define XPBezelStyleSmallSquare    NSSmallSquareBezelStyle

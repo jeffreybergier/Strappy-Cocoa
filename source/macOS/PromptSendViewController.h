@@ -19,7 +19,7 @@
   NSView       *bezelView_;
   NSScrollView *scrollView_;
   NSTextView   *textView_;
-  NSSegmentedControl *sidebarSegmented_;
+  NSButton *sidebarButton_;
   NSSegmentedControl *actionSegmented_;
   id<PromptSendViewControllerDelegate> delegate_;
   BOOL          enabled_;
