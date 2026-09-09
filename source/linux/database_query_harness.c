@@ -11140,6 +11140,35 @@ static int harness_run_provider_account_routing_tests(
   }
   strappy_free_string(error);
 
+  error = NULL;
+  openrouter_endpoint = strappy_provider_responses_endpoint(
+    STRAPPY_PROVIDER_KIND_OPENROUTER,
+    "http://router.example/v1/responses",
+    &error);
+  ok = (openrouter_endpoint == NULL) && (error != NULL) &&
+    (strstr(error, "absolute HTTPS URL") != NULL);
+  free(openrouter_endpoint);
+  strappy_free_string(error);
+  if (!ok) {
+    fprintf(stderr,
+            "OpenRouter accepted a plain HTTP Responses endpoint.\n");
+    return 0;
+  }
+
+  error = NULL;
+  chatgpt_endpoint = strappy_provider_definition_responses_endpoint(
+    strappy_provider_find(STRAPPY_PROVIDER_OPENAI_CHATGPT),
+    "http://chatgpt.example/v1/responses",
+    &error);
+  ok = (chatgpt_endpoint == NULL) && (error != NULL);
+  free(chatgpt_endpoint);
+  strappy_free_string(error);
+  if (!ok) {
+    fprintf(stderr,
+            "ChatGPT accepted a plain HTTP endpoint override.\n");
+    return 0;
+  }
+
   session_id = 0LL;
   error = NULL;
   if (!strappy_db_create_session(context->catalog_path, &session_id, &error) ||
@@ -12254,10 +12283,10 @@ static int harness_run_multi_account_database_tests(
     if (ok) ok = strappy_db_archive_provider_account(
       path,other_incomplete,&error);
   }
-  if (ok) ok = strappy_db_create_provider_account(path,"other","Local","https://one.example/v1/responses",&other_one,&error) &&
-    strappy_db_create_provider_account(path,"other","Local","https://two.example/v1/responses",&other_two,&error) &&
+  if (ok) ok = strappy_db_create_provider_account(path,"other","Local","http://127.0.0.1:11434/v1/responses",&other_one,&error) &&
+    strappy_db_create_provider_account(path,"other","Local","http://192.168.0.120:11434/v1/responses",&other_two,&error) &&
     strappy_db_update_provider_account(path,other_two,"Local",
-      "https://two.example/v1/responses",8192LL,&error);
+      "http://192.168.0.120:11434/v1/responses",8192LL,&error);
   memset(&input,0,sizeof(input));
   input.wire_model_id="manual"; input.display_name=NULL;
   input.context_window_tokens=8192LL; input.max_output_tokens=2048LL;
@@ -12304,7 +12333,7 @@ static int harness_run_multi_account_database_tests(
     (strcmp(options.model_id,manual_two)==0) &&
     strappy_db_get_session_model_route(path,session_id,&route,&error) &&
     (route.responses_endpoint != NULL) &&
-    (strcmp(route.responses_endpoint,"https://two.example/v1/responses")==0) &&
+    (strcmp(route.responses_endpoint,"http://192.168.0.120:11434/v1/responses")==0) &&
     (route.max_output_tokens==8192LL) &&
     (strcmp(route.billing_kind,"unknown")==0) &&
     route.local_functions_enabled && !route.hosted_tools_enabled;

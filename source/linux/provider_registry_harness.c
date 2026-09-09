@@ -22,7 +22,6 @@ int main(void)
 {
   static const char *invalid_other_endpoints[] = {
     "relative/responses",
-    "http://example.test/responses",
     "ftp://example.test/responses",
     "https:///responses",
     "https://example.test/line\nbreak"
@@ -137,6 +136,13 @@ int main(void)
   ok = ok && (endpoint != NULL) &&
     (strcmp(endpoint, "https://example.test/v1/responses") == 0);
   free(endpoint);
+  endpoint = strappy_provider_definition_responses_endpoint(
+    other,
+    "http://192.168.0.120:11434/v1/responses",
+    &error);
+  ok = ok && (endpoint != NULL) &&
+    (strcmp(endpoint, "http://192.168.0.120:11434/v1/responses") == 0);
+  free(endpoint);
   endpoint = strappy_provider_definition_responses_endpoint(other,
                                                              NULL,
                                                              &error);
@@ -158,6 +164,25 @@ int main(void)
     free(error);
     error = NULL;
   }
+  free(error);
+
+  error = NULL;
+  endpoint = strappy_provider_definition_responses_endpoint(
+    openrouter,
+    "http://router.example.test/v1/responses",
+    &error);
+  ok = ok && (endpoint == NULL) && (error != NULL) &&
+    (strstr(error, "absolute HTTPS URL") != NULL);
+  free(endpoint);
+  free(error);
+
+  error = NULL;
+  endpoint = strappy_provider_definition_responses_endpoint(
+    chatgpt,
+    "http://chatgpt.example.test/v1/responses",
+    &error);
+  ok = ok && (endpoint == NULL) && (error != NULL);
+  free(endpoint);
   free(error);
 
   if (!ok) {

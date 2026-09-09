@@ -190,66 +190,47 @@ static int strappy_client_ensure_curl_initialized(char **error_out)
   return 1;
 }
 
-static int strappy_client_require_https(CURL *curl,
-                                        const char *url,
-                                        char **error_out)
+static int strappy_client_configure_protocols(CURL *curl,
+                                              const char *url,
+                                              int allows_plain_http,
+                                              char **error_out)
 {
   CURLcode code;
-#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
-  int is_loopback_test;
 
-  is_loopback_test = (url != NULL) &&
-    (strncmp(url, "http://127.0.0.1:", 17U) == 0);
-#else
-  (void)url;
+  allows_plain_http = allows_plain_http && (url != NULL) &&
+    (strncmp(url, "http://", 7U) == 0);
+#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
+  allows_plain_http = allows_plain_http ||
+    ((url != NULL) &&
+     (strncmp(url, "http://127.0.0.1:", 17U) == 0));
 #endif
 
 #if LIBCURL_VERSION_NUM >= 0x075500
-#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
   code = curl_easy_setopt(curl,
                           CURLOPT_PROTOCOLS_STR,
-                          is_loopback_test ? "http,https" : "https");
-#else
-  code = curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "https");
-#endif
+                          allows_plain_http ? "http,https" : "https");
   if (code == CURLE_OK) {
-#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
     code = curl_easy_setopt(curl,
                             CURLOPT_REDIR_PROTOCOLS_STR,
-                            is_loopback_test ? "http,https" : "https");
-#else
-    code = curl_easy_setopt(curl,
-                            CURLOPT_REDIR_PROTOCOLS_STR,
-                            "https");
-#endif
+                            allows_plain_http ? "http,https" : "https");
   }
 #else
-#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
   code = curl_easy_setopt(curl,
                           CURLOPT_PROTOCOLS,
-                          is_loopback_test ?
+                          allows_plain_http ?
                             (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS) :
                             (long)CURLPROTO_HTTPS);
-#else
-  code = curl_easy_setopt(curl, CURLOPT_PROTOCOLS, (long)CURLPROTO_HTTPS);
-#endif
   if (code == CURLE_OK) {
-#if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
     code = curl_easy_setopt(curl,
                             CURLOPT_REDIR_PROTOCOLS,
-                            is_loopback_test ?
+                            allows_plain_http ?
                               (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS) :
                               (long)CURLPROTO_HTTPS);
-#else
-    code = curl_easy_setopt(curl,
-                            CURLOPT_REDIR_PROTOCOLS,
-                            (long)CURLPROTO_HTTPS);
-#endif
   }
 #endif
   if (code != CURLE_OK) {
     strappy_set_formatted_error(error_out,
-                                "Could not require HTTPS for curl: %s",
+                                "Could not configure curl protocols: %s",
                                 curl_easy_strerror(code));
     return 0;
   }
@@ -546,7 +527,7 @@ int strappy_client_fetch_openrouter_user_models_json(
     strappy_set_error(error_out, "Could not create curl handle.");
     return 0;
   }
-  if (!strappy_client_require_https(curl, url, error_out)) {
+  if (!strappy_client_configure_protocols(curl, url, 0, error_out)) {
     curl_easy_cleanup(curl);
     free(user_agent);
     strappy_client_destroy_headers(headers);
@@ -1083,7 +1064,11 @@ int strappy_client_send_provider_responses_json_with_transport(
     strappy_set_error(error_out, "Could not create Responses curl handle.");
     return 0;
   }
-  if (!strappy_client_require_https(curl, url, error_out)) {
+  if (!strappy_client_configure_protocols(
+        curl,
+        url,
+        provider == STRAPPY_PROVIDER_KIND_OTHER,
+        error_out)) {
     curl_easy_cleanup(curl);
     free(user_agent);
     strappy_client_destroy_headers(headers);
@@ -1103,7 +1088,6 @@ int strappy_client_send_provider_responses_json_with_transport(
   memset(curl_error, 0, sizeof(curl_error));
   result->started_at_ms = strappy_client_now_ms();
   result->request_bytes = (long long)request_length;
-
   curl_easy_setopt(curl, CURLOPT_URL, url);
   curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
   curl_easy_setopt(curl, CURLOPT_POST, 1L);

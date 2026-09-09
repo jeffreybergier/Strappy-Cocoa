@@ -145,7 +145,8 @@ static int strappy_provider_always_available(void)
   return 1;
 }
 
-static int strappy_provider_url_is_absolute_https(const char *endpoint)
+static int strappy_provider_url_is_absolute(const char *endpoint,
+                                            int allows_plain_http)
 {
   const char *authority;
   const char *cursor;
@@ -155,6 +156,9 @@ static int strappy_provider_url_is_absolute_https(const char *endpoint)
   }
   if (strncmp(endpoint, "https://", 8U) == 0) {
     authority = endpoint + 8U;
+  } else if (allows_plain_http &&
+             (strncmp(endpoint, "http://", 7U) == 0)) {
+    authority = endpoint + 7U;
 #if defined(STRAPPY_ENABLE_LOOPBACK_HTTP_TESTS)
   } else if (strncmp(endpoint, "http://127.0.0.1:", 17U) == 0) {
     authority = endpoint + 7U;
@@ -181,10 +185,17 @@ static int strappy_provider_validate_configurable_endpoint(
   int is_override,
   char **error_out)
 {
+  int allows_plain_http;
+
+  allows_plain_http = (definition != NULL) &&
+    (definition->kind == STRAPPY_PROVIDER_KIND_OTHER);
   if ((definition == NULL) ||
-      !strappy_provider_url_is_absolute_https(endpoint)) {
-    strappy_set_error(error_out,
-                      "Provider endpoint must be an absolute HTTPS URL.");
+      !strappy_provider_url_is_absolute(endpoint, allows_plain_http)) {
+    strappy_set_error(
+      error_out,
+      allows_plain_http ?
+        "Custom provider endpoint must be an absolute HTTP or HTTPS URL." :
+        "Provider endpoint must be an absolute HTTPS URL.");
     return 0;
   }
   if (is_override && !definition->allows_endpoint_override) {
