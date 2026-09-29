@@ -95,6 +95,7 @@ int main(void)
   require(strappy_db_catalog_open(path,NULL,1,sort,5,&text,&reader,&error),"open large snapshot");
   open_time=seconds()-start;
   require(strappy_db_catalog_count(reader)==20000U,"large count");
+  require(strappy_db_catalog_total_count(reader)==20000U && strappy_db_catalog_allowed_count(reader)==5000U && strappy_db_catalog_hidden_count(reader)==10000U,"footer totals use unfiltered metadata");
   require(strappy_db_catalog_groups(reader,group,NULL,&error),"group metadata without pages");
   require(group_count==100U && group_rows==20000U,"all groups");
   require(sqlite3_prepare_v2(db,"SELECT d.id FROM databases d JOIN applications a ON a.id=d.application_id "
@@ -122,6 +123,7 @@ int main(void)
   require(strappy_db_catalog_query(reader,"FILE-19999",0,sort,5,&error),"case-insensitive contains search");
   search_time=seconds()-start;
   require(strappy_db_catalog_count(reader)==1,"search count");
+  require(strappy_db_catalog_total_count(reader)==20000U && strappy_db_catalog_allowed_count(reader)==5000U,"search retains footer totals");
   require(strappy_db_catalog_page(reader,0,&page,&error) && page.records[0].catalog_id==19999,"search result");
   strappy_discovered_database_record_list_destroy(&page);
   require(!strappy_db_catalog_query(reader,NULL,1,bad_sort,1,&error),"reject unknown sort key");

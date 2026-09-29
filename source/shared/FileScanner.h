@@ -26,6 +26,9 @@ extern NSString * const FileScannerCatalogReadFailedNotification;
 - (NSArray *)applicationSectionsWithError:(NSError **)error;
 - (NSUInteger)indexForCatalogIdentifier:(NSNumber *)identifier;
 - (NSError *)readError;
+- (NSUInteger)totalCount;
+- (NSUInteger)allowedCount;
+- (NSUInteger)hiddenCount;
 @end
 
 @interface FileScanner : NSObject

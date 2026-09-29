@@ -795,6 +795,9 @@ static void FileScannerCatalogGroup(void *context, const char *name,
 }
 - (id)copyWithZone:(NSZone *)zone { (void)zone; return [self retain]; }
 - (NSUInteger)count { return (NSUInteger)strappy_db_catalog_count(reader_); }
+- (NSUInteger)totalCount { return (NSUInteger)strappy_db_catalog_total_count(reader_); }
+- (NSUInteger)allowedCount { return (NSUInteger)strappy_db_catalog_allowed_count(reader_); }
+- (NSUInteger)hiddenCount { return (NSUInteger)strappy_db_catalog_hidden_count(reader_); }
 - (NSError *)readError { return readError_; }
 - (void)recordReadError:(char *)message
 {

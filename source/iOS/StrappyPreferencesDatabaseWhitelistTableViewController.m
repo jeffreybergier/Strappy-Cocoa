@@ -321,6 +321,18 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
   [self refreshStatusToolbar];
 }
 
+- (NSUInteger)totalRowCount
+{
+  return [[self rows] isKindOfClass:[FileScannerCatalogRows class]] ? [(FileScannerCatalogRows *)[self rows] totalCount] : 0U;
+}
+
+- (NSUInteger)selectedRowCount
+{
+  FileScannerCatalogRows *rows = [[self rows] isKindOfClass:[FileScannerCatalogRows class]] ?
+    (FileScannerCatalogRows *)[self rows] : nil;
+  return [self hiddenMode] ? [rows hiddenCount] : [rows allowedCount];
+}
+
 - (BOOL)databaseRowCanBeAllowed:(NSDictionary *)row
 {
   NSNumber *valid;

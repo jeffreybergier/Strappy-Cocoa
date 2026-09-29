@@ -395,6 +395,41 @@ typedef struct strappy_model_record_list {
   size_t count;
 } strappy_model_record_list;
 
+typedef struct strappy_catalog_sort {
+  const char *key;
+  int ascending;
+} strappy_catalog_sort;
+
+/* Preference-list snapshots: one active model per provider/wire identity,
+ * restricted to providers with an active account. TEMP search/order keys are
+ * reused by queries. Main-database writes require a new snapshot. */
+typedef struct strappy_model_reader strappy_model_reader;
+typedef struct strappy_model_list_text {
+  int (*contains)(const char *text, const char *needle);
+  char *(*search_text)(size_t count, const char *const *values);
+  int (*compare)(const char *left, const char *right);
+} strappy_model_list_text;
+int strappy_db_model_list_open(const char *path, const char *custom_provider_name,
+  const char *search, const strappy_catalog_sort *sort, size_t sort_count,
+  const strappy_model_list_text *text, strappy_model_reader **out, char **error_out);
+void strappy_db_model_list_close(strappy_model_reader *reader);
+size_t strappy_db_model_list_count(const strappy_model_reader *reader);
+size_t strappy_db_model_list_total_count(const strappy_model_reader *reader);
+size_t strappy_db_model_list_allowed_count(const strappy_model_reader *reader);
+int strappy_db_model_list_has_accounts(const strappy_model_reader *reader);
+int strappy_db_model_list_query(strappy_model_reader *reader, const char *search,
+  const strappy_catalog_sort *sort, size_t sort_count, char **error_out);
+int strappy_db_model_list_page(strappy_model_reader *reader, size_t offset,
+  strappy_model_record_list *list, char **error_out);
+int strappy_db_model_list_index(strappy_model_reader *reader, const char *model_id,
+  size_t *index, char **error_out);
+typedef void (*strappy_model_list_group_callback)(void *context, const char *provider,
+  const char *title, size_t offset, size_t count);
+/* Requires provider as the leading sort key. */
+int strappy_db_model_list_groups(strappy_model_reader *reader,
+  strappy_model_list_group_callback callback, void *context, char **error_out);
+unsigned long long strappy_db_model_list_page_steps(const strappy_model_reader *reader);
+
 /* Source compatibility while Cocoa call sites move to the generic names. */
 typedef strappy_model_record strappy_openrouter_model_record;
 typedef strappy_model_record_list strappy_openrouter_model_record_list;
@@ -582,10 +617,6 @@ typedef struct strappy_catalog_text {
   int (*compare)(const char *left, const char *right);
   int (*contains)(const char *text, const char *needle);
 } strappy_catalog_text;
-typedef struct strappy_catalog_sort {
-  const char *key;
-  int ascending;
-} strappy_catalog_sort;
 int strappy_db_catalog_open(const char *path, const char *search, int show_hidden,
   const strappy_catalog_sort *sort, size_t sort_count,
   const strappy_catalog_text *text, strappy_catalog_reader **out, char **error_out);
@@ -593,6 +624,9 @@ int strappy_db_catalog_query(strappy_catalog_reader *reader, const char *search,
   int show_hidden, const strappy_catalog_sort *sort, size_t sort_count, char **error_out);
 void strappy_db_catalog_close(strappy_catalog_reader *reader);
 size_t strappy_db_catalog_count(const strappy_catalog_reader *reader);
+size_t strappy_db_catalog_total_count(const strappy_catalog_reader *reader);
+size_t strappy_db_catalog_allowed_count(const strappy_catalog_reader *reader);
+size_t strappy_db_catalog_hidden_count(const strappy_catalog_reader *reader);
 unsigned long long strappy_db_catalog_page_steps(const strappy_catalog_reader *reader);
 int strappy_db_catalog_page(strappy_catalog_reader *reader, size_t offset,
   strappy_discovered_database_record_list *list, char **error_out);

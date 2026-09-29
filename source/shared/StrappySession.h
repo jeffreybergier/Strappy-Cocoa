@@ -1,3 +1,4 @@
+#import "StrappyModelRows.h"
 #import <Foundation/Foundation.h>
 #import "StrappySessionSections.h"
 
@@ -212,6 +213,8 @@ enum {
 + (NSArray *)modelCatalogMatchingSearchText:(NSString *)searchText
                                        error:(NSError **)error;
 + (NSArray *)modelCatalogWithError:(NSError **)error;
++ (StrappyModelRows *)modelPreferenceRowsMatchingSearch:(NSString *)search
+  sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
 + (NSArray *)configuredProviderModelCatalogWithError:(NSError **)error;
 + (NSArray *)allowedModelCatalogWithError:(NSError **)error;
 + (NSArray *)bundledModelCatalogForProviderIdentifier:

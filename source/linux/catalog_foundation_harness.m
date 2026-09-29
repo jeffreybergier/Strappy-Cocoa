@@ -98,7 +98,7 @@ int main(void)
   openTime=[NSDate timeIntervalSinceReferenceDate]-start;
   require(rows!=nil,[error description]);
   pages=object_getIvar(rows,class_getInstanceVariable([FileScannerCatalogRows class],"pages_"));
-  require([rows count]==20000U && [pages count]==0U,@"count does not hydrate rows");
+  require([rows count]==20000U && [rows totalCount]==20000U && [rows allowedCount]==0U && [rows hiddenCount]==0U && [pages count]==0U,@"count does not hydrate rows");
   sections=[rows applicationSectionsWithError:&error];
   require([sections count]==2U && [pages count]==0U,@"groups do not hydrate rows");
   require([[[sections objectAtIndex:0] objectForKey:@"title"] isEqualToString:@"Éclair (org.one)"],@"duplicate app names disambiguate");

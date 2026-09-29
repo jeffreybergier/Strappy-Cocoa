@@ -5,8 +5,6 @@
 #import "StrappyModelProvidersTableViewController.h"
 #import "StrappySession.h"
 
-static NSString * const kStrappyModelSearchTextKey =
-  @"_strappy_model_search_text";
 static NSString *StrappyStringForModelRow(NSDictionary *row, NSString *key)
 {
   NSString *value;
@@ -22,198 +20,6 @@ static NSString *StrappyModelDisplayNameForRow(NSDictionary *row)
   name = StrappyStringForModelRow(row, @"name");
   return ([name length] > 0U) ? name :
     StrappyStringForModelRow(row, @"wire_model_id");
-}
-
-static NSArray *StrappyModelSearchKeys(void)
-{
-  static NSArray *keys = nil;
-
-  if (keys == nil) {
-    keys = [[NSArray alloc] initWithObjects:
-      @"id",
-      @"wire_model_id",
-      @"provider_account_id",
-      @"provider_id",
-      @"provider_name",
-      @"provider_account_name",
-      @"canonical_slug",
-      @"hugging_face_id",
-      @"name",
-      @"description",
-      @"context_length",
-      @"created",
-      @"architecture_modality",
-      @"architecture_tokenizer",
-      @"architecture_instruct_type",
-      @"pricing_prompt",
-      @"pricing_completion",
-      @"pricing_request",
-      @"pricing_image",
-      @"pricing_audio",
-      @"pricing_web_search",
-      @"pricing_internal_reasoning",
-      @"pricing_input_cache_read",
-      @"pricing_input_cache_write",
-      @"top_provider_context_length",
-      @"top_provider_max_completion_tokens",
-      @"knowledge_cutoff",
-      @"expiration_date",
-      @"fetched_at",
-      nil];
-  }
-
-  return keys;
-}
-
-static void StrappyAppendModelSearchValue(NSMutableString *searchText, id value)
-{
-  NSString *stringValue;
-
-  if ([value isKindOfClass:[NSString class]]) {
-    stringValue = value;
-  } else if ([value isKindOfClass:[NSNumber class]]) {
-    stringValue = [value stringValue];
-  } else {
-    return;
-  }
-
-  if ([stringValue length] == 0U) {
-    return;
-  }
-
-  if ([searchText length] > 0U) {
-    [searchText appendString:@" "];
-  }
-  [searchText appendString:stringValue];
-}
-
-static NSString *StrappyModelSearchTextForRow(NSDictionary *row)
-{
-  NSMutableString *searchText;
-  NSArray *keys;
-  NSUInteger index;
-
-  searchText = [NSMutableString string];
-  keys = StrappyModelSearchKeys();
-  for (index = 0U; index < [keys count]; index++) {
-    StrappyAppendModelSearchValue(searchText,
-                                  [row objectForKey:[keys objectAtIndex:index]]);
-  }
-
-  return [searchText lowercaseString];
-}
-
-static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
-{
-  NSMutableDictionary *rowsByProviderModel;
-  NSMutableArray *providerModels;
-  NSMutableArray *preparedRows;
-  NSUInteger index;
-
-  if (![rows isKindOfClass:[NSArray class]]) {
-    return [NSArray array];
-  }
-
-  rowsByProviderModel = [NSMutableDictionary dictionary];
-  providerModels = [NSMutableArray array];
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-    NSMutableDictionary *providerModel;
-    NSString *providerIdentifier;
-    NSString *wireModelIdentifier;
-    NSString *key;
-
-    row = [rows objectAtIndex:index];
-    if (![row isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-
-    providerIdentifier = StrappyStringForModelRow(row, @"provider_id");
-    wireModelIdentifier = StrappyStringForModelRow(row, @"wire_model_id");
-    if (([providerIdentifier length] == 0U) ||
-        ([wireModelIdentifier length] == 0U)) {
-      continue;
-    }
-    key = [NSString stringWithFormat:@"%@\n%@", providerIdentifier,
-      wireModelIdentifier];
-    providerModel = [rowsByProviderModel objectForKey:key];
-    if (providerModel == nil) {
-      NSString *providerName;
-
-      providerModel = [NSMutableDictionary dictionaryWithDictionary:row];
-      [providerModel setObject:key forKey:@"provider_model_key"];
-      if ([providerIdentifier isEqualToString:@"openrouter"]) providerName = @"OpenRouter";
-      else if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) providerName = @"ChatGPT";
-      else providerName = NSLocalizedString(@"Custom", nil);
-      [providerModel setObject:providerName forKey:@"provider_name"];
-      [rowsByProviderModel setObject:providerModel forKey:key];
-      [providerModels addObject:providerModel];
-    } else {
-      BOOL allowed;
-      BOOL selected;
-
-      allowed = [[providerModel objectForKey:@"allowed"] boolValue] ||
-        [[row objectForKey:@"allowed"] boolValue];
-      selected = [[providerModel objectForKey:@"selected"] boolValue] ||
-        [[row objectForKey:@"selected"] boolValue];
-      if ([[row objectForKey:@"selected"] boolValue]) {
-        NSString *savedKey;
-        NSString *savedProviderName;
-
-        savedKey = [providerModel objectForKey:@"provider_model_key"];
-        savedProviderName = [providerModel objectForKey:@"provider_name"];
-        [providerModel setDictionary:row];
-        [providerModel setObject:savedKey forKey:@"provider_model_key"];
-        [providerModel setObject:savedProviderName forKey:@"provider_name"];
-      }
-      [providerModel setObject:[NSNumber numberWithBool:allowed] forKey:@"allowed"];
-      [providerModel setObject:[NSNumber numberWithBool:selected] forKey:@"selected"];
-    }
-  }
-
-  preparedRows = [NSMutableArray arrayWithCapacity:[providerModels count]];
-  for (index = 0U; index < [providerModels count]; index++) {
-    NSDictionary *row;
-    NSMutableDictionary *preparedRow;
-
-    row = [providerModels objectAtIndex:index];
-    preparedRow = [NSMutableDictionary dictionaryWithDictionary:row];
-    [preparedRow setObject:StrappyModelSearchTextForRow(row)
-                    forKey:kStrappyModelSearchTextKey];
-    [preparedRows addObject:preparedRow];
-  }
-
-  return preparedRows;
-}
-
-static NSComparisonResult StrappyCompareStrings(NSString *left, NSString *right)
-{
-  if (![left isKindOfClass:[NSString class]]) {
-    left = @"";
-  }
-  if (![right isKindOfClass:[NSString class]]) {
-    right = @"";
-  }
-  return [left caseInsensitiveCompare:right];
-}
-
-static NSComparisonResult StrappyCompareBooleans(BOOL left, BOOL right)
-{
-  if (left == right) {
-    return NSOrderedSame;
-  }
-  return left ? NSOrderedAscending : NSOrderedDescending;
-}
-
-static NSComparisonResult StrappyCompareDouble(double left, double right)
-{
-  if (left < right) {
-    return NSOrderedAscending;
-  }
-  if (left > right) {
-    return NSOrderedDescending;
-  }
-  return NSOrderedSame;
 }
 
 static BOOL StrappyModelRowIsDefault(NSDictionary *row)
@@ -237,86 +43,11 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
     YES : NO;
 }
 
-static NSComparisonResult StrappyCompareModelWhitelistRows(id left,
-                                                           id right,
-                                                           void *context)
-{
-  NSDictionary *leftRow;
-  NSDictionary *rightRow;
-  NSComparisonResult result;
-
-  (void)context;
-  leftRow = [left isKindOfClass:[NSDictionary class]] ? left : nil;
-  rightRow = [right isKindOfClass:[NSDictionary class]] ? right : nil;
-  result = StrappyCompareStrings(
-    StrappyStringForModelRow(leftRow, @"provider_name"),
-    StrappyStringForModelRow(rightRow, @"provider_name"));
-  if (result != NSOrderedSame) {
-    return result;
-  }
-  result = StrappyCompareBooleans(StrappyModelRowIsAllowed(leftRow),
-                                  StrappyModelRowIsAllowed(rightRow));
-  if (result != NSOrderedSame) {
-    return result;
-  }
-  result = StrappyCompareStrings(
-    StrappyStringForModelRow(leftRow, @"wire_model_id"),
-    StrappyStringForModelRow(rightRow, @"wire_model_id"));
-  if (result != NSOrderedSame) {
-    return result;
-  }
-  result = StrappyCompareDouble(
-    [StrappyStringForModelRow(leftRow, @"pricing_completion") doubleValue],
-    [StrappyStringForModelRow(rightRow, @"pricing_completion") doubleValue]);
-  if (result != NSOrderedSame) {
-    return result;
-  }
-  return StrappyCompareDouble(
-    [StrappyStringForModelRow(leftRow, @"pricing_prompt") doubleValue],
-    [StrappyStringForModelRow(rightRow, @"pricing_prompt") doubleValue]);
-}
-
-static NSArray *StrappyModelAccountIdentifiersForRows(NSArray *rows)
-{
-  NSMutableArray *identifiers;
-  NSUInteger index;
-
-  identifiers = [NSMutableArray array];
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-    NSString *identifier;
-
-    row = [rows objectAtIndex:index];
-    identifier = StrappyStringForModelRow(row, @"provider_id");
-    if (([identifier length] > 0U) &&
-        ![identifiers containsObject:identifier]) {
-      [identifiers addObject:identifier];
-    }
-  }
-  return identifiers;
-}
-
-static NSArray *StrappyModelRowsForAccount(NSArray *rows,
-                                           NSString *accountIdentifier)
-{
-  NSMutableArray *accountRows;
-  NSUInteger index;
-
-  accountRows = [NSMutableArray array];
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-
-    row = [rows objectAtIndex:index];
-    if ([StrappyStringForModelRow(row, @"provider_id")
-          isEqualToString:accountIdentifier]) {
-      [accountRows addObject:row];
-    }
-  }
-  return accountRows;
-}
-
 @interface StrappyPreferencesModelWhitelistTableViewController ()
 @property (nonatomic, assign) BOOL hasConfiguredAccounts;
+@property (nonatomic, copy) NSArray *modelSections;
+- (void)loadModelRowsUsingSnapshot:(BOOL)reuse;
+- (void)scheduleModelReload;
 @property (nonatomic, assign) BOOL refreshingModels;
 @property (nonatomic, strong) UIBarButtonItem *updateButton;
 @end
@@ -366,77 +97,95 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
        selector:@selector(providerAccountsDidChange:)
            name:StrappyProviderAccountsDidChangeNotification
          object:nil];
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelListReadFailed:)
+    name:StrappyModelListReadFailedNotification object:nil];
   [self setRefreshingModels:[StrappySession isModelCatalogRefreshInFlight]];
 }
 
-- (NSArray *)loadAllRowsWithError:(NSError **)error
+- (void)reloadRows
 {
-  NSArray *accounts;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(reloadRows) object:nil];
+  [self loadModelRowsUsingSnapshot:NO];
+}
 
-  accounts = [StrappySession providerAccountCatalogWithError:error];
-  if (accounts == nil) {
-    [self setHasConfiguredAccounts:NO];
-    return nil;
+- (void)applyRows
+{
+  [self loadModelRowsUsingSnapshot:YES];
+}
+
+- (void)scheduleModelReload
+{
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(reloadRows) object:nil];
+  [self performSelector:@selector(reloadRows) withObject:nil afterDelay:0.0];
+}
+
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText
+{
+  (void)searchBar; (void)searchText;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyRows) object:nil];
+  [self performSelector:@selector(applyRows) withObject:nil afterDelay:0.15];
+}
+
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar
+{
+  [self applyRows];
+  [searchBar resignFirstResponder];
+}
+
+- (void)loadModelRowsUsingSnapshot:(BOOL)reuse
+{
+  NSError *error = nil;
+  StrappyModelRows *rows = nil;
+  NSArray *sections;
+  NSArray *sort = [NSArray arrayWithObjects:
+    [[NSSortDescriptor alloc] initWithKey:@"model_provider" ascending:YES],
+    [[NSSortDescriptor alloc] initWithKey:@"model_allowed" ascending:NO],
+    [[NSSortDescriptor alloc] initWithKey:@"model_id" ascending:YES],
+    [[NSSortDescriptor alloc] initWithKey:@"model_completion_price" ascending:YES],
+    [[NSSortDescriptor alloc] initWithKey:@"model_prompt_price" ascending:YES],nil];
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyRows) object:nil];
+  if (reuse && [[self rows] isKindOfClass:[StrappyModelRows class]]) {
+    rows = (StrappyModelRows *)[self rows];
+    if (![rows filterWithSearch:[self currentSearchText] sortDescriptors:sort error:&error]) rows = nil;
+  } else {
+    rows = [StrappySession modelPreferenceRowsMatchingSearch:[self currentSearchText]
+      sortDescriptors:sort error:&error];
   }
-  [self setHasConfiguredAccounts:([accounts count] > 0U) ? YES : NO];
-  return [StrappySession configuredProviderModelCatalogWithError:error];
-}
-
-- (NSArray *)preparedRowsForRows:(NSArray *)rows
-{
-  return StrappyPreparedModelRowsForRows(rows);
-}
-
-- (NSArray *)sortedRows:(NSArray *)rows
-{
-  return [rows sortedArrayUsingFunction:StrappyCompareModelWhitelistRows
-                                context:NULL];
-}
-
-- (BOOL)row:(NSDictionary *)row matchesSearchText:(NSString *)searchText
-{
-  NSString *rowSearchText;
-
-  if ([searchText length] == 0U) {
-    return YES;
+  sections = rows != nil ? [rows providerSectionsWithError:&error] : nil;
+  if (sections == nil) {
+    [self setRows:[NSArray array]];
+    [self setModelSections:[NSArray array]];
+    [self setStatusMessage:[error localizedDescription]];
+  } else {
+    [self setRows:rows];
+    [self setModelSections:sections];
+    [self setHasConfiguredAccounts:[rows hasConfiguredAccounts]];
+    [self setStatusMessage:nil];
   }
-
-  rowSearchText = [row objectForKey:kStrappyModelSearchTextKey];
-  if (![rowSearchText isKindOfClass:[NSString class]]) {
-    rowSearchText = StrappyModelSearchTextForRow(row);
-  }
-  return ([rowSearchText rangeOfString:[searchText lowercaseString]].location !=
-          NSNotFound);
+  [[self tableView] reloadData];
+  [self refreshStatusToolbar];
 }
 
-- (NSArray *)modelAccountIdentifiers
+- (void)modelListReadFailed:(NSNotification *)notification
 {
-  return StrappyModelAccountIdentifiersForRows([self rows]);
+  if ([notification object] != [self rows]) return;
+  [self setStatusMessage:[[[notification userInfo] objectForKey:@"error"] localizedDescription]];
+  [self refreshStatusToolbar];
 }
 
-- (NSArray *)modelRowsInSection:(NSInteger)section
+- (NSDictionary *)modelSectionAtIndex:(NSInteger)section
 {
-  NSArray *accounts;
-
-  accounts = [self modelAccountIdentifiers];
-  if ((section < 0) || ((NSUInteger)section >= [accounts count])) {
-    return [NSArray array];
-  }
-  return StrappyModelRowsForAccount(
-    [self rows],
-    [accounts objectAtIndex:(NSUInteger)section]);
+  if (section < 0 || (NSUInteger)section >= [[self modelSections] count]) return nil;
+  return [[self modelSections] objectAtIndex:(NSUInteger)section];
 }
 
 - (NSDictionary *)modelRowAtIndexPath:(NSIndexPath *)indexPath
 {
-  NSArray *sectionRows;
-
-  sectionRows = [self modelRowsInSection:[indexPath section]];
-  if (([indexPath row] < 0) ||
-      ((NSUInteger)[indexPath row] >= [sectionRows count])) {
-    return nil;
-  }
-  return [sectionRows objectAtIndex:(NSUInteger)[indexPath row]];
+  NSDictionary *section = [self modelSectionAtIndex:[indexPath section]];
+  NSUInteger count = [[section objectForKey:@"count"] unsignedIntegerValue];
+  NSUInteger offset = [[section objectForKey:@"offset"] unsignedIntegerValue];
+  if ([indexPath row] < 0 || (NSUInteger)[indexPath row] >= count) return nil;
+  return [[self rows] objectAtIndex:offset + (NSUInteger)[indexPath row]];
 }
 
 - (BOOL)modelRowIsDefault:(NSDictionary *)row
@@ -462,11 +211,21 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
   return nil;
 }
 
+- (NSUInteger)totalRowCount
+{
+  return [[self rows] isKindOfClass:[StrappyModelRows class]] ? [(StrappyModelRows *)[self rows] totalCount] : 0U;
+}
+
+- (NSUInteger)selectedRowCount
+{
+  return [[self rows] isKindOfClass:[StrappyModelRows class]] ? [(StrappyModelRows *)[self rows] allowedCount] : 0U;
+}
+
 - (NSString *)statusText
 {
   if (![self working] && ([[self statusMessage] length] == 0U) &&
       ([[self currentSearchText] length] == 0U) &&
-      ([[self allRows] count] == 0U)) {
+      ([[self rows] count] == 0U)) {
     return [self hasConfiguredAccounts] ?
       NSLocalizedString(@"No Models Available", nil) :
       NSLocalizedString(@"No Accounts Configured", nil);
@@ -523,6 +282,7 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
 
   userInfo = [notification userInfo];
   errorMessage = [userInfo objectForKey:@"error"];
+  [self reloadRows];
   [self setRefreshingModels:NO];
   if ([errorMessage isKindOfClass:[NSString class]] &&
       ([errorMessage length] > 0U)) {
@@ -531,19 +291,18 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
     [self refreshStatusToolbar];
     return;
   }
-  [self reloadRows];
 }
 
 - (void)modelCatalogDidChange:(NSNotification *)notification
 {
   (void)notification;
-  [self reloadRows];
+  [self scheduleModelReload];
 }
 
 - (void)providerAccountsDidChange:(NSNotification *)notification
 {
   (void)notification;
-  [self reloadRows];
+  [self scheduleModelReload];
 }
 
 - (void)useRow:(NSDictionary *)row atIndexPath:(NSIndexPath *)indexPath
@@ -570,38 +329,24 @@ static NSArray *StrappyModelRowsForAccount(NSArray *rows,
   [self reloadRows];
 }
 
-#pragma mark - Account-grouped table
+#pragma mark - Provider sections
 
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
-  NSUInteger count;
-
   (void)tableView;
-  count = [[self modelAccountIdentifiers] count];
-  return (NSInteger)((count > 0U) ? count : 1U);
+  return (NSInteger)MAX([[self modelSections] count],1U);
 }
 
-- (NSInteger)tableView:(UITableView *)tableView
- numberOfRowsInSection:(NSInteger)section
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
 {
   (void)tableView;
-  return (NSInteger)[[self modelRowsInSection:section] count];
+  return (NSInteger)[[[self modelSectionAtIndex:section] objectForKey:@"count"] unsignedIntegerValue];
 }
 
-- (NSString *)tableView:(UITableView *)tableView
- titleForHeaderInSection:(NSInteger)section
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section
 {
-  NSArray *sectionRows;
-  NSString *name;
-
   (void)tableView;
-  sectionRows = [self modelRowsInSection:section];
-  if ([sectionRows count] == 0U) {
-    return nil;
-  }
-  name = StrappyStringForModelRow([sectionRows objectAtIndex:0U],
-                                  @"provider_name");
-  return ([name length] > 0U) ? name : NSLocalizedString(@"Provider", nil);
+  return [[self modelSectionAtIndex:section] objectForKey:@"title"];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView

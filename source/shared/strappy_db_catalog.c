@@ -4256,6 +4256,49 @@ int strappy_db_list_allowed_openrouter_models(
   return 1;
 }
 
+#define STRAPPY_MODEL_SELECT \
+    "SELECT m.id, m.canonical_slug, m.hugging_face_id, m.name, " \
+    "m.description, m.context_length, m.created_at_s, " \
+    "m.architecture_modality, m.architecture_tokenizer, " \
+    "m.architecture_instruct_type, " \
+    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id " \
+      "AND p.price_kind = 'prompt'), " \
+    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id " \
+      "AND p.price_kind = 'completion'), " \
+    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id " \
+      "AND p.price_kind = 'request'), " \
+    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id " \
+      "AND p.price_kind = 'image'), " \
+    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id " \
+      "AND p.price_kind = 'audio'), " \
+    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id " \
+      "AND p.price_kind = 'web_search'), " \
+    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id " \
+      "AND p.price_kind = 'internal_reasoning'), " \
+    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id " \
+      "AND p.price_kind = 'input_cache_read'), " \
+    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id " \
+      "AND p.price_kind = 'input_cache_write'), " \
+    "m.provider_context_length, m.provider_max_completion_tokens, " \
+    "m.provider_is_moderated, m.knowledge_cutoff, m.expiration_date, " \
+    "m.details_url, NULL, NULL, NULL, NULL, NULL, NULL, " \
+    "strftime('%Y-%m-%dT%H:%M:%fZ', m.last_seen_at_ms / 1000.0, 'unixepoch'), " \
+    "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL \
+      " THEN 1 ELSE 0 END, " \
+    "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL \
+      " OR COALESCE(mp.allowed, 0) = 1 THEN 1 ELSE 0 END " \
+    ", '', m.provider_id, '', m.wire_model_id, " \
+    "COALESCE(mc.billing_kind, 'metered_api'), " \
+    "COALESCE(mc.reasoning_enabled, 1), " \
+    "COALESCE(mc.local_functions_enabled, 1), " \
+    "COALESCE(mc.hosted_tools_enabled, 1), " \
+    "EXISTS (SELECT 1 FROM model_features mif WHERE mif.model_id=m.id " \
+      "AND mif.feature_kind='input_modality' AND mif.feature_value='image') " \
+    "FROM models m " \
+    "LEFT JOIN model_capabilities mc ON mc.model_id = m.id " \
+    "LEFT JOIN model_preferences mp ON mp.provider_id = m.provider_id " \
+      "AND mp.wire_model_id = m.wire_model_id "
+
 static int strappy_db_semantic_list_models(
   const char *db_path,
   const char *search_text,
@@ -4263,48 +4306,7 @@ static int strappy_db_semantic_list_models(
   strappy_openrouter_model_record_list *list,
   char **error_out)
 {
-  static const char *select_columns =
-    "SELECT m.id, m.canonical_slug, m.hugging_face_id, m.name, "
-    "m.description, m.context_length, m.created_at_s, "
-    "m.architecture_modality, m.architecture_tokenizer, "
-    "m.architecture_instruct_type, "
-    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id "
-      "AND p.price_kind = 'prompt'), "
-    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id "
-      "AND p.price_kind = 'completion'), "
-    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id "
-      "AND p.price_kind = 'request'), "
-    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id "
-      "AND p.price_kind = 'image'), "
-    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id "
-      "AND p.price_kind = 'audio'), "
-    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id "
-      "AND p.price_kind = 'web_search'), "
-    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id "
-      "AND p.price_kind = 'internal_reasoning'), "
-    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id "
-      "AND p.price_kind = 'input_cache_read'), "
-    "(SELECT p.price_decimal FROM model_prices p WHERE p.model_id = m.id "
-      "AND p.price_kind = 'input_cache_write'), "
-    "m.provider_context_length, m.provider_max_completion_tokens, "
-    "m.provider_is_moderated, m.knowledge_cutoff, m.expiration_date, "
-    "m.details_url, NULL, NULL, NULL, NULL, NULL, NULL, "
-    "strftime('%Y-%m-%dT%H:%M:%fZ', m.last_seen_at_ms / 1000.0, 'unixepoch'), "
-    "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
-      " THEN 1 ELSE 0 END, "
-    "CASE WHEN m.id = " STRAPPY_DB_DEFAULT_MODEL_SQL
-      " OR COALESCE(mp.allowed, 0) = 1 THEN 1 ELSE 0 END "
-    ", '', m.provider_id, '', m.wire_model_id, "
-    "COALESCE(mc.billing_kind, 'metered_api'), "
-    "COALESCE(mc.reasoning_enabled, 1), "
-    "COALESCE(mc.local_functions_enabled, 1), "
-    "COALESCE(mc.hosted_tools_enabled, 1), "
-    "EXISTS (SELECT 1 FROM model_features mif WHERE mif.model_id=m.id "
-      "AND mif.feature_kind='input_modality' AND mif.feature_value='image') "
-    "FROM models m "
-    "LEFT JOIN model_capabilities mc ON mc.model_id = m.id "
-    "LEFT JOIN model_preferences mp ON mp.provider_id = m.provider_id "
-      "AND mp.wire_model_id = m.wire_model_id ";
+  static const char *select_columns = STRAPPY_MODEL_SELECT;
   static const char *unfiltered_suffix =
     "WHERE m.catalog_active = 1 "
     "ORDER BY LOWER(m.provider_id), "
@@ -5244,6 +5246,9 @@ struct strappy_catalog_reader {
   sqlite3_stmt *identity;
   strappy_catalog_text text;
   size_t count;
+  size_t total_count;
+  size_t allowed_count;
+  size_t hidden_count;
   int comparison_failed;
   unsigned long long page_steps;
 };
@@ -5357,6 +5362,12 @@ int strappy_db_catalog_open(const char *path, const char *search, int show_hidde
   rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt); stmt = NULL;
   if (rc != SQLITE_DONE) goto failure;
+  if (sqlite3_prepare_v2(reader->db,"SELECT count(*),COALESCE(sum(allowed),0),COALESCE(sum(hidden),0) FROM catalog_keys",
+      -1,&stmt,NULL)!=SQLITE_OK || sqlite3_step(stmt)!=SQLITE_ROW) goto failure;
+  reader->total_count=(size_t)sqlite3_column_int64(stmt,0);
+  reader->allowed_count=(size_t)sqlite3_column_int64(stmt,1);
+  reader->hidden_count=(size_t)sqlite3_column_int64(stmt,2);
+  sqlite3_finalize(stmt); stmt=NULL;
   if (sqlite3_exec(reader->db,"CREATE TEMP TABLE catalog_order (location_id INTEGER,"
       "catalog_id INTEGER,application TEXT,group_key TEXT,bundle TEXT);"
       "CREATE INDEX catalog_identity ON catalog_order(catalog_id);",NULL,NULL,NULL) != SQLITE_OK)
@@ -5520,3 +5531,257 @@ unsigned long long strappy_db_catalog_page_steps(const strappy_catalog_reader *r
 {
   return reader->page_steps;
 }
+
+struct strappy_model_reader {
+  sqlite3 *db;
+  sqlite3_stmt *page;
+  sqlite3_stmt *identity;
+  strappy_model_list_text text;
+  size_t count;
+  size_t total_count;
+  size_t allowed_count;
+  int has_accounts;
+  int comparison_failed;
+  unsigned long long page_steps;
+};
+
+static int strappy_model_list_error(strappy_model_reader *reader, char **error_out)
+{
+  strappy_set_formatted_error(error_out,"Could not read model list: %s",
+    reader->comparison_failed ? "Could not allocate text comparison." : sqlite3_errmsg(reader->db));
+  return 0;
+}
+
+static void strappy_model_list_search(sqlite3_context *context, int argc, sqlite3_value **argv)
+{
+  strappy_model_reader *reader = sqlite3_user_data(context);
+  const char *values[32];
+  char *result;
+  int index;
+  if (argc > 32) { sqlite3_result_error(context,"Too many model search fields",-1); return; }
+  for (index=0; index<argc; index++) values[index]=strappy_catalog_value(argv[index]);
+  result=reader->text.search_text((size_t)argc,values);
+  if (result == NULL) sqlite3_result_error_nomem(context);
+  else sqlite3_result_text(context,result,-1,free);
+}
+
+static void strappy_model_list_contains(sqlite3_context *context, int argc, sqlite3_value **argv)
+{
+  strappy_model_reader *reader = sqlite3_user_data(context);
+  (void)argc;
+  sqlite3_result_int(context,reader->text.contains(strappy_catalog_value(argv[0]),strappy_catalog_value(argv[1])));
+}
+
+static int strappy_model_list_compare(void *context, int alen, const void *a, int blen, const void *b)
+{
+  strappy_model_reader *reader = context;
+  char *left = sqlite3_mprintf("%.*s",alen,(const char *)a);
+  char *right = sqlite3_mprintf("%.*s",blen,(const char *)b);
+  int result=0;
+  if (left != NULL && right != NULL) result=reader->text.compare(left,right);
+  else reader->comparison_failed=1;
+  sqlite3_free(left); sqlite3_free(right);
+  return result;
+}
+
+void strappy_db_model_list_close(strappy_model_reader *reader)
+{
+  if (reader == NULL) return;
+  sqlite3_finalize(reader->page); sqlite3_finalize(reader->identity);
+  if (reader->db != NULL) {
+    sqlite3_exec(reader->db,"ROLLBACK",NULL,NULL,NULL);
+    sqlite3_close(reader->db);
+  }
+  free(reader);
+}
+
+#define STRAPPY_MODEL_LIST_PRICE(kind) \
+  "(SELECT price_decimal FROM model_prices WHERE model_id=m.id AND price_kind='" kind "')"
+#define STRAPPY_MODEL_LIST_PROVIDER \
+  "CASE m.provider_id WHEN 'openrouter' THEN 'OpenRouter' WHEN 'openai_chatgpt' THEN 'ChatGPT' ELSE ?1 END"
+
+int strappy_db_model_list_open(const char *path, const char *custom_provider_name,
+  const char *search, const strappy_catalog_sort *sort, size_t sort_count,
+  const strappy_model_list_text *text, strappy_model_reader **out, char **error_out)
+{
+  strappy_model_reader *reader;
+  sqlite3_stmt *stmt=NULL;
+  int rc;
+  /* Search fields and their order match the original Cocoa combined search
+   * string, including numeric zeroes and empty account fields (provider rows).
+   * Prices stay semantic decimal text until converted for numeric sorting. */
+  static const char *keys=
+    "CREATE TEMP TABLE model_keys AS SELECT m.id AS model_id,m.provider_id,m.wire_model_id,"
+    "m.name AS raw_name,CASE WHEN m.name='' THEN m.wire_model_id ELSE m.name END AS name,"
+    STRAPPY_MODEL_LIST_PROVIDER " AS provider_name,m.context_length,"
+    "CAST(COALESCE(" STRAPPY_MODEL_LIST_PRICE("prompt") ",'0') AS REAL) AS prompt_price,"
+    "CAST(COALESCE(" STRAPPY_MODEL_LIST_PRICE("completion") ",'0') AS REAL) AS completion_price,"
+    "CASE WHEN m.id=" STRAPPY_DB_DEFAULT_MODEL_SQL " THEN 1 ELSE 0 END AS selected,"
+    "CASE WHEN m.id=" STRAPPY_DB_DEFAULT_MODEL_SQL " OR COALESCE(mp.allowed,0)=1 THEN 1 ELSE 0 END AS allowed,"
+    "model_search(m.id,m.wire_model_id,m.provider_id," STRAPPY_MODEL_LIST_PROVIDER ","
+      "m.canonical_slug,m.hugging_face_id,m.name,m.description,m.context_length,m.created_at_s,"
+      "m.architecture_modality,m.architecture_tokenizer,m.architecture_instruct_type,"
+      STRAPPY_MODEL_LIST_PRICE("prompt") "," STRAPPY_MODEL_LIST_PRICE("completion") ","
+      STRAPPY_MODEL_LIST_PRICE("request") "," STRAPPY_MODEL_LIST_PRICE("image") ","
+      STRAPPY_MODEL_LIST_PRICE("audio") "," STRAPPY_MODEL_LIST_PRICE("web_search") ","
+      STRAPPY_MODEL_LIST_PRICE("internal_reasoning") "," STRAPPY_MODEL_LIST_PRICE("input_cache_read") ","
+      STRAPPY_MODEL_LIST_PRICE("input_cache_write") ","
+      "m.provider_context_length,m.provider_max_completion_tokens,m.knowledge_cutoff,m.expiration_date,"
+      "strftime('%Y-%m-%dT%H:%M:%fZ',m.last_seen_at_ms/1000.0,'unixepoch')) AS search_text "
+    "FROM models m LEFT JOIN model_preferences mp ON mp.provider_id=m.provider_id "
+    "AND mp.wire_model_id=m.wire_model_id WHERE m.catalog_active=1 AND EXISTS "
+    "(SELECT 1 FROM provider_accounts a WHERE a.provider_id=m.provider_id AND a.lifecycle_state='active');";
+  if (out == NULL || text == NULL || text->search_text == NULL || text->compare == NULL || text->contains == NULL) {
+    strappy_set_error(error_out,"Invalid model list options."); return 0;
+  }
+  *out=NULL;
+  if (!strappy_db_initialize(path,error_out)) return 0;
+  reader=calloc(1U,sizeof(*reader));
+  if (reader == NULL) { strappy_set_error(error_out,"Could not allocate model reader."); return 0; }
+  reader->text=*text;
+  rc=sqlite3_open_v2(path,&reader->db,SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,NULL);
+  if (rc != SQLITE_OK) goto failure;
+  sqlite3_busy_timeout(reader->db,5000);
+  if (sqlite3_create_function(reader->db,"model_search",-1,SQLITE_UTF8,reader,strappy_model_list_search,NULL,NULL)!=SQLITE_OK ||
+      sqlite3_create_function(reader->db,"model_contains",2,SQLITE_UTF8,reader,strappy_model_list_contains,NULL,NULL)!=SQLITE_OK ||
+      sqlite3_create_collation(reader->db,"model_text",SQLITE_UTF8,reader,strappy_model_list_compare)!=SQLITE_OK ||
+      sqlite3_exec(reader->db,"BEGIN",NULL,NULL,NULL)!=SQLITE_OK) goto failure;
+  if (sqlite3_prepare_v2(reader->db,"SELECT EXISTS(SELECT 1 FROM provider_accounts WHERE lifecycle_state='active')",
+      -1,&stmt,NULL)!=SQLITE_OK || sqlite3_step(stmt)!=SQLITE_ROW) goto failure;
+  reader->has_accounts=sqlite3_column_int(stmt,0);
+  sqlite3_finalize(stmt); stmt=NULL;
+  if (sqlite3_prepare_v2(reader->db,keys,-1,&stmt,NULL)!=SQLITE_OK) goto failure;
+  sqlite3_bind_text(stmt,1,custom_provider_name != NULL ? custom_provider_name : "Custom",-1,SQLITE_TRANSIENT);
+  rc=sqlite3_step(stmt); sqlite3_finalize(stmt); stmt=NULL;
+  if (rc!=SQLITE_DONE) goto failure;
+  if (sqlite3_prepare_v2(reader->db,"SELECT count(*),COALESCE(sum(allowed),0) FROM model_keys",
+      -1,&stmt,NULL)!=SQLITE_OK || sqlite3_step(stmt)!=SQLITE_ROW) goto failure;
+  reader->total_count=(size_t)sqlite3_column_int64(stmt,0);
+  reader->allowed_count=(size_t)sqlite3_column_int64(stmt,1);
+  sqlite3_finalize(stmt); stmt=NULL;
+  if (rc!=SQLITE_DONE || sqlite3_exec(reader->db,
+      "CREATE TEMP TABLE model_order(model_id TEXT UNIQUE,provider_id TEXT,provider_name TEXT)",NULL,NULL,NULL)!=SQLITE_OK)
+    goto failure;
+  if (!strappy_db_model_list_query(reader,search,sort,sort_count,error_out)) {
+    strappy_db_model_list_close(reader); return 0;
+  }
+  if (sqlite3_prepare_v2(reader->db,STRAPPY_MODEL_SELECT
+      "JOIN model_order o ON o.model_id=m.id WHERE o.rowid>?1 AND o.rowid<=?2 ORDER BY o.rowid",
+      -1,&reader->page,NULL)!=SQLITE_OK ||
+      sqlite3_prepare_v2(reader->db,"SELECT rowid-1 FROM model_order WHERE model_id=?1",-1,&reader->identity,NULL)!=SQLITE_OK)
+    goto failure;
+  *out=reader;
+  return 1;
+failure:
+  sqlite3_finalize(stmt); strappy_model_list_error(reader,error_out); strappy_db_model_list_close(reader);
+  return 0;
+}
+
+int strappy_db_model_list_query(strappy_model_reader *reader, const char *search,
+  const strappy_catalog_sort *sort, size_t sort_count, char **error_out)
+{
+  static const char *keys[]={"model_provider","model_allowed","model_name","model_id","model_context","model_prompt_price","model_completion_price"};
+  static const char *columns[]={"provider_name COLLATE model_text","allowed","name COLLATE model_text","wire_model_id COLLATE model_text","context_length","prompt_price","completion_price"};
+  char order[2048];
+  size_t used=0U,index,key;
+  char *sql, *needle;
+  const char *value=search != NULL ? search : "";
+  sqlite3_stmt *stmt=NULL;
+  sqlite3_int64 count;
+  int rc;
+  if (sort_count>12U || (sort_count!=0U && sort==NULL)) {
+    strappy_set_error(error_out,"Invalid model sort options."); return 0;
+  }
+  for(index=0U;index<sort_count;index++) {
+    for(key=0U;key<7U;key++) if (sort[index].key!=NULL && !strcmp(sort[index].key,keys[key])) break;
+    if(key==7U) { strappy_set_error(error_out,"Unknown model sort key."); return 0; }
+    used+=(size_t)snprintf(order+used,sizeof(order)-used,"%s %s,",columns[key],sort[index].ascending ? "ASC" : "DESC");
+  }
+  snprintf(order+used,sizeof(order)-used,"wire_model_id COLLATE model_text,lower(provider_id),selected DESC,lower(raw_name),model_id");
+  needle=reader->text.search_text(1U,&value);
+  if(needle==NULL) { strappy_set_error(error_out,"Could not allocate model search text."); return 0; }
+  reader->comparison_failed=0;
+  if(sqlite3_exec(reader->db,"SAVEPOINT model_query",NULL,NULL,NULL)!=SQLITE_OK) {
+    free(needle); return strappy_model_list_error(reader,error_out);
+  }
+  if(sqlite3_exec(reader->db,"DELETE FROM model_order",NULL,NULL,NULL)!=SQLITE_OK) { free(needle); goto failure; }
+  sql=sqlite3_mprintf("INSERT INTO model_order SELECT model_id,provider_id,provider_name FROM model_keys "
+    "WHERE ?1='' OR model_contains(search_text,?1) ORDER BY %s",order);
+  if(sql==NULL) { free(needle); goto failure; }
+  rc=sqlite3_prepare_v2(reader->db,sql,-1,&stmt,NULL); sqlite3_free(sql);
+  if(rc==SQLITE_OK) rc=sqlite3_bind_text(stmt,1,needle,-1,SQLITE_TRANSIENT);
+  free(needle);
+  if(rc!=SQLITE_OK) goto failure;
+  rc=sqlite3_step(stmt); sqlite3_finalize(stmt); stmt=NULL;
+  if(rc!=SQLITE_DONE || reader->comparison_failed) goto failure;
+  if(sqlite3_prepare_v2(reader->db,"SELECT count(*) FROM model_order",-1,&stmt,NULL)!=SQLITE_OK ||
+      sqlite3_step(stmt)!=SQLITE_ROW) goto failure;
+  count=sqlite3_column_int64(stmt,0); sqlite3_finalize(stmt); stmt=NULL;
+  if(count<0 || (unsigned long long)count>(unsigned long long)LONG_MAX) goto failure;
+  if(sqlite3_exec(reader->db,"RELEASE model_query",NULL,NULL,NULL)!=SQLITE_OK) goto failure;
+  reader->count=(size_t)count;
+  return 1;
+failure:
+  sqlite3_finalize(stmt); strappy_model_list_error(reader,error_out);
+  sqlite3_exec(reader->db,"ROLLBACK TO model_query; RELEASE model_query",NULL,NULL,NULL);
+  return 0;
+}
+
+size_t strappy_db_model_list_count(const strappy_model_reader *reader) { return reader->count; }
+int strappy_db_model_list_has_accounts(const strappy_model_reader *reader) { return reader->has_accounts; }
+unsigned long long strappy_db_model_list_page_steps(const strappy_model_reader *reader) { return reader->page_steps; }
+
+int strappy_db_model_list_page(strappy_model_reader *reader, size_t offset,
+  strappy_model_record_list *list, char **error_out)
+{
+  int rc;
+  strappy_model_record_list_init(list);
+  if(offset>=reader->count) return 1;
+  list->records=calloc(32U,sizeof(*list->records));
+  if(list->records==NULL) { strappy_set_error(error_out,"Could not allocate model page."); return 0; }
+  sqlite3_bind_int64(reader->page,1,(sqlite3_int64)offset);
+  sqlite3_bind_int64(reader->page,2,(sqlite3_int64)offset+32);
+  while((rc=sqlite3_step(reader->page))==SQLITE_ROW && list->count<32U) {
+    if(!strappy_db_assign_model_from_statement(&list->records[list->count++],reader->page,error_out)) {
+      sqlite3_reset(reader->page); strappy_model_record_list_destroy(list); return 0;
+    }
+  }
+  reader->page_steps+=(unsigned long long)sqlite3_stmt_status(reader->page,SQLITE_STMTSTATUS_VM_STEP,1);
+  sqlite3_reset(reader->page);
+  if(rc!=SQLITE_DONE) { strappy_model_record_list_destroy(list); return strappy_model_list_error(reader,error_out); }
+  return 1;
+}
+
+int strappy_db_model_list_index(strappy_model_reader *reader, const char *model_id,
+  size_t *index, char **error_out)
+{
+  int rc;
+  *index=(size_t)-1;
+  sqlite3_bind_text(reader->identity,1,model_id,-1,SQLITE_TRANSIENT);
+  rc=sqlite3_step(reader->identity);
+  if(rc==SQLITE_ROW) *index=(size_t)sqlite3_column_int64(reader->identity,0);
+  sqlite3_reset(reader->identity);
+  return rc==SQLITE_ROW || rc==SQLITE_DONE ? 1 : strappy_model_list_error(reader,error_out);
+}
+
+int strappy_db_model_list_groups(strappy_model_reader *reader,
+  strappy_model_list_group_callback callback, void *context, char **error_out)
+{
+  sqlite3_stmt *stmt=NULL;
+  int rc=sqlite3_prepare_v2(reader->db,
+    "SELECT provider_id,provider_name,min(rowid)-1,count(*) FROM model_order GROUP BY provider_id ORDER BY min(rowid)",
+    -1,&stmt,NULL);
+  if(rc==SQLITE_OK) while((rc=sqlite3_step(stmt))==SQLITE_ROW) {
+    callback(context,(const char *)sqlite3_column_text(stmt,0),(const char *)sqlite3_column_text(stmt,1),
+      (size_t)sqlite3_column_int64(stmt,2),(size_t)sqlite3_column_int64(stmt,3));
+  }
+  sqlite3_finalize(stmt);
+  return rc==SQLITE_DONE ? 1 : strappy_model_list_error(reader,error_out);
+}
+
+size_t strappy_db_catalog_total_count(const strappy_catalog_reader *reader) { return reader->total_count; }
+size_t strappy_db_catalog_allowed_count(const strappy_catalog_reader *reader) { return reader->allowed_count; }
+
+size_t strappy_db_model_list_total_count(const strappy_model_reader *reader) { return reader->total_count; }
+size_t strappy_db_model_list_allowed_count(const strappy_model_reader *reader) { return reader->allowed_count; }
+size_t strappy_db_catalog_hidden_count(const strappy_catalog_reader *reader) { return reader->hidden_count; }

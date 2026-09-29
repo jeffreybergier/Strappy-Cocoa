@@ -34,8 +34,6 @@ static NSString * const kStrappyPreferencesToolbarStudy =
   @"StrappyPreferencesToolbar.Study";
 static NSString * const kStrappyPreferencesToolbarPrompts =
   @"StrappyPreferencesToolbar.Prompts";
-static NSString * const kStrappyModelSearchTextKey =
-  @"_strappy_model_search_text";
 
 static NSString *StrappyPreferencesErrorMessage(NSError *error,
                                                  NSString *fallbackMessage)
@@ -150,22 +148,6 @@ static NSString *StrappyDatabaseAppNameForRow(NSDictionary *row)
 
   return NSLocalizedString(@"Other", nil);
 }
-
-static NSString *StrappyModelProviderDisplayName(NSString *providerId)
-{
-  if ([providerId isEqualToString:@"openrouter"]) {
-    return @"OpenRouter";
-  }
-  if ([providerId isEqualToString:@"openai_chatgpt"]) {
-    return @"ChatGPT";
-  }
-  if ([providerId isEqualToString:@"other"]) {
-    return NSLocalizedString(@"Custom", nil);
-  }
-  return ([providerId length] > 0U) ? providerId :
-    NSLocalizedString(@"Other", nil);
-}
-
 
 static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
 {
@@ -282,167 +264,6 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
   return (formatted != nil) ? formatted : @"";
 }
 
-static NSArray *StrappyModelSearchKeys(void)
-{
-  static NSArray *keys = nil;
-
-  if (keys == nil) {
-    keys = [[NSArray alloc] initWithObjects:
-      @"id",
-      @"wire_model_id",
-      @"provider_account_id",
-      @"provider_id",
-      @"provider_name",
-      @"provider_account_name",
-      @"canonical_slug",
-      @"hugging_face_id",
-      @"name",
-      @"description",
-      @"context_length",
-      @"created",
-      @"architecture_modality",
-      @"architecture_tokenizer",
-      @"architecture_instruct_type",
-      @"pricing_prompt",
-      @"pricing_completion",
-      @"pricing_request",
-      @"pricing_image",
-      @"pricing_audio",
-      @"pricing_web_search",
-      @"pricing_internal_reasoning",
-      @"pricing_input_cache_read",
-      @"pricing_input_cache_write",
-      @"top_provider_context_length",
-      @"top_provider_max_completion_tokens",
-      @"knowledge_cutoff",
-      @"expiration_date",
-      @"fetched_at",
-      nil];
-  }
-
-  return keys;
-}
-
-static void StrappyAppendModelSearchValue(NSMutableString *searchText, id value)
-{
-  NSString *stringValue;
-
-  if ([value isKindOfClass:[NSString class]]) {
-    stringValue = value;
-  } else if ([value isKindOfClass:[NSNumber class]]) {
-    stringValue = [value stringValue];
-  } else {
-    return;
-  }
-
-  if ([stringValue length] == 0U) {
-    return;
-  }
-
-  if ([searchText length] > 0U) {
-    [searchText appendString:@" "];
-  }
-  [searchText appendString:stringValue];
-}
-
-static NSString *StrappyModelSearchTextForRow(NSDictionary *row)
-{
-  NSMutableString *searchText;
-  NSArray *keys;
-  NSUInteger index;
-
-  searchText = [NSMutableString string];
-  keys = StrappyModelSearchKeys();
-  for (index = 0U; index < [keys count]; index++) {
-    StrappyAppendModelSearchValue(searchText,
-                                  [row objectForKey:[keys objectAtIndex:index]]);
-  }
-
-  return [searchText lowercaseString];
-}
-
-static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
-{
-  NSMutableDictionary *rowsByProviderModel;
-  NSMutableArray *providerModels;
-  NSMutableArray *preparedRows;
-  NSUInteger index;
-
-  if (![rows isKindOfClass:[NSArray class]]) {
-    return [NSArray array];
-  }
-
-  rowsByProviderModel = [NSMutableDictionary dictionary];
-  providerModels = [NSMutableArray array];
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-    NSMutableDictionary *providerModel;
-    NSString *providerId;
-    NSString *wireModelId;
-    NSString *providerModelKey;
-
-    row = [rows objectAtIndex:index];
-    if (![row isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-
-    providerId = StrappyStringForModelRow(row, @"provider_id");
-    wireModelId = StrappyStringForModelRow(row, @"wire_model_id");
-    if (([providerId length] == 0U) || ([wireModelId length] == 0U)) {
-      continue;
-    }
-    providerModelKey = [NSString stringWithFormat:@"%@\n%@",
-      providerId, wireModelId];
-    providerModel = [rowsByProviderModel objectForKey:providerModelKey];
-    if (providerModel == nil) {
-      providerModel = [NSMutableDictionary dictionaryWithDictionary:row];
-      [providerModel setObject:providerModelKey forKey:@"provider_model_key"];
-      [providerModel setObject:StrappyModelProviderDisplayName(providerId)
-                       forKey:@"provider_name"];
-      [rowsByProviderModel setObject:providerModel forKey:providerModelKey];
-      [providerModels addObject:providerModel];
-    } else {
-      BOOL allowed;
-      BOOL selected;
-
-      allowed = [[providerModel objectForKey:@"allowed"] boolValue] ||
-        [[row objectForKey:@"allowed"] boolValue];
-      selected = [[providerModel objectForKey:@"selected"] boolValue] ||
-        [[row objectForKey:@"selected"] boolValue];
-      if ([[row objectForKey:@"selected"] boolValue]) {
-        NSString *savedKey;
-        NSString *savedProviderName;
-
-        savedKey = [[providerModel objectForKey:@"provider_model_key"] retain];
-        savedProviderName = [[providerModel objectForKey:@"provider_name"] retain];
-        [providerModel setDictionary:row];
-        [providerModel setObject:savedKey forKey:@"provider_model_key"];
-        [providerModel setObject:savedProviderName forKey:@"provider_name"];
-        [savedKey release];
-        [savedProviderName release];
-      }
-      [providerModel setObject:[NSNumber numberWithBool:allowed]
-                       forKey:@"allowed"];
-      [providerModel setObject:[NSNumber numberWithBool:selected]
-                       forKey:@"selected"];
-    }
-  }
-
-  preparedRows = [NSMutableArray arrayWithCapacity:[providerModels count]];
-  for (index = 0U; index < [providerModels count]; index++) {
-    NSDictionary *row;
-    NSMutableDictionary *preparedRow;
-
-    row = [providerModels objectAtIndex:index];
-    preparedRow = [NSMutableDictionary dictionaryWithDictionary:row];
-    [preparedRow setObject:StrappyModelSearchTextForRow(row)
-                    forKey:kStrappyModelSearchTextKey];
-    [preparedRows addObject:preparedRow];
-  }
-
-  return preparedRows;
-}
-
 @interface PreferencesWindowController ()
 - (void)buildContentView;
 - (void)setupToolbar;
@@ -486,12 +307,11 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                          returnCode:(NSInteger)returnCode
                         contextInfo:(void *)contextInfo;
 - (NSString *)currentModelSearchText;
-- (NSArray *)modelRows:(NSArray *)rows matchingSearchText:(NSString *)searchText;
 - (void)applyModelRows;
 - (void)refreshModelStatus;
 - (void)setModelStatusErrorMessage:(NSString *)message;
 - (void)loadOpenRouterModels;
-- (void)sortAllModelRows;
+- (void)scheduleModelReload;
 - (NSString *)selectedModelTableRowIdentifier;
 - (void)selectModelTableRowWithIdentifier:(NSString *)modelIdentifier;
 - (NSArray *)selectedDatabaseTableRowIdentifiers;
@@ -561,7 +381,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [window setFrameAutosaveName:kStrappyPreferencesFrameAutosaveName];
 
   if ((self = [super initWithWindow:window])) {
-    allModelRows_ = [[NSArray alloc] init];
     modelRows_ = [[NSArray alloc] init];
     databaseRows_ = [[NSArray alloc] init];
     allDatabaseStudyRows_ = [[NSArray alloc] init];
@@ -616,6 +435,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
       name:FileScannerDatabaseCatalogScanDidStartNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(databaseCatalogScanDidFinish:)
       name:FileScannerDatabaseCatalogScanDidFinishNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelListReadFailed:)
+      name:StrappyModelListReadFailedNotification object:nil];
     [self buildContentView];
     [self loadSystemPrompt];
     [self setModelCatalogRefreshing:[StrappySession isModelCatalogRefreshInFlight]];
@@ -1502,57 +1323,40 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   return searchText;
 }
 
-- (NSArray *)modelRows:(NSArray *)rows matchingSearchText:(NSString *)searchText
-{
-  NSMutableArray *matchingRows;
-  NSString *needle;
-  NSUInteger index;
-
-  if (![rows isKindOfClass:[NSArray class]]) {
-    return [NSArray array];
-  }
-  if ([searchText length] == 0U) {
-    return rows;
-  }
-
-  needle = [searchText lowercaseString];
-  matchingRows = [NSMutableArray arrayWithCapacity:[rows count]];
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-    NSString *rowSearchText;
-
-    row = [rows objectAtIndex:index];
-    if (![row isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-
-    rowSearchText = [row objectForKey:kStrappyModelSearchTextKey];
-    if (![rowSearchText isKindOfClass:[NSString class]]) {
-      rowSearchText = StrappyModelSearchTextForRow(row);
-    }
-
-    if ([rowSearchText rangeOfString:needle].location != NSNotFound) {
-      [matchingRows addObject:row];
-    }
-  }
-
-  return matchingRows;
-}
-
 - (void)applyModelRows
 {
-  NSArray *rows;
-  NSString *selectedModelIdentifier;
-
-  selectedModelIdentifier = [[self selectedModelTableRowIdentifier] retain];
-  rows = [self modelRows:allModelRows_
-      matchingSearchText:[self currentModelSearchText]];
-  [modelRows_ release];
-  modelRows_ = [rows copy];
+  NSError *error = nil;
+  StrappyModelRows *rows = nil;
+  NSString *identifier = [[self selectedModelTableRowIdentifier] retain];
+  NSArray *sort = [modelWhitelistView_ effectiveSortDescriptorsForSortDescriptors:
+    [modelTableView_ sortDescriptors]];
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyModelRows) object:nil];
+  if (!modelCatalogDirty_ && [modelRows_ isKindOfClass:[StrappyModelRows class]]) {
+    rows = (StrappyModelRows *)modelRows_;
+    if (![rows filterWithSearch:[self currentModelSearchText] sortDescriptors:sort error:&error]) rows = nil;
+  } else {
+    rows = [StrappySession modelPreferenceRowsMatchingSearch:[self currentModelSearchText]
+      sortDescriptors:sort error:&error];
+  }
+  if (rows == nil) {
+    [identifier release];
+    [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(error,
+      NSLocalizedString(@"Model list could not be loaded.",nil))];
+    return;
+  }
+  modelCatalogDirty_ = NO;
+  noAvailableModelAccounts_ = ![rows hasConfiguredAccounts];
+  [rows retain]; [modelRows_ release]; modelRows_ = rows;
   [modelTableView_ reloadData];
-  [self selectModelTableRowWithIdentifier:selectedModelIdentifier];
-  [selectedModelIdentifier release];
+  [self selectModelTableRowWithIdentifier:identifier];
+  [identifier release];
   [self refreshModelStatus];
+}
+
+- (void)modelListReadFailed:(NSNotification *)notification
+{
+  if ([notification object] != modelRows_) return;
+  [self setModelStatusErrorMessage:[[[notification userInfo] objectForKey:@"error"] localizedDescription]];
 }
 
 - (void)refreshModelStatus
@@ -1611,45 +1415,15 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)loadOpenRouterModels
 {
-  NSArray *accounts;
-  NSError *error;
-  NSArray *rows;
-
-  error = nil;
-  accounts = [StrappySession providerAccountCatalogWithError:&error];
-  if (accounts == nil) {
-    [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
-      error,
-      NSLocalizedString(@"Account list could not be loaded.", nil))];
-    return;
-  }
-  rows = [StrappySession configuredProviderModelCatalogWithError:&error];
-  if (rows != nil) {
-    modelCatalogDirty_ = NO;
-    noAvailableModelAccounts_ = ([accounts count] == 0U) ? YES : NO;
-    [allModelRows_ release];
-    allModelRows_ = [StrappyPreparedModelRowsForRows(rows) copy];
-    [self sortAllModelRows];
-    [self applyModelRows];
-    return;
-  }
-
-  [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
-    error,
-    NSLocalizedString(@"Model list could not be loaded.", nil))];
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(loadOpenRouterModels) object:nil];
+  modelCatalogDirty_ = YES;
+  [self applyModelRows];
 }
 
-- (void)sortAllModelRows
+- (void)scheduleModelReload
 {
-  NSArray *sortedRows;
-
-  if ((modelWhitelistView_ == nil) || (allModelRows_ == nil)) {
-    return;
-  }
-
-  sortedRows = [modelWhitelistView_ sortedRows:allModelRows_];
-  [allModelRows_ release];
-  allModelRows_ = [sortedRows copy];
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(loadOpenRouterModels) object:nil];
+  [self performSelector:@selector(loadOpenRouterModels) withObject:nil afterDelay:0.0];
 }
 
 - (NSString *)selectedModelTableRowIdentifier
@@ -1666,37 +1440,19 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   return StrappyStringForModelRow([modelRows_ objectAtIndex:(NSUInteger)row],
-                                  @"provider_model_key");
+                                  @"id");
 }
 
 - (void)selectModelTableRowWithIdentifier:(NSString *)modelIdentifier
 {
-  NSUInteger index;
-
-  if (modelTableView_ == nil) {
-    return;
+  NSUInteger index = NSNotFound;
+  if ([modelRows_ isKindOfClass:[StrappyModelRows class]])
+    index = [(StrappyModelRows *)modelRows_ indexForModelIdentifier:modelIdentifier];
+  if (index == NSNotFound) [modelTableView_ deselectAll:self];
+  else {
+    [modelTableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:index] byExtendingSelection:NO];
+    [modelTableView_ scrollRowToVisible:(NSInteger)index];
   }
-
-  if (![modelIdentifier isKindOfClass:[NSString class]] ||
-      ([modelIdentifier length] == 0U)) {
-    [modelTableView_ deselectAll:self];
-    return;
-  }
-
-  for (index = 0U; index < [modelRows_ count]; index++) {
-    NSDictionary *row;
-
-    row = [modelRows_ objectAtIndex:index];
-    if ([StrappyStringForModelRow(row, @"provider_model_key")
-          isEqualToString:modelIdentifier]) {
-      [modelTableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:index]
-                     byExtendingSelection:NO];
-      [modelTableView_ scrollRowToVisible:(NSInteger)index];
-      return;
-    }
-  }
-
-  [modelTableView_ deselectAll:self];
 }
 
 - (NSArray *)selectedDatabaseTableRowIdentifiers
@@ -1734,7 +1490,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)modelSearchChanged:(id)sender
 {
   (void)sender;
-  [self applyModelRows];
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyModelRows) object:nil];
+  [self performSelector:@selector(applyModelRows) withObject:nil afterDelay:0.15];
 }
 
 - (void)databaseSearchChanged:(id)sender
@@ -1760,9 +1517,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)modelSearchTextDidChange:(NSNotification *)notification
 {
-  if ([notification object] == modelSearchField_) {
-    [self applyModelRows];
-  }
+  if ([notification object] == modelSearchField_) [self modelSearchChanged:modelSearchField_];
 }
 
 - (void)databaseSearchTextDidChange:(NSNotification *)notification
@@ -1854,21 +1609,13 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)modelCatalogRefreshDidFinish:(NSNotification *)notification
 {
-  NSDictionary *userInfo;
-  NSString *errorMessage;
-
-  userInfo = [notification userInfo];
-  errorMessage = [userInfo objectForKey:@"error"];
+  NSString *message = [[notification userInfo] objectForKey:@"error"];
+  modelCatalogDirty_ = YES;
   [self setModelCatalogRefreshing:NO];
-  if ([errorMessage isKindOfClass:[NSString class]] &&
-      ([errorMessage length] > 0U)) {
-    [self setModelStatusErrorMessage:errorMessage];
-    return;
-  }
-
-  if ([[[[self window] toolbar] selectedItemIdentifier]
-        isEqualToString:kStrappyPreferencesToolbarModels]) {
+  if ([[[[self window] toolbar] selectedItemIdentifier] isEqualToString:kStrappyPreferencesToolbarModels]) {
     [self loadOpenRouterModels];
+    if ([message isKindOfClass:[NSString class]] && [message length] > 0U)
+      [self setModelStatusErrorMessage:message];
   }
 }
 
@@ -1883,7 +1630,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
   identifier = [[[self window] toolbar] selectedItemIdentifier];
   if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
-    [self loadOpenRouterModels];
+    [self scheduleModelReload];
   }
 }
 
@@ -1895,7 +1642,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   modelCatalogDirty_ = YES;
   identifier = [[[self window] toolbar] selectedItemIdentifier];
   if ([identifier isEqualToString:kStrappyPreferencesToolbarModels]) {
-    [self loadOpenRouterModels];
+    [self scheduleModelReload];
   }
 }
 
@@ -2274,7 +2021,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
   (void)oldDescriptors;
   if (tableView == modelTableView_) {
-    [self sortAllModelRows];
     [self applyModelRows];
     return;
   }
@@ -2832,7 +2578,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [showHiddenDatabasesButton_ release];
   [scanProgressIndicator_ release];
   [databaseStatusLabel_ release];
-  [allModelRows_ release];
   [modelRows_ release];
   [databaseRows_ release];
   [allDatabaseStudyRows_ release];

@@ -36,7 +36,6 @@
   NSButton            *showHiddenDatabasesButton_;
   NSProgressIndicator *scanProgressIndicator_;
   NSTextField         *databaseStatusLabel_;
-  NSArray             *allModelRows_;
   NSArray             *modelRows_;
   NSArray             *databaseRows_;
   NSArray             *allDatabaseStudyRows_;

@@ -15,6 +15,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+@interface StrappyModelListSource : NSObject <StrappyModelListSource> {
+  strappy_model_reader *reader_;
+}
+- (id)initWithPath:(NSString *)path search:(NSString *)search
+  sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
+@end
+
 typedef struct StrappyChatGPTAuthorizationCancellationContext {
   id<StrappyChatGPTAuthorizationObserver> observer;
   id context;
@@ -3369,6 +3376,20 @@ static BOOL StrappySessionRecordFromOptions(
   return [StrappySession modelCatalogMatchingSearchText:nil error:error];
 }
 
++ (StrappyModelRows *)modelPreferenceRowsMatchingSearch:(NSString *)search
+  sortDescriptors:(NSArray *)descriptors error:(NSError **)error
+{
+  StrappyModelListSource *source;
+  StrappyModelRows *rows;
+  if (![self initializeSessionStoreWithError:error]) return nil;
+  source = [[StrappyModelListSource alloc] initWithPath:[self sessionsDatabasePath]
+    search:search sortDescriptors:descriptors error:error];
+  if (source == nil) return nil;
+  rows = [[[StrappyModelRows alloc] initWithModelSource:source] autorelease];
+  [source release];
+  return rows;
+}
+
 + (NSArray *)configuredProviderModelCatalogWithError:(NSError **)error
 {
   NSString *databasePath;
@@ -4382,14 +4403,6 @@ static BOOL StrappySessionRecordFromOptions(
       message = NSLocalizedString(@"Model refresh failed.", nil);
     }
     [result setObject:message forKey:@"error"];
-  } else {
-    NSArray *models;
-
-    models = [StrappySession modelCatalogWithError:nil];
-    if (models != nil) {
-      [result setObject:[NSNumber XP_numberWithUnsignedInteger:[models count]]
-                 forKey:@"model_count"];
-    }
   }
   strappy_session_free_string(strappyError);
 
@@ -6188,5 +6201,137 @@ NSString * const StrappySessionListReadFailedNotification =
   }
   return [NSDictionary dictionaryWithObject:
     NSLocalizedString(@"Could not load conversation", nil) forKey:@"name"];
+}
+@end
+
+static char *StrappyModelListSearchText(size_t count, const char *const *values)
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  NSMutableArray *parts = [NSMutableArray arrayWithCapacity:count];
+  size_t index;
+  char *result;
+  for (index = 0U; index < count; index++)
+    [parts addObject:[StrappySession stringFromCStringOrEmpty:values[index]]];
+  result = strdup([[StrappyModelRows searchTextForValues:parts] UTF8String]);
+  [pool release];
+  return result;
+}
+static int StrappyModelListCompare(const char *a, const char *b)
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  NSComparisonResult result = [[StrappySession stringFromCStringOrEmpty:a]
+    caseInsensitiveCompare:[StrappySession stringFromCStringOrEmpty:b]];
+  [pool release];
+  return result < 0 ? -1 : (result > 0 ? 1 : 0);
+}
+static int StrappyModelListContains(const char *text, const char *needle)
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  NSRange range = [[StrappySession stringFromCStringOrEmpty:text]
+    rangeOfString:[StrappySession stringFromCStringOrEmpty:needle]];
+  int result = range.location != NSNotFound;
+  [pool release];
+  return result;
+}
+static void StrappyModelListGroup(void *context, const char *provider, const char *title,
+  size_t offset, size_t count)
+{
+  NSMutableArray *groups = (NSMutableArray *)context;
+  [groups addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+    [StrappySession stringFromCStringOrEmpty:provider],@"provider_id",
+    [StrappySession stringFromCStringOrEmpty:title],@"title",
+    [NSNumber XP_numberWithUnsignedInteger:(XPUInteger)offset],@"offset",
+    [NSNumber XP_numberWithUnsignedInteger:(XPUInteger)count],@"count",nil]];
+}
+static BOOL StrappyModelListSort(NSArray *descriptors, strappy_catalog_sort *sort, NSError **error)
+{
+  NSUInteger index;
+  if ([descriptors count] > 12U) {
+    if (error != NULL) *error = [StrappySession errorFromCString:"Too many model sort keys."];
+    return NO;
+  }
+  for (index = 0U; index < [descriptors count]; index++) {
+    NSSortDescriptor *descriptor = [descriptors objectAtIndex:index];
+    sort[index].key = [[descriptor key] UTF8String];
+    sort[index].ascending = [descriptor ascending] ? 1 : 0;
+  }
+  return YES;
+}
+@implementation StrappyModelListSource
+- (id)initWithPath:(NSString *)path search:(NSString *)search
+  sortDescriptors:(NSArray *)descriptors error:(NSError **)error
+{
+  strappy_catalog_sort sort[12];
+  strappy_model_list_text text = { StrappyModelListContains,StrappyModelListSearchText,StrappyModelListCompare };
+  char *message = NULL;
+  self = [super init];
+  if (self == nil) return nil;
+  if (!StrappyModelListSort(descriptors,sort,error)) { [self release]; return nil; }
+  if (!strappy_db_model_list_open([path fileSystemRepresentation],
+      [NSLocalizedString(@"Custom",nil) UTF8String],[search UTF8String],sort,
+      (size_t)[descriptors count],&text,&reader_,&message)) {
+    if (error != NULL) *error = [StrappySession errorFromCString:message];
+    strappy_free_string(message); [self release]; return nil;
+  }
+  return self;
+}
+- (void)dealloc { strappy_db_model_list_close(reader_); [super dealloc]; }
+- (NSUInteger)count { return (NSUInteger)strappy_db_model_list_count(reader_); }
+- (NSUInteger)totalCount { return (NSUInteger)strappy_db_model_list_total_count(reader_); }
+- (NSUInteger)allowedCount { return (NSUInteger)strappy_db_model_list_allowed_count(reader_); }
+- (BOOL)hasConfiguredAccounts { return strappy_db_model_list_has_accounts(reader_) ? YES : NO; }
+- (BOOL)filterWithSearch:(NSString *)search sortDescriptors:(NSArray *)descriptors error:(NSError **)error
+{
+  strappy_catalog_sort sort[12];
+  char *message = NULL;
+  if (!StrappyModelListSort(descriptors,sort,error)) return NO;
+  if (!strappy_db_model_list_query(reader_,[search UTF8String],sort,(size_t)[descriptors count],&message)) {
+    if (error != NULL) *error = [StrappySession errorFromCString:message];
+    strappy_free_string(message); return NO;
+  }
+  return YES;
+}
+- (NSUInteger)indexForModelIdentifier:(NSString *)identifier error:(NSError **)error
+{
+  size_t index;
+  char *message = NULL;
+  if (!strappy_db_model_list_index(reader_,[identifier UTF8String],&index,&message)) {
+    if (error != NULL) *error = [StrappySession errorFromCString:message];
+    strappy_free_string(message); return NSNotFound;
+  }
+  return index == (size_t)-1 ? NSNotFound : (NSUInteger)index;
+}
+- (NSArray *)providerSectionsWithError:(NSError **)error
+{
+  NSMutableArray *groups = [NSMutableArray array];
+  char *message = NULL;
+  if (!strappy_db_model_list_groups(reader_,StrappyModelListGroup,groups,&message)) {
+    if (error != NULL) *error = [StrappySession errorFromCString:message];
+    strappy_free_string(message); return nil;
+  }
+  return groups;
+}
+- (NSArray *)pageAtOffset:(NSUInteger)offset error:(NSError **)error
+{
+  strappy_model_record_list records;
+  char *message = NULL;
+  NSMutableArray *rows;
+  size_t index;
+  if (!strappy_db_model_list_page(reader_,(size_t)offset,&records,&message)) {
+    if (error != NULL) *error = [StrappySession errorFromCString:message];
+    strappy_free_string(message); return nil;
+  }
+  rows = [NSMutableArray arrayWithCapacity:records.count];
+  for (index = 0U; index < records.count; index++) {
+    NSMutableDictionary *row = [NSMutableDictionary dictionaryWithDictionary:
+      [StrappySession dictionaryFromModelRecord:&records.records[index]]];
+    NSString *provider = [row objectForKey:@"provider_id"];
+    NSString *name = [provider isEqualToString:@"openrouter"] ? @"OpenRouter" :
+      ([provider isEqualToString:@"openai_chatgpt"] ? @"ChatGPT" : NSLocalizedString(@"Custom",nil));
+    [row setObject:name forKey:@"provider_name"];
+    [rows addObject:row];
+  }
+  strappy_model_record_list_destroy(&records);
+  return rows;
 }
 @end

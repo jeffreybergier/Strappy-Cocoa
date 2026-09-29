@@ -26,6 +26,8 @@
 - (NSString *)currentSearchText;
 - (NSString *)workingStatusText;
 - (NSString *)statusText;
+- (NSUInteger)totalRowCount;
+- (NSUInteger)selectedRowCount;
 - (NSString *)actionButtonAccessibilityLabel;
 - (void)actionButtonPressed:(id)sender;
 - (void)configureCell:(UITableViewCell *)cell withRow:(NSDictionary *)row;

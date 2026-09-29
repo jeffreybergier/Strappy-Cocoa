@@ -188,34 +188,29 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   return nil;
 }
 
+- (NSUInteger)totalRowCount
+{
+  return [[self allRows] count];
+}
+
+- (NSUInteger)selectedRowCount
+{
+  NSUInteger count = 0U;
+  NSUInteger index;
+  for (index = 0U; index < [[self allRows] count]; index++) {
+    NSDictionary *row = [[self allRows] objectAtIndex:index];
+    if ([row isKindOfClass:[NSDictionary class]] && [self rowIsSelected:row]) count++;
+  }
+  return count;
+}
+
 - (NSString *)statusText
 {
-  NSUInteger index;
-  NSUInteger selectedCount;
-  NSUInteger totalCount;
-  NSString *workingText;
-
-  workingText = [self workingStatusText];
-  if ([workingText length] > 0U) {
-    return workingText;
-  }
-
-  if ([[self statusMessage] length] > 0U) {
-    return [self statusMessage];
-  }
-
-  selectedCount = 0U;
-  totalCount = [[self allRows] count];
-  for (index = 0U; index < totalCount; index++) {
-    NSDictionary *row;
-
-    row = [[self allRows] objectAtIndex:index];
-    if ([row isKindOfClass:[NSDictionary class]] && [self rowIsSelected:row]) {
-      selectedCount++;
-    }
-  }
+  NSString *workingText = [self workingStatusText];
+  if ([workingText length] > 0U) return workingText;
+  if ([[self statusMessage] length] > 0U) return [self statusMessage];
   return [NSString stringWithFormat:NSLocalizedString(@"%lu of %lu", nil),
-    (unsigned long)selectedCount, (unsigned long)totalCount];
+    (unsigned long)[self selectedRowCount], (unsigned long)[self totalRowCount]];
 }
 
 - (NSString *)actionButtonAccessibilityLabel

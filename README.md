@@ -123,6 +123,17 @@ flowchart TB
   filtering, sorting, identity lookup, and snapshot isolation. Run
   `make -C source/linux catalog-foundation-test` with GNUstep installed to check
   the actual Objective-C cache, Unicode search, lazy sections, and notifications.
+- Model preferences use provider-owned rows directly, with the same 32-row
+  paging and 128-row cache. SQLite retains temporary search/sort keys for a
+  consistent snapshot; provider section counts and model-ID selection do not
+  hydrate rows. Search preserves the original combined fields and Foundation
+  Unicode matching, with a 150 ms typing delay. Account, catalog, whitelist,
+  and default-model changes refresh the snapshot after persistence. Model
+  pickers retain their existing allowed-model APIs. `model_list_harness` checks
+  21,000 models against the eager loader, all column sorts, default protection,
+  account visibility, snapshot isolation, and bounded query work. The optional
+  `make -C source/linux model-rows-test` checks Unicode search, cache eviction,
+  metadata-only access, and deferred read errors using GNUstep.
 - `make -C source/linux session-sections-test` checks session date grouping,
   calendar boundaries, daylight-saving transitions, and the Tiger calendar
   fallback. This optional Foundation harness requires `libgnustep-base-dev`
