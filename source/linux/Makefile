@@ -18,6 +18,7 @@ STRAPPY_DB_SOURCES = \
 	$(SHARED_DIR)/strappy_provider.c \
 	$(SHARED_DIR)/strappy_db.c \
 	$(SHARED_DIR)/strappy_db_catalog.c \
+	$(SHARED_DIR)/strappy_db_sidebar.c \
 	$(SHARED_DIR)/strappy_db_sessions.c \
 	$(SHARED_DIR)/strappy_db_responses.c
 STRAPPY_PLATFORM_SOURCES = \
@@ -225,7 +226,7 @@ endif
 	openrouter-live-test openai-oauth-test \
 	openai-oauth-poc-self-test clean
 
-test: $(PROVIDER_REGISTRY_HARNESS) $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) $(OPENAI_OAUTH_HARNESS) $(CHATGPT_ADAPTER_HARNESS) $(CHATGPT_COMPATIBILITY_PROBE) $(CALENDAR_HARNESS) | $(TEST_DIR)
+test: $(BUILD_DIR)/sidebar_harness $(PROVIDER_REGISTRY_HARNESS) $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) $(OPENAI_OAUTH_HARNESS) $(CHATGPT_ADAPTER_HARNESS) $(CHATGPT_COMPATIBILITY_PROBE) $(CALENDAR_HARNESS) | $(TEST_DIR)
 	@echo "--- Running Linux shared-core test suite ---"
 	@echo "No live provider requests are made by this target."
 	@echo " [1/12] RUN  provider_registry_harness"
@@ -264,7 +265,8 @@ test: $(PROVIDER_REGISTRY_HARNESS) $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_H
 	@echo " [12/12] RUN  calendar_harness"
 	./$(CALENDAR_HARNESS)
 	@echo " [12/12] PASS calendar_harness"
-	@echo "--- PASS: all 12 offline Linux shared-core checks completed ---"
+	./$(BUILD_DIR)/sidebar_harness
+	@echo "--- PASS: all offline Linux shared-core checks completed ---"
 
 require-live-test-opt-in:
 	@test "$$STRAPPY_ALLOW_LIVE_PROVIDER_TESTS" = "YES" || \
@@ -376,3 +378,7 @@ session-sections-test:
 		$(SHARED_DIR)/XPFoundationCalendar.m -o $(BUILD_DIR)/session_sections_harness \
 		$$(gnustep-config --base-libs)
 	$(BUILD_DIR)/session_sections_harness
+
+SIDEBAR_HARNESS_SOURCES = sidebar_harness.c $(filter-out database_query_harness.c,$(DATABASE_QUERY_HARNESS_SOURCES))
+$(BUILD_DIR)/sidebar_harness: $(SIDEBAR_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SIDEBAR_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) $(PLATFORM_LIBS) -lcurl

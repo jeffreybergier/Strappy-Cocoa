@@ -45,9 +45,7 @@
   "WHERE x.session_id = s.id), " \
   STRAPPY_DB_STRINGIFY(STRAPPY_SESSION_DEFAULT_ROUND_LIMIT) ")"
 #define STRAPPY_DB_SESSION_LAST_ACTIVITY_MS_SQL \
-  "COALESCE((SELECT i.created_at_ms FROM conversation_items i " \
-  "WHERE i.session_id = s.id ORDER BY i.sequence DESC LIMIT 1), " \
-  "s.created_at_ms)"
+  "(SELECT a.last_activity_at_ms FROM session_activity a WHERE a.session_id=s.id)"
 
 static int strappy_db_copy_default_session_options(
   sqlite3 *db,

@@ -4780,6 +4780,15 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
++ (StrappySessionRows *)sidebarRowsWithError:(NSError **)error
+{
+  NSString *path;
+
+  path = [self sessionsDatabasePath];
+  if (![self ensureSessionsDirectoryForDatabasePath:path error:error]) return nil;
+  return [[[StrappySessionRows alloc] initWithDatabasePath:path error:error] autorelease];
+}
+
 + (NSArray *)sessionSummariesWithError:(NSError **)error
 {
   NSString *databasePath;
@@ -6031,4 +6040,153 @@ static BOOL StrappySessionRecordFromOptions(
   [userInfo release];
 }
 
+@end
+
+NSString * const StrappySessionListReadFailedNotification =
+  @"StrappySessionListReadFailedNotification";
+
+@interface StrappySessionRows ()
+- (void)recordReadError:(char *)message;
+@end
+
+@implementation StrappySessionRows
+- (id)initWithDatabasePath:(NSString *)path error:(NSError **)error
+{
+  strappy_session_reader *reader;
+  char *message;
+
+  self = [super init];
+  if (self == nil) return nil;
+  reader = NULL;
+  message = NULL;
+  if (!strappy_db_sidebar_open([path fileSystemRepresentation], &reader, &message)) {
+    if (error != nil) *error = [StrappySession errorFromCString:message];
+    strappy_free_string(message);
+    [self release];
+    return nil;
+  }
+  reader_ = reader;
+  pages_ = [[NSMutableDictionary alloc] init];
+  pageOrder_ = [[NSMutableArray alloc] init];
+  return self;
+}
+
+- (void)dealloc
+{
+  strappy_db_sidebar_close((strappy_session_reader *)reader_);
+  [pages_ release];
+  [pageOrder_ release];
+  [readError_ release];
+  [super dealloc];
+}
+
+- (id)copyWithZone:(NSZone *)zone
+{
+  (void)zone;
+  return [self retain];
+}
+
+- (NSUInteger)count
+{
+  return (NSUInteger)strappy_db_sidebar_count((strappy_session_reader *)reader_);
+}
+
+- (NSError *)readError { return readError_; }
+
+- (void)recordReadError:(char *)message
+{
+  if (readError_ == nil) {
+    readError_ = [[StrappySession errorFromCString:message] retain];
+    /* Defer delivery until the table callback finishes. Failed rows carry no
+     * session ID, so selecting or deleting them cannot affect another row. */
+    [[NSNotificationQueue defaultQueue] enqueueNotification:
+      [NSNotification notificationWithName:StrappySessionListReadFailedNotification
+        object:self userInfo:[NSDictionary dictionaryWithObject:readError_ forKey:@"error"]]
+      postingStyle:NSPostASAP];
+  }
+  strappy_free_string(message);
+}
+
+- (NSUInteger)countSinceTimestamp:(long long)timestamp
+{
+  size_t count;
+  char *message;
+
+  message = NULL;
+  if (!strappy_db_sidebar_count_since((strappy_session_reader *)reader_, timestamp,
+                                      &count, &message)) {
+    [self recordReadError:message];
+    return NSNotFound;
+  }
+  return (NSUInteger)count;
+}
+
+- (NSUInteger)indexForSessionIdentifier:(NSNumber *)identifier
+{
+  size_t index;
+  char *message;
+
+  if (![identifier isKindOfClass:[NSNumber class]]) return NSNotFound;
+  message = NULL;
+  if (!strappy_db_sidebar_index((strappy_session_reader *)reader_,
+                                [identifier longLongValue], &index, &message)) {
+    [self recordReadError:message];
+    return NSNotFound;
+  }
+  return index == (size_t)-1 ? NSNotFound : (NSUInteger)index;
+}
+
+- (id)objectAtIndex:(NSUInteger)index
+{
+  NSUInteger offset;
+  NSNumber *key;
+  NSArray *page;
+
+  if (index >= [self count]) {
+    [NSException raise:NSRangeException format:@"Session index outside snapshot"];
+  }
+  offset = (index / STRAPPY_SIDEBAR_PAGE_SIZE) * STRAPPY_SIDEBAR_PAGE_SIZE;
+  key = [NSNumber XP_numberWithUnsignedInteger:offset];
+  page = [pages_ objectForKey:key];
+  if (page == nil && readError_ == nil) {
+    strappy_sidebar_page records;
+    char *message;
+    NSMutableArray *rows;
+    size_t row;
+
+    message = NULL;
+    if (!strappy_db_sidebar_read((strappy_session_reader *)reader_, (size_t)offset,
+                                 &records, &message)) {
+      [self recordReadError:message];
+    } else {
+      rows = [NSMutableArray arrayWithCapacity:records.count];
+      for (row = 0; row < records.count; row++) {
+        strappy_sidebar_record *record;
+
+        record = &records.records[row];
+        [rows addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+          [NSNumber numberWithLongLong:record->session_id], @"id",
+          [NSNumber numberWithLongLong:record->last_activity_at_ms], @"last_activity_at_ms",
+          [StrappySession stringFromCStringOrEmpty:record->name], @"name",
+          [StrappySession stringFromCStringOrEmpty:record->model_name], @"model_name",
+          @"session", @"row_type", nil]];
+      }
+      strappy_db_sidebar_page_destroy(&records);
+      /* Four 32-row pages, evicting the least recently used page. */
+      if ([pageOrder_ count] >= 4U) {
+        [pages_ removeObjectForKey:[pageOrder_ objectAtIndex:0]];
+        [pageOrder_ removeObjectAtIndex:0];
+      }
+      page = rows;
+      [pages_ setObject:page forKey:key];
+    }
+  }
+  if (page != nil) {
+    [pageOrder_ removeObject:key];
+    [pageOrder_ addObject:key];
+    if (index - offset < [page count]) return [page objectAtIndex:index - offset];
+  }
+  return [NSDictionary dictionaryWithObject:
+    NSLocalizedString(@"Could not load conversation", nil) forKey:@"name"];
+}
 @end

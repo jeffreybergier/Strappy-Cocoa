@@ -1118,6 +1118,9 @@ static int strappy_db_ensure_semantic_schema(sqlite3 *db, char **error_out)
       return 0;
     }
   }
+  if (!strappy_db_ensure_session_activity(db, error_out)) {
+    return 0;
+  }
   if (!strappy_db_validate_schema_identity(db, error_out)) {
     return 0;
   }

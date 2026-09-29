@@ -34,74 +34,11 @@ enum {
 static NSString * const kStrappySessionRowTypeKey = @"row_type";
 static NSString * const kStrappySessionRowTypeSection = @"section";
 static NSString * const kStrappySessionRowTypeSession = @"session";
-static NSString * const kStrappySessionRowTypeEmpty = @"empty";
-static NSString * const kStrappySessionPromptInFlightKey =
-  @"prompt_in_flight";
-
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED >= 101400
   #define StrappyPasteboardStringType NSPasteboardTypeString
 #else
   #define StrappyPasteboardStringType NSStringPboardType
 #endif
-
-static NSDictionary *StrappySectionRow(NSString *title)
-{
-  return [NSDictionary dictionaryWithObjectsAndKeys:
-    kStrappySessionRowTypeSection, kStrappySessionRowTypeKey,
-    (title ? title : @""), @"section_title",
-    nil];
-}
-
-static NSDictionary *StrappyEmptySessionRow(void)
-{
-  return [NSDictionary dictionaryWithObjectsAndKeys:
-    kStrappySessionRowTypeEmpty, kStrappySessionRowTypeKey,
-    NSLocalizedString(@"No conversations yet", nil), @"name",
-    NSLocalizedString(@"Create a conversation to begin.", nil), @"last_message_text",
-    nil];
-}
-
-static NSDictionary *StrappySessionDisplayRow(NSDictionary *session)
-{
-  NSMutableDictionary *row;
-  NSNumber *sessionIdentifier;
-  BOOL inFlight;
-
-  row = [NSMutableDictionary dictionaryWithDictionary:session];
-  [row setObject:kStrappySessionRowTypeSession forKey:kStrappySessionRowTypeKey];
-  sessionIdentifier = [session objectForKey:@"id"];
-  inFlight =
-    [StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier];
-  [row setObject:[NSNumber numberWithBool:inFlight]
-          forKey:kStrappySessionPromptInFlightKey];
-  return row;
-}
-
-static NSArray *StrappySessionGroupedRows(NSArray *sessions)
-{
-  NSArray *sections;
-  NSMutableArray *rows;
-  NSUInteger sectionIndex;
-
-  sections = [StrappySessionSections sectionsForSessions:sessions];
-  rows = [NSMutableArray arrayWithCapacity:[sessions count] + [sections count]];
-  for (sectionIndex = 0; sectionIndex < [sections count]; sectionIndex++) {
-    NSDictionary *section;
-    NSArray *members;
-    NSUInteger row;
-
-    section = [sections objectAtIndex:sectionIndex];
-    [rows addObject:StrappySectionRow([section objectForKey:@"title"])];
-    members = [section objectForKey:@"sessions"];
-    for (row = 0; row < [members count]; row++) {
-      [rows addObject:StrappySessionDisplayRow([members objectAtIndex:row])];
-    }
-  }
-  if ([sessions count] == 0) {
-    [rows addObject:StrappyEmptySessionRow()];
-  }
-  return rows;
-}
 
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
 {
@@ -114,34 +51,21 @@ static NSString *StrappySessionPromptPreview(NSDictionary *session)
   return NSLocalizedString(@"Untitled Session", nil);
 }
 
-static NSString *StrappyDisplayTimestamp(NSString *timestamp)
+static NSString *StrappyDisplayTimestamp(NSNumber *timestamp)
 {
-  static NSDateFormatter *inputFormatter = nil;
-  static NSDateFormatter *displayFormatter = nil;
+  static NSDateFormatter *formatter = nil;
   NSDate *date;
 
-  if (![timestamp isKindOfClass:[NSString class]] || ([timestamp length] == 0U)) {
-    return @"";
+  if (![timestamp isKindOfClass:[NSNumber class]]) return @"";
+  if (formatter == nil) {
+    formatter = [[NSDateFormatter alloc] init];
+    [formatter setFormatterBehavior:NSDateFormatterBehavior10_4];
+    [formatter setDateStyle:NSDateFormatterShortStyle];
+    [formatter setTimeStyle:NSDateFormatterShortStyle];
   }
-
-  if (inputFormatter == nil) {
-    inputFormatter = [[NSDateFormatter alloc] init];
-    [inputFormatter setFormatterBehavior:NSDateFormatterBehavior10_4];
-    [inputFormatter setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"];
-    [inputFormatter setTimeZone:[NSTimeZone timeZoneForSecondsFromGMT:0]];
-  }
-  if (displayFormatter == nil) {
-    displayFormatter = [[NSDateFormatter alloc] init];
-    [displayFormatter setFormatterBehavior:NSDateFormatterBehavior10_4];
-    [displayFormatter setDateStyle:NSDateFormatterShortStyle];
-    [displayFormatter setTimeStyle:NSDateFormatterShortStyle];
-  }
-
-  date = [inputFormatter dateFromString:timestamp];
-  if (date == nil) {
-    return timestamp;
-  }
-  return [displayFormatter stringFromDate:date];
+  [formatter setTimeZone:[NSTimeZone localTimeZone]];
+  date = [NSDate dateWithTimeIntervalSince1970:[timestamp doubleValue] / 1000.0];
+  return [formatter stringFromDate:date];
 }
 
 static NSDictionary *StrappyTextAttributes(NSFont *font,
@@ -188,11 +112,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 
 static BOOL StrappyRowIsPromptInFlight(NSDictionary *row)
 {
-  NSNumber *inFlight;
-
-  inFlight = [row objectForKey:kStrappySessionPromptInFlightKey];
-  return ([inFlight isKindOfClass:[NSNumber class]] &&
-          [inFlight boolValue]) ? YES : NO;
+  return [StrappySession isPromptInFlightForSessionIdentifier:[row objectForKey:@"id"]];
 }
 
 static CGFloat StrappyBackingScaleForView(NSView *view)
@@ -328,7 +248,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   title = StrappySessionPromptPreview(row);
   timestamp = @"";
   if ([type isEqualToString:kStrappySessionRowTypeSession]) {
-    timestamp = StrappyDisplayTimestamp([row objectForKey:@"last_message_at"]);
+    timestamp = StrappyDisplayTimestamp([row objectForKey:@"last_activity_at_ms"]);
     modelName = [row objectForKey:@"model_name"];
     if (![modelName isKindOfClass:[NSString class]]) {
       modelName = @"";
@@ -416,6 +336,7 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 @interface SessionListViewController ()
 - (void)rebuildToolbarSegmentIcons;
+- (void)sidebarReadFailed:(NSNotification *)notification;
 - (void)dateBoundariesDidChange:(NSNotification *)notification;
 - (void)updateToolbarSegments;
 - (NSDictionary *)selectedSessionRow;
@@ -507,6 +428,8 @@ static void StrappyDrawTintedImage(NSImage *image,
   [[NSNotificationCenter defaultCenter] addObserver:self
     selector:@selector(dateBoundariesDidChange:)
     name:StrappySessionDateBoundariesDidChangeNotification object:nil];
+  [[NSNotificationCenter defaultCenter] addObserver:self
+    selector:@selector(sidebarReadFailed:) name:StrappySessionListReadFailedNotification object:nil];
   [StrappySessionSections startMidnightTimer];
   [self reloadData];
   [tableView_ sizeLastColumnToFit];
@@ -681,23 +604,9 @@ static void StrappyDrawTintedImage(NSImage *image,
 
   {
     NSInteger row;
-    NSMutableArray *mutableRows;
-    NSMutableDictionary *displayRow;
-
     row = [self rowForSessionIdentifier:identifier];
-    if (row < 0) {
-      return;
-    }
-    mutableRows = [[rows_ mutableCopy] autorelease];
-    displayRow = [NSMutableDictionary dictionaryWithDictionary:
-      [mutableRows objectAtIndex:(NSUInteger)row]];
-    [displayRow setObject:[NSNumber numberWithBool:
-      [StrappySession isPromptInFlightForSessionIdentifier:identifier]]
-                   forKey:kStrappySessionPromptInFlightKey];
-    [mutableRows replaceObjectAtIndex:(NSUInteger)row withObject:displayRow];
-    [rows_ release];
-    rows_ = [mutableRows copy];
-    [tableView_ reloadData];
+    if (row < 0) return;
+    [tableView_ setNeedsDisplayInRect:[tableView_ rectOfRow:row]];
     [self updateToolbarSegments];
   }
 }
@@ -728,7 +637,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   if (delegate_ != nil) {
     if ([type isEqualToString:kStrappySessionRowTypeSession]) {
       [delegate_ sessionListViewController:self
-                          didSelectSession:[StrappySession sessionWithSummary:session]];
+                          didSelectSession:[StrappySession sessionWithIdentifier:[session objectForKey:@"id"]]];
     }
   }
   [self updateToolbarSegments];
@@ -738,155 +647,73 @@ static void StrappyDrawTintedImage(NSImage *image,
 {
   NSUInteger index;
 
-  if (sessionIdentifier == nil) {
-    return -1;
-  }
-
-  for (index = 0U; index < [rows_ count]; index++) {
-    NSDictionary *session = [rows_ objectAtIndex:index];
-    NSNumber *candidate = [session objectForKey:@"id"];
-    if ([candidate isKindOfClass:[NSNumber class]] &&
-        [candidate isEqualToNumber:sessionIdentifier]) {
-      return (NSInteger)index;
-    }
-  }
-
-  return -1;
+  index = [rows_ indexForSessionIdentifier:sessionIdentifier];
+  return rows_ == nil || index == NSNotFound ? -1 : (NSInteger)index;
 }
 
 - (void)reloadData
 {
   NSError *error;
-  NSArray *sessions;
-  NSInteger row;
+  StrappySessionRows *sessions;
+  NSArray *sections;
+  StrappySessionTableRows *rows;
 
   error = nil;
-  sessions = [StrappySession sessionSummariesWithError:&error];
-  if (sessions == nil) {
-    sessions = [NSArray array];
+  sessions = [StrappySession sidebarRowsWithError:&error];
+  sections = sessions != nil ? [StrappySessionSections sectionsForSessions:sessions] : nil;
+  if (sections == nil) {
+    [self showError:error != nil ? error : [sessions readError]
+              title:NSLocalizedString(@"Could not load conversations", nil)
+    fallbackMessage:NSLocalizedString(@"Could not load conversations", nil)];
+    return;
   }
-
+  rows = [[StrappySessionTableRows alloc] initWithSessions:sessions sections:sections];
   [rows_ release];
-  rows_ = [StrappySessionGroupedRows(sessions) copy];
-  suppressSelectionNotification_ = YES;
-  [tableView_ reloadData];
-  suppressSelectionNotification_ = NO;
-
-  row = [self rowForSessionIdentifier:selectedSessionId_];
-
-  if (row >= 0) {
-    suppressSelectionNotification_ = YES;
-    [tableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
-             byExtendingSelection:NO];
-    suppressSelectionNotification_ = NO;
-    [tableView_ scrollRowToVisible:row];
-  } else {
-    [tableView_ deselectAll:self];
-    [self notifySelectedSession];
-  }
-  [self updateToolbarSegments];
-}
-
-- (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier select:(BOOL)select
-{
-  NSError *error;
-  NSDictionary *summary;
-
-  if (sessionIdentifier == nil) {
-    [self reloadData];
-    return;
-  }
-
-  error = nil;
-  summary =
-    [StrappySession sessionListSummaryForSessionIdentifier:sessionIdentifier
-                                                     error:&error];
-  if (summary == nil) {
-    [self reloadData];
-    return;
-  }
-
-  [self applySessionSummary:summary select:select];
-}
-
-- (void)applySessionSummary:(NSDictionary *)summary select:(BOOL)select
-{
-  NSNumber *sessionIdentifier;
-  NSMutableArray *summaries;
-  NSArray *sortDescriptors;
-  NSUInteger index;
-  BOOL replaced;
-
-  if (![summary isKindOfClass:[NSDictionary class]]) {
-    return;
-  }
-  sessionIdentifier = [summary objectForKey:@"id"];
-  if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
-    return;
-  }
-
-  if (select) {
-    [selectedSessionId_ release];
-    selectedSessionId_ = [sessionIdentifier retain];
-  }
-
-  summaries = [NSMutableArray array];
-  replaced = NO;
-  for (index = 0U; index < [rows_ count]; index++) {
-    NSDictionary *candidate;
-    NSNumber *candidateId;
-
-    candidate = [rows_ objectAtIndex:index];
-    if (![[candidate objectForKey:kStrappySessionRowTypeKey]
-           isEqualToString:kStrappySessionRowTypeSession]) {
-      continue;
-    }
-    candidateId = [candidate objectForKey:@"id"];
-    if ([candidateId isEqualToNumber:sessionIdentifier]) {
-      [summaries addObject:summary];
-      replaced = YES;
-    } else {
-      [summaries addObject:candidate];
-    }
-  }
-  if (!replaced) {
-    [summaries addObject:summary];
-  }
-  sortDescriptors = [NSArray arrayWithObjects:
-    [[[NSSortDescriptor alloc] initWithKey:@"last_activity_at_ms"
-                                 ascending:NO] autorelease],
-    [[[NSSortDescriptor alloc] initWithKey:@"id"
-                                 ascending:NO] autorelease],
-    nil];
-  [summaries sortUsingDescriptors:sortDescriptors];
-
-  [rows_ release];
-  rows_ = [StrappySessionGroupedRows(summaries) copy];
+  rows_ = rows;
+  [sessionRows_ release];
+  sessionRows_ = [sessions retain];
   suppressSelectionNotification_ = YES;
   [tableView_ reloadData];
   suppressSelectionNotification_ = NO;
   [self selectSessionIdentifier:selectedSessionId_];
+  if ([self rowForSessionIdentifier:selectedSessionId_] < 0) [self notifySelectedSession];
   [self updateToolbarSegments];
+}
+
+- (void)sidebarReadFailed:(NSNotification *)notification
+{
+  if ([notification object] == sessionRows_) {
+    [self showError:[[notification userInfo] objectForKey:@"error"]
+              title:NSLocalizedString(@"Could not load conversations", nil)
+    fallbackMessage:NSLocalizedString(@"Could not load conversations", nil)];
+  }
+}
+
+- (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier select:(BOOL)select
+{
+  if (select && selectedSessionId_ != sessionIdentifier) {
+    [selectedSessionId_ release];
+    selectedSessionId_ = [sessionIdentifier retain];
+  }
+  [self reloadData];
+}
+
+- (void)applySessionSummary:(NSDictionary *)summary select:(BOOL)select
+{
+  [self reloadSessionIdentifier:[summary objectForKey:@"id"] select:select];
 }
 
 - (void)dateBoundariesDidChange:(NSNotification *)notification
 {
-  NSMutableArray *sessions;
-  NSUInteger index;
+  NSArray *sections;
+  StrappySessionTableRows *rows;
 
   (void)notification;
-  sessions = [NSMutableArray array];
-  for (index = 0; index < [rows_ count]; index++) {
-    NSDictionary *row;
-
-    row = [rows_ objectAtIndex:index];
-    if ([[row objectForKey:kStrappySessionRowTypeKey]
-          isEqualToString:kStrappySessionRowTypeSession]) {
-      [sessions addObject:row];
-    }
-  }
+  sections = [StrappySessionSections sectionsForSessions:sessionRows_];
+  if (sections == nil) return;
+  rows = [[StrappySessionTableRows alloc] initWithSessions:sessionRows_ sections:sections];
   [rows_ release];
-  rows_ = [StrappySessionGroupedRows(sessions) copy];
+  rows_ = rows;
   suppressSelectionNotification_ = YES;
   [tableView_ reloadData];
   suppressSelectionNotification_ = NO;
@@ -1167,40 +994,21 @@ static void StrappyDrawTintedImage(NSImage *image,
       (NSUInteger)row >= [rows_ count]) {
     return NO;
   }
-  return [[[rows_ objectAtIndex:(NSUInteger)row]
-    objectForKey:kStrappySessionRowTypeKey] isEqualToString:kStrappySessionRowTypeSection];
+  return [rows_ isSectionAtIndex:(NSUInteger)row];
 }
 
 - (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row
 {
-  NSDictionary *rowData;
-
   (void)tableView;
-  if ((row < 0) || (row >= (NSInteger)[rows_ count])) {
-    return kStrappySessionRowHeight;
-  }
-
-  rowData = [rows_ objectAtIndex:(NSUInteger)row];
-  if ([[rowData objectForKey:kStrappySessionRowTypeKey]
-        isEqualToString:kStrappySessionRowTypeSection]) {
-    return kStrappySectionRowHeight;
-  }
-  return kStrappySessionRowHeight;
+  return row >= 0 && [rows_ isSectionAtIndex:(NSUInteger)row]
+    ? kStrappySectionRowHeight : kStrappySessionRowHeight;
 }
 
 - (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row
 {
-  NSDictionary *rowData;
-  NSString *type;
-
   (void)tableView;
-  if ((row < 0) || (row >= (NSInteger)[rows_ count])) {
-    return NO;
-  }
-
-  rowData = [rows_ objectAtIndex:(NSUInteger)row];
-  type = [rowData objectForKey:kStrappySessionRowTypeKey];
-  return [type isEqualToString:kStrappySessionRowTypeSession] ? YES : NO;
+  return row >= 0 && (NSUInteger)row < [rows_ count] && [sessionRows_ count] > 0 &&
+    ![rows_ isSectionAtIndex:(NSUInteger)row];
 }
 
 - (void)tableViewSelectionDidChange:(NSNotification *)notification
@@ -1307,6 +1115,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   [toolbarView_ release];
   [toolbarSegmented_ release];
   [rows_ release];
+  [sessionRows_ release];
   [selectedSessionId_ release];
   [super dealloc];
 }

@@ -12,6 +12,34 @@
 extern "C" {
 #endif
 
+/* Sidebar snapshots are independent read-only connections. Use on one thread,
+ * close/reopen after writes, and never share a snapshot with the writer. */
+#define STRAPPY_SIDEBAR_PAGE_SIZE 32U
+typedef struct strappy_session_reader strappy_session_reader;
+typedef struct strappy_sidebar_record {
+  long long session_id;
+  long long last_activity_at_ms;
+  char *name;
+  char *model_name;
+} strappy_sidebar_record;
+typedef struct strappy_sidebar_page {
+  strappy_sidebar_record records[STRAPPY_SIDEBAR_PAGE_SIZE];
+  size_t count;
+} strappy_sidebar_page;
+int strappy_db_sidebar_open(const char *path, strappy_session_reader **out,
+                            char **error_out);
+void strappy_db_sidebar_close(strappy_session_reader *reader);
+size_t strappy_db_sidebar_count(const strappy_session_reader *reader);
+int strappy_db_sidebar_count_since(strappy_session_reader *reader, long long timestamp,
+                                   size_t *count, char **error_out);
+int strappy_db_sidebar_index(strappy_session_reader *reader, long long session_id,
+                             size_t *index, char **error_out);
+int strappy_db_sidebar_read(strappy_session_reader *reader, size_t offset,
+                            strappy_sidebar_page *page, char **error_out);
+void strappy_db_sidebar_page_destroy(strappy_sidebar_page *page);
+/* Cumulative reader work, for regression tests and local profiling. */
+unsigned long long strappy_db_sidebar_steps(const strappy_session_reader *reader);
+
 typedef struct strappy_session_record {
   long long session_id;
   char *name;

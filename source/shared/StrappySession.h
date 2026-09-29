@@ -1,4 +1,21 @@
 #import <Foundation/Foundation.h>
+#import "StrappySessionSections.h"
+
+extern NSString * const StrappySessionListReadFailedNotification;
+
+/* Main-thread, immutable DB snapshot with a bounded cache of sidebar rows. */
+@interface StrappySessionRows : NSArray <StrappySessionListSource> {
+ @private
+  void *reader_;
+  NSMutableDictionary *pages_;
+  NSMutableArray *pageOrder_;
+  NSError *readError_;
+}
+- (id)initWithDatabasePath:(NSString *)path error:(NSError **)error;
+- (NSUInteger)countSinceTimestamp:(long long)timestamp;
+- (NSUInteger)indexForSessionIdentifier:(NSNumber *)identifier;
+- (NSError *)readError;
+@end
 
 extern NSString * const StrappySessionDidUpdateNotification;
 extern NSString * const StrappySessionPromptDidStartNotification;
@@ -187,6 +204,7 @@ enum {
 + (BOOL)isPromptInFlightForSessionIdentifier:(NSNumber *)sessionIdentifier;
 + (BOOL)isModelCatalogRefreshInFlight;
 + (NSArray *)sessionSummariesWithError:(NSError **)error;
++ (StrappySessionRows *)sidebarRowsWithError:(NSError **)error;
 + (NSDictionary *)sessionListSummaryForSessionIdentifier:
     (NSNumber *)sessionIdentifier error:(NSError **)error;
 + (NSDictionary *)sessionSummaryForSessionIdentifier:(NSNumber *)sessionIdentifier

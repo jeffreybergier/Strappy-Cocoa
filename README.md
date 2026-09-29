@@ -103,6 +103,15 @@ flowchart TB
    To keep C code out of the Objective-C code, these files are the only
    Objective-C files that can import the C "backend"
 - Linux test suite runs in the docker container and tests the C "backend"
+- Session sidebars read a consistent SQLite snapshot, fetch 32 lightweight
+  summaries per page, and cache at most 128 summaries. Date sections store
+  ranges rather than copies of every session. The `session_activity` table is
+  populated once for existing histories and maintained transactionally by
+  triggers; activity follows the last conversation item by sequence, falling
+  back to creation time. Renaming or changing options does not move a session.
+  The offline `sidebar_harness` tests ordering, snapshot isolation, backfill,
+  cascades, and indexed paging with 20,000 sessions, and prints a local timing
+  comparison against the eager loader (which also benefits from the new index).
 - `make -C source/linux session-sections-test` checks session date grouping,
   calendar boundaries, daylight-saving transitions, and the Tiger calendar
   fallback. This optional Foundation harness requires `libgnustep-base-dev`

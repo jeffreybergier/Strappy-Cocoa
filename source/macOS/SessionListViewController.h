@@ -4,6 +4,8 @@
 
 @class SessionListViewController;
 @class StrappySession;
+@class StrappySessionRows;
+@class StrappySessionTableRows;
 
 @protocol SessionListViewControllerDelegate
 - (void)sessionListViewController:(SessionListViewController *)controller
@@ -17,7 +19,8 @@
   NSTableView  *tableView_;
   NSView       *toolbarView_;
   NSSegmentedControl *toolbarSegmented_;
-  NSArray      *rows_;
+  StrappySessionTableRows *rows_;
+  StrappySessionRows *sessionRows_;
   NSNumber     *selectedSessionId_;
   id<SessionListViewControllerDelegate> delegate_;
   BOOL          suppressSelectionNotification_;

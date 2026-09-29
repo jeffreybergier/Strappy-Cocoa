@@ -490,3 +490,5 @@
 "This Month" = "今月";
 "This Year" = "今年";
 "Older" = "それ以前";
+"Could not load conversation" = "会話を読み込めませんでした";
+"Could not load conversations" = "会話一覧を読み込めませんでした";

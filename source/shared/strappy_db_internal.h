@@ -48,6 +48,7 @@ int strappy_db_exec(sqlite3 *db,
                     const char *error_prefix,
                     char **error_out);
 int strappy_db_ensure_schema(sqlite3 *db, char **error_out);
+int strappy_db_ensure_session_activity(sqlite3 *db, char **error_out);
 void strappy_db_sql_buffer_destroy(strappy_db_sql_buffer *buffer);
 int strappy_db_sql_buffer_append(strappy_db_sql_buffer *buffer,
                                  const char *text);
