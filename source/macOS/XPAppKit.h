@@ -185,6 +185,7 @@
 #define XPTableViewStyleSourceList 3
 
 @interface NSTableView (XPAppKit)
+- (BOOL)XP_supportsGroupRows;
 - (void)XP_setFloatsGroupRows:(BOOL)floats;
 - (void)XP_setSourceListStyle;
 @end

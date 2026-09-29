@@ -485,3 +485,8 @@
 "The credential for \"%@\" will be removed. Existing conversations and history will be preserved, but they cannot send new requests with this account." = "The credential for \"%@\" will be removed. Existing conversations and history will be preserved, but they cannot send new requests with this account.";
 "Wait for active requests before deleting this account." = "Wait for active requests before deleting this account.";
 "https://example.com/v1/responses" = "https://example.com/v1/responses";
+"Today" = "Today";
+"This Week" = "This Week";
+"This Month" = "This Month";
+"This Year" = "This Year";
+"Older" = "Older";

@@ -103,6 +103,10 @@ flowchart TB
    To keep C code out of the Objective-C code, these files are the only
    Objective-C files that can import the C "backend"
 - Linux test suite runs in the docker container and tests the C "backend"
+- `make -C source/linux session-sections-test` checks session date grouping,
+  calendar boundaries, daylight-saving transitions, and the Tiger calendar
+  fallback. This optional Foundation harness requires `libgnustep-base-dev`
+  and an Objective-C compiler on Linux.
 
 ### Warning Flags
 

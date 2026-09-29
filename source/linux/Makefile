@@ -364,3 +364,15 @@ $(CALENDAR_HARNESS): $(CALENDAR_HARNESS_SOURCES) | $(BUILD_DIR)
 
 clean:
 	rm -rf $(BUILD_DIR) $(TEST_DIR) database_query_harness webview_harness responses_harness
+
+# Optional Foundation tests; install libgnustep-base-dev and an Objective-C
+# compiler on Linux. Keep this dependency separate from the portable C suite.
+GNUSTEP_OBJC ?= gcc
+.PHONY: session-sections-test
+session-sections-test:
+	@mkdir -p $(BUILD_DIR)
+	$(GNUSTEP_OBJC) $$(gnustep-config --objc-flags) -std=gnu99 -I$(SHARED_DIR) \
+		session_sections_harness.m $(SHARED_DIR)/StrappySessionSections.m \
+		$(SHARED_DIR)/XPFoundationCalendar.m -o $(BUILD_DIR)/session_sections_harness \
+		$$(gnustep-config --base-libs)
+	$(BUILD_DIR)/session_sections_harness

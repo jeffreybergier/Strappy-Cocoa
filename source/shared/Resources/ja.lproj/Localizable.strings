@@ -485,3 +485,8 @@
 "The credential for \"%@\" will be removed. Existing conversations and history will be preserved, but they cannot send new requests with this account." = "\"%@\"の認証情報を削除します。既存の会話と履歴は保持されますが、このアカウントで新しいリクエストを送信できなくなります。";
 "Wait for active requests before deleting this account." = "進行中のリクエストが完了してから、このアカウントを削除してください。";
 "https://example.com/v1/responses" = "https://example.com/v1/responses";
+"Today" = "今日";
+"This Week" = "今週";
+"This Month" = "今月";
+"This Year" = "今年";
+"Older" = "それ以前";

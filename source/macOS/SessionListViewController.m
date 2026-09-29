@@ -2,6 +2,7 @@
 #import "AIFontAwesome.h"
 #import "StrappyBottomToolbarView.h"
 #import "StrappySession.h"
+#import "StrappySessionSections.h"
 #import "XPFoundation.h"
 
 static const CGFloat kStrappySessionRowHeight = 68.0;
@@ -74,6 +75,32 @@ static NSDictionary *StrappySessionDisplayRow(NSDictionary *session)
   [row setObject:[NSNumber numberWithBool:inFlight]
           forKey:kStrappySessionPromptInFlightKey];
   return row;
+}
+
+static NSArray *StrappySessionGroupedRows(NSArray *sessions)
+{
+  NSArray *sections;
+  NSMutableArray *rows;
+  NSUInteger sectionIndex;
+
+  sections = [StrappySessionSections sectionsForSessions:sessions];
+  rows = [NSMutableArray arrayWithCapacity:[sessions count] + [sections count]];
+  for (sectionIndex = 0; sectionIndex < [sections count]; sectionIndex++) {
+    NSDictionary *section;
+    NSArray *members;
+    NSUInteger row;
+
+    section = [sections objectAtIndex:sectionIndex];
+    [rows addObject:StrappySectionRow([section objectForKey:@"title"])];
+    members = [section objectForKey:@"sessions"];
+    for (row = 0; row < [members count]; row++) {
+      [rows addObject:StrappySessionDisplayRow([members objectAtIndex:row])];
+    }
+  }
+  if ([sessions count] == 0) {
+    [rows addObject:StrappyEmptySessionRow()];
+  }
+  return rows;
 }
 
 static NSString *StrappySessionPromptPreview(NSDictionary *session)
@@ -389,6 +416,7 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 @interface SessionListViewController ()
 - (void)rebuildToolbarSegmentIcons;
+- (void)dateBoundariesDidChange:(NSNotification *)notification;
 - (void)updateToolbarSegments;
 - (NSDictionary *)selectedSessionRow;
 - (NSInteger)rowForSessionIdentifier:(NSNumber *)sessionIdentifier;
@@ -476,6 +504,10 @@ static void StrappyDrawTintedImage(NSImage *image,
   [self rebuildToolbarSegmentIcons];
   [toolbarView_ addSubview:toolbarSegmented_];
 
+  [[NSNotificationCenter defaultCenter] addObserver:self
+    selector:@selector(dateBoundariesDidChange:)
+    name:StrappySessionDateBoundariesDidChangeNotification object:nil];
+  [StrappySessionSections startMidnightTimer];
   [self reloadData];
   [tableView_ sizeLastColumnToFit];
   [self layoutSidebarViews];
@@ -726,9 +758,7 @@ static void StrappyDrawTintedImage(NSImage *image,
 {
   NSError *error;
   NSArray *sessions;
-  NSMutableArray *displayRows;
   NSInteger row;
-  NSUInteger index;
 
   error = nil;
   sessions = [StrappySession sessionSummariesWithError:&error];
@@ -736,19 +766,11 @@ static void StrappyDrawTintedImage(NSImage *image,
     sessions = [NSArray array];
   }
 
-  displayRows = [NSMutableArray arrayWithCapacity:[sessions count] + 1U];
-  [displayRows addObject:StrappySectionRow(NSLocalizedString(@"Conversations", nil))];
-  if ([sessions count] == 0U) {
-    [displayRows addObject:StrappyEmptySessionRow()];
-  } else {
-    for (index = 0U; index < [sessions count]; index++) {
-      [displayRows addObject:StrappySessionDisplayRow([sessions objectAtIndex:index])];
-    }
-  }
-
   [rows_ release];
-  rows_ = [displayRows copy];
+  rows_ = [StrappySessionGroupedRows(sessions) copy];
+  suppressSelectionNotification_ = YES;
   [tableView_ reloadData];
+  suppressSelectionNotification_ = NO;
 
   row = [self rowForSessionIdentifier:selectedSessionId_];
 
@@ -791,7 +813,6 @@ static void StrappyDrawTintedImage(NSImage *image,
 {
   NSNumber *sessionIdentifier;
   NSMutableArray *summaries;
-  NSMutableArray *displayRows;
   NSArray *sortDescriptors;
   NSUInteger index;
   BOOL replaced;
@@ -839,19 +860,37 @@ static void StrappyDrawTintedImage(NSImage *image,
     nil];
   [summaries sortUsingDescriptors:sortDescriptors];
 
-  displayRows = [NSMutableArray arrayWithCapacity:[summaries count] + 1U];
-  [displayRows addObject:
-    StrappySectionRow(NSLocalizedString(@"Conversations", nil))];
-  for (index = 0U; index < [summaries count]; index++) {
-    [displayRows addObject:
-      StrappySessionDisplayRow([summaries objectAtIndex:index])];
-  }
-
   [rows_ release];
-  rows_ = [displayRows copy];
+  rows_ = [StrappySessionGroupedRows(summaries) copy];
+  suppressSelectionNotification_ = YES;
   [tableView_ reloadData];
+  suppressSelectionNotification_ = NO;
   [self selectSessionIdentifier:selectedSessionId_];
   [self updateToolbarSegments];
+}
+
+- (void)dateBoundariesDidChange:(NSNotification *)notification
+{
+  NSMutableArray *sessions;
+  NSUInteger index;
+
+  (void)notification;
+  sessions = [NSMutableArray array];
+  for (index = 0; index < [rows_ count]; index++) {
+    NSDictionary *row;
+
+    row = [rows_ objectAtIndex:index];
+    if ([[row objectForKey:kStrappySessionRowTypeKey]
+          isEqualToString:kStrappySessionRowTypeSession]) {
+      [sessions addObject:row];
+    }
+  }
+  [rows_ release];
+  rows_ = [StrappySessionGroupedRows(sessions) copy];
+  suppressSelectionNotification_ = YES;
+  [tableView_ reloadData];
+  suppressSelectionNotification_ = NO;
+  [self selectSessionIdentifier:selectedSessionId_];
 }
 
 - (void)selectSessionIdentifier:(NSNumber *)sessionIdentifier
@@ -1120,6 +1159,16 @@ static void StrappyDrawTintedImage(NSImage *image,
     return nil;
   }
   return [rows_ objectAtIndex:(NSUInteger)row];
+}
+
+- (BOOL)tableView:(NSTableView *)tableView isGroupRow:(NSInteger)row
+{
+  if (![tableView XP_supportsGroupRows] || row < 0 ||
+      (NSUInteger)row >= [rows_ count]) {
+    return NO;
+  }
+  return [[[rows_ objectAtIndex:(NSUInteger)row]
+    objectForKey:kStrappySessionRowTypeKey] isEqualToString:kStrappySessionRowTypeSection];
 }
 
 - (CGFloat)tableView:(NSTableView *)tableView heightOfRow:(NSInteger)row

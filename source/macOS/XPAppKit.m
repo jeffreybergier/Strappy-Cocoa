@@ -588,6 +588,14 @@ static id XPAppKitLegacyWebFrameViewForView(NSView *view)
 
 @implementation NSTableView (XPAppKit)
 
+- (BOOL)XP_supportsGroupRows
+{
+  /* Source-list highlighting and delegate group rows both arrived in 10.5.
+   * Floating rows arrived later, so they cannot identify Leopard support. */
+  return [self respondsToSelector:@selector(setSelectionHighlightStyle:)];
+}
+
+
 - (void)XP_setFloatsGroupRows:(BOOL)floats
 {
   if (AICCCurrentTier() < AICCTierMiddle) {

@@ -15,6 +15,29 @@ typedef enum XPPlatformFamily {
   XPPlatformFamilyMacOS = 2
 } XPPlatformFamily;
 
+/* Preserve the original unit values on every SDK. In particular, the newer
+ * week-of-year bit is unavailable on iOS 4 and Tiger. Only the SDK names are
+ * deprecated; suppress their declaration warnings inside this boundary. */
+#if defined(__clang__)
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+enum {
+  XPCalendarUnitEra = NSEraCalendarUnit,
+  XPCalendarUnitDay = NSDayCalendarUnit,
+  XPCalendarUnitWeek = NSWeekCalendarUnit,
+  XPCalendarUnitWeekday = NSWeekdayCalendarUnit,
+  XPCalendarUnitMonth = NSMonthCalendarUnit,
+  XPCalendarUnitYear = NSYearCalendarUnit
+};
+#if defined(__clang__)
+  #pragma clang diagnostic pop
+#endif
+
+@interface NSCalendar (XPFoundation)
+- (NSDate *)XP_startOfUnit:(NSCalendarUnit)unit forDate:(NSDate *)date;
+@end
+
 @interface NSProcessInfo (XPFoundation)
 
 /* Keep build-target platform checks inside the compatibility layer. */

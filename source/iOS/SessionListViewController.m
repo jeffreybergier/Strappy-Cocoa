@@ -4,6 +4,7 @@
 #import "PreferencesTableViewController.h"
 #import "StrappyActivityAccessoryView.h"
 #import "StrappySession.h"
+#import "StrappySessionSections.h"
 #import "XPFoundation.h"
 #import "XPUIKit.h"
 
@@ -83,11 +84,14 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
 @interface SessionListViewController () <UIAlertViewDelegate>
 @property (nonatomic, copy) NSArray *sessions;
+@property (nonatomic, copy) NSArray *sections;
 @property (nonatomic, copy) NSNumber *selectedSessionId;
 @property (nonatomic, strong) UIBarButtonItem *addButton;
 @property (nonatomic, strong) UIBarButtonItem *settingsButton;
 @property (nonatomic, copy) NSNumber *pendingDeleteSessionIdentifier;
 @property (nonatomic, assign) BOOL creatingSession;
+- (BOOL)rebuildSections;
+- (void)dateBoundariesDidChange:(NSNotification *)notification;
 - (void)strappySessionDidUpdate:(NSNotification *)notification;
 - (void)applySessionSummary:(NSDictionary *)summary select:(BOOL)select;
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification;
@@ -160,6 +164,9 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
            name:StrappySessionPromptDidFinishNotification
          object:nil];
 
+  [[NSNotificationCenter defaultCenter] addObserver:self
+    selector:@selector(dateBoundariesDidChange:)
+    name:UIApplicationSignificantTimeChangeNotification object:nil];
   [self reloadData];
 }
 
@@ -204,8 +211,40 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
     self.sessions = sessions;
   }
 
-  [self.tableView reloadData];
-  [self selectSessionIdentifier:self.selectedSessionId];
+  [self rebuildSections];
+  [[self tableView] reloadData];
+  [self selectSessionIdentifier:[self selectedSessionId]];
+}
+
+- (BOOL)rebuildSections
+{
+  NSArray *sections;
+  BOOL sameStructure;
+  NSUInteger index;
+
+  sections = [StrappySessionSections sectionsForSessions:[self sessions]];
+  sameStructure = ([sections count] == [[self sections] count]);
+  for (index = 0; sameStructure && index < [sections count]; index++) {
+    NSDictionary *oldSection;
+    NSDictionary *newSection;
+
+    oldSection = [[self sections] objectAtIndex:index];
+    newSection = [sections objectAtIndex:index];
+    sameStructure = [[oldSection objectForKey:@"title"]
+      isEqual:[newSection objectForKey:@"title"]] &&
+      [[oldSection objectForKey:@"sessions"] count] ==
+      [[newSection objectForKey:@"sessions"] count];
+  }
+  [self setSections:sections];
+  return sameStructure;
+}
+
+- (void)dateBoundariesDidChange:(NSNotification *)notification
+{
+  (void)notification;
+  [self rebuildSections];
+  [[self tableView] reloadData];
+  [self selectSessionIdentifier:[self selectedSessionId]];
 }
 
 - (void)reloadSessionIdentifier:(NSNumber *)sessionIdentifier
@@ -238,6 +277,9 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   NSArray *sortDescriptors;
   NSIndexPath *oldIndexPath;
   NSIndexPath *newIndexPath;
+  NSUInteger index;
+  BOOL replaced;
+  BOOL sameStructure;
 
   if (![summary isKindOfClass:[NSDictionary class]]) {
     return;
@@ -252,10 +294,16 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
   oldIndexPath = [self indexPathForSessionIdentifier:sessionIdentifier];
   mutableSessions = [NSMutableArray arrayWithArray:[self sessions]];
-  if (oldIndexPath != nil) {
-    [mutableSessions replaceObjectAtIndex:(NSUInteger)[oldIndexPath row]
-                               withObject:summary];
-  } else {
+  replaced = NO;
+  for (index = 0; index < [mutableSessions count]; index++) {
+    if ([[[mutableSessions objectAtIndex:index] objectForKey:@"id"]
+          isEqual:sessionIdentifier]) {
+      [mutableSessions replaceObjectAtIndex:index withObject:summary];
+      replaced = YES;
+      break;
+    }
+  }
+  if (!replaced) {
     [mutableSessions addObject:summary];
   }
   sortDescriptors = [NSArray arrayWithObjects:
@@ -265,8 +313,9 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
                                   ascending:NO],
     nil];
   [self setSessions:[mutableSessions sortedArrayUsingDescriptors:sortDescriptors]];
+  sameStructure = [self rebuildSections];
   newIndexPath = [self indexPathForSessionIdentifier:sessionIdentifier];
-  if ((oldIndexPath != nil) && [oldIndexPath isEqual:newIndexPath]) {
+  if (sameStructure && (oldIndexPath != nil) && [oldIndexPath isEqual:newIndexPath]) {
     [[self tableView] reloadRowsAtIndexPaths:
       [NSArray arrayWithObject:newIndexPath]
                               withRowAnimation:UITableViewRowAnimationNone];
@@ -287,15 +336,17 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
     return nil;
   }
 
-  for (index = 0U; index < [self.sessions count]; index++) {
-    NSDictionary *session;
-    NSNumber *candidate;
+  for (index = 0U; index < [[self sections] count]; index++) {
+    NSArray *sessions;
+    NSUInteger row;
 
-    session = [self.sessions objectAtIndex:index];
-    candidate = [session objectForKey:@"id"];
-    if ([candidate isKindOfClass:[NSNumber class]] &&
-        [candidate isEqualToNumber:sessionIdentifier]) {
-      return [NSIndexPath indexPathForRow:(NSInteger)index inSection:0];
+    sessions = [[[self sections] objectAtIndex:index] objectForKey:@"sessions"];
+    for (row = 0; row < [sessions count]; row++) {
+      if ([[[sessions objectAtIndex:row] objectForKey:@"id"]
+            isEqual:sessionIdentifier]) {
+        return [NSIndexPath indexPathForRow:(NSInteger)row
+                                 inSection:(NSInteger)index];
+      }
     }
   }
   return nil;
@@ -418,16 +469,20 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
 - (NSDictionary *)sessionAtIndexPath:(NSIndexPath *)indexPath
 {
+  NSArray *sessions;
+  NSUInteger section;
   NSUInteger row;
 
-  if ((indexPath == nil) || (indexPath.section != 0)) {
+  if (indexPath == nil) {
     return nil;
   }
-  row = (NSUInteger)indexPath.row;
-  if (row >= [self.sessions count]) {
+  section = (NSUInteger)[indexPath section];
+  row = (NSUInteger)[indexPath row];
+  if (section >= [[self sections] count]) {
     return nil;
   }
-  return [self.sessions objectAtIndex:row];
+  sessions = [[[self sections] objectAtIndex:section] objectForKey:@"sessions"];
+  return (row < [sessions count]) ? [sessions objectAtIndex:row] : nil;
 }
 
 - (BOOL)canDeleteSession:(NSDictionary *)session
@@ -575,25 +630,28 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
   (void)tableView;
-  return 1;
+  return (NSInteger)[[self sections] count];
 }
 
 - (NSInteger)tableView:(UITableView *)tableView
  numberOfRowsInSection:(NSInteger)section
 {
   (void)tableView;
-  if (section != 0) {
+  if ((section < 0) || ((NSUInteger)section >= [[self sections] count])) {
     return 0;
   }
-  return (NSInteger)[self.sessions count];
+  return (NSInteger)[[[[self sections] objectAtIndex:(NSUInteger)section]
+    objectForKey:@"sessions"] count];
 }
 
 - (NSString *)tableView:(UITableView *)tableView
 titleForHeaderInSection:(NSInteger)section
 {
   (void)tableView;
-  (void)section;
-  return nil;
+  if ((section < 0) || ((NSUInteger)section >= [[self sections] count])) {
+    return nil;
+  }
+  return [[[self sections] objectAtIndex:(NSUInteger)section] objectForKey:@"title"];
 }
 
 - (UITableViewCell *)tableView:(UITableView *)tableView
