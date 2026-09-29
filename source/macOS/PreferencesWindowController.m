@@ -166,22 +166,6 @@ static NSString *StrappyModelProviderDisplayName(NSString *providerId)
     NSLocalizedString(@"Other", nil);
 }
 
-static NSString *StrappyDatabaseBundleIdentifierForRow(NSDictionary *row)
-{
-  NSString *bundleIdentifier;
-
-  bundleIdentifier = [row objectForKey:@"app_bundle_id"];
-  return ([bundleIdentifier isKindOfClass:[NSString class]] &&
-          ([bundleIdentifier length] > 0U)) ? bundleIdentifier : @"";
-}
-
-static BOOL StrappyDatabaseRowAllowedValue(NSDictionary *row)
-{
-  NSString *decision;
-
-  decision = [row objectForKey:@"user_decision"];
-  return [decision isEqualToString:@"allowed"];
-}
 
 static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
 {
@@ -510,8 +494,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)sortAllModelRows;
 - (NSString *)selectedModelTableRowIdentifier;
 - (void)selectModelTableRowWithIdentifier:(NSString *)modelIdentifier;
-- (NSArray *)selectedDatabaseTableRowPaths;
-- (void)selectDatabaseTableRowsWithPaths:(NSArray *)paths;
+- (NSArray *)selectedDatabaseTableRowIdentifiers;
+- (void)selectDatabaseTableRowsWithIdentifiers:(NSArray *)identifiers;
 - (void)modelSearchChanged:(id)sender;
 - (void)modelSearchTextDidChange:(NSNotification *)notification;
 - (void)setModelCatalogRefreshing:(BOOL)refreshing;
@@ -521,8 +505,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)providerAccountsDidChange:(NSNotification *)notification;
 - (void)modelProviderEditorDidClose:(id)editor;
 - (NSString *)currentDatabaseSearchText;
-- (NSArray *)databaseRows:(NSArray *)rows
-  matchingSearchText:(NSString *)searchText;
 - (void)applyDatabaseRows;
 - (void)loadCatalogedDatabases;
 - (void)databaseCatalogDidChange:(NSNotification *)notification;
@@ -534,8 +516,8 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
                       returnCode:(NSInteger)returnCode
                      contextInfo:(void *)contextInfo;
 - (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode;
-- (void)scanDatabasesInBackground:(NSDictionary *)request;
-- (void)scanDatabasesDidFinish:(NSDictionary *)result;
+- (void)databaseCatalogScanDidStart:(NSNotification *)notification;
+- (void)databaseCatalogScanDidFinish:(NSNotification *)notification;
 - (void)refreshDatabaseStatus;
 - (void)setDatabaseStatusErrorMessage:(NSString *)message;
 - (void)whitelistTableViewDidPressSpace:(NSTableView *)tableView;
@@ -581,7 +563,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   if ((self = [super initWithWindow:window])) {
     allModelRows_ = [[NSArray alloc] init];
     modelRows_ = [[NSArray alloc] init];
-    allDatabaseRows_ = [[NSArray alloc] init];
     databaseRows_ = [[NSArray alloc] init];
     allDatabaseStudyRows_ = [[NSArray alloc] init];
     databaseStudyRows_ = [[NSArray alloc] init];
@@ -629,10 +610,16 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
          selector:@selector(databaseStudyPromptDidFinish:)
              name:StrappySessionPromptDidFinishNotification
            object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(catalogReadFailed:)
+      name:FileScannerCatalogReadFailedNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(databaseCatalogScanDidStart:)
+      name:FileScannerDatabaseCatalogScanDidStartNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(databaseCatalogScanDidFinish:)
+      name:FileScannerDatabaseCatalogScanDidFinishNotification object:nil];
     [self buildContentView];
     [self loadSystemPrompt];
     [self setModelCatalogRefreshing:[StrappySession isModelCatalogRefreshInFlight]];
-    [self setScanning:NO];
+    [self setScanning:[FileScanner isDatabaseCatalogScanInFlight]];
   }
 
   [window release];
@@ -1712,65 +1699,36 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [modelTableView_ deselectAll:self];
 }
 
-- (NSArray *)selectedDatabaseTableRowPaths
+- (NSArray *)selectedDatabaseTableRowIdentifiers
 {
-  NSMutableArray *paths;
+  NSMutableArray *identifiers = [NSMutableArray array];
   NSIndexSet *selectedRows;
-  NSUInteger rowIndex;
-
-  paths = [NSMutableArray array];
-  if (databaseTableView_ == nil) {
-    return paths;
-  }
-
+  NSUInteger index;
+  if (databaseTableView_ == nil) return identifiers;
   selectedRows = [databaseTableView_ selectedRowIndexes];
-  for (rowIndex = [selectedRows firstIndex];
-       rowIndex != NSNotFound;
-       rowIndex = [selectedRows indexGreaterThanIndex:rowIndex]) {
-    NSString *path;
-
-    if (rowIndex >= [databaseRows_ count]) {
-      continue;
-    }
-
-    path = StrappyDatabasePathForRow([databaseRows_ objectAtIndex:rowIndex]);
-    if ([path length] > 0U) {
-      [paths addObject:path];
+  for (index = [selectedRows firstIndex]; index != NSNotFound;
+       index = [selectedRows indexGreaterThanIndex:index]) {
+    if (index < [databaseRows_ count]) {
+      NSNumber *identifier = [[databaseRows_ objectAtIndex:index] objectForKey:@"catalog_id"];
+      if (identifier != nil) [identifiers addObject:identifier];
     }
   }
-
-  return paths;
+  return identifiers;
 }
 
-- (void)selectDatabaseTableRowsWithPaths:(NSArray *)paths
+- (void)selectDatabaseTableRowsWithIdentifiers:(NSArray *)identifiers
 {
-  NSMutableIndexSet *indexes;
+  NSMutableIndexSet *indexes = [NSMutableIndexSet indexSet];
   NSUInteger index;
-
-  if (databaseTableView_ == nil) {
-    return;
-  }
-
-  if (![paths isKindOfClass:[NSArray class]] || ([paths count] == 0U)) {
-    [databaseTableView_ deselectAll:self];
-    return;
-  }
-
-  indexes = [NSMutableIndexSet indexSet];
-  for (index = 0U; index < [databaseRows_ count]; index++) {
-    NSString *path;
-
-    path = StrappyDatabasePathForRow([databaseRows_ objectAtIndex:index]);
-    if ([paths containsObject:path]) {
-      [indexes addIndex:index];
+  if ([databaseRows_ isKindOfClass:[FileScannerCatalogRows class]]) {
+    for (index = 0U; index < [identifiers count]; index++) {
+      NSUInteger row = [(FileScannerCatalogRows *)databaseRows_
+        indexForCatalogIdentifier:[identifiers objectAtIndex:index]];
+      if (row != NSNotFound) [indexes addIndex:row];
     }
   }
-
-  if ([indexes count] == 0U) {
-    [databaseTableView_ deselectAll:self];
-    return;
-  }
-  [databaseTableView_ selectRowIndexes:indexes byExtendingSelection:NO];
+  if ([indexes count] == 0U) [databaseTableView_ deselectAll:self];
+  else [databaseTableView_ selectRowIndexes:indexes byExtendingSelection:NO];
 }
 
 - (void)modelSearchChanged:(id)sender
@@ -1782,21 +1740,22 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)databaseSearchChanged:(id)sender
 {
   (void)sender;
-  [self applyDatabaseRows];
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyDatabaseRows) object:nil];
+  [self performSelector:@selector(applyDatabaseRows) withObject:nil afterDelay:0.15];
 }
 
 - (void)showHiddenDatabasesChanged:(id)sender
 {
-  NSArray *selectedPaths;
+  NSArray *selectedIdentifiers;
 
   if (sender != showHiddenDatabasesButton_) {
     return;
   }
 
-  selectedPaths = [[self selectedDatabaseTableRowPaths] retain];
+  selectedIdentifiers = [[self selectedDatabaseTableRowIdentifiers] retain];
   [self applyDatabaseRows];
-  [self selectDatabaseTableRowsWithPaths:selectedPaths];
-  [selectedPaths release];
+  [self selectDatabaseTableRowsWithIdentifiers:selectedIdentifiers];
+  [selectedIdentifiers release];
 }
 
 - (void)modelSearchTextDidChange:(NSNotification *)notification
@@ -1808,9 +1767,9 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)databaseSearchTextDidChange:(NSNotification *)notification
 {
-  if ([notification object] == databaseSearchField_) {
-    [self applyDatabaseRows];
-  }
+  if ([notification object] != databaseSearchField_) return;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyDatabaseRows) object:nil];
+  [self performSelector:@selector(applyDatabaseRows) withObject:nil afterDelay:0.15];
 }
 
 - (void)setModelCatalogRefreshing:(BOOL)refreshing
@@ -1956,130 +1915,56 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   return searchText;
 }
 
-- (NSArray *)databaseRows:(NSArray *)rows matchingSearchText:(NSString *)searchText
-{
-  NSMutableArray *matchingRows;
-  NSUInteger index;
-
-  if (![rows isKindOfClass:[NSArray class]]) {
-    return [NSArray array];
-  }
-  if ([searchText length] == 0U) {
-    return rows;
-  }
-
-  matchingRows = [NSMutableArray arrayWithCapacity:[rows count]];
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-    NSString *name;
-    NSString *appName;
-    NSString *appBundleId;
-    NSString *location;
-    NSString *path;
-
-    row = [rows objectAtIndex:index];
-    if (![row isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-
-    name = StrappyDatabaseNameForRow(row);
-    appName = StrappyDatabaseAppNameForRow(row);
-    appBundleId = StrappyDatabaseBundleIdentifierForRow(row);
-    location = StrappyDatabaseLocationForRow(row);
-    path = StrappyDatabasePathForRow(row);
-    if (([name rangeOfString:searchText
-                     options:NSCaseInsensitiveSearch].location != NSNotFound) ||
-        ([appName rangeOfString:searchText
-                        options:NSCaseInsensitiveSearch].location != NSNotFound) ||
-        ([appBundleId rangeOfString:searchText
-                            options:NSCaseInsensitiveSearch].location !=
-         NSNotFound) ||
-        ([location rangeOfString:searchText
-                         options:NSCaseInsensitiveSearch].location != NSNotFound) ||
-        ([path rangeOfString:searchText
-                     options:NSCaseInsensitiveSearch].location != NSNotFound)) {
-      [matchingRows addObject:row];
-    }
-  }
-
-  return matchingRows;
-}
-
 - (void)applyDatabaseRows
 {
-  NSMutableArray *visibleRows;
-  NSArray *rows;
-  NSUInteger index;
-
-  rows = allDatabaseRows_;
-  if ([showHiddenDatabasesButton_ state] != XPControlStateValueOn) {
-    visibleRows = [NSMutableArray arrayWithCapacity:[allDatabaseRows_ count]];
-    for (index = 0U; index < [allDatabaseRows_ count]; index++) {
-      NSDictionary *row;
-
-      row = [allDatabaseRows_ objectAtIndex:index];
-      if (![row isKindOfClass:[NSDictionary class]]) {
-        continue;
-      }
-      if (StrappyDatabaseRowHiddenValue(row) &&
-          !StrappyDatabaseRowAllowedValue(row)) {
-        continue;
-      }
-      [visibleRows addObject:row];
-    }
-    rows = visibleRows;
+  NSError *error = nil;
+  NSArray *selectedIdentifiers = [self selectedDatabaseTableRowIdentifiers];
+  NSArray *descriptors = [databaseWhitelistView_ effectiveSortDescriptorsForSortDescriptors:
+    [databaseTableView_ sortDescriptors]];
+  FileScannerCatalogRows *rows = nil;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyDatabaseRows) object:nil];
+  if (!databaseCatalogDirty_ && [databaseRows_ isKindOfClass:[FileScannerCatalogRows class]]) {
+    rows = (FileScannerCatalogRows *)databaseRows_;
+    if (![rows filterWithSearch:[self currentDatabaseSearchText]
+        showHidden:([showHiddenDatabasesButton_ state] == XPControlStateValueOn)
+        sortDescriptors:descriptors error:&error]) rows = nil;
+  } else {
+    rows = [[FileScanner sharedScanner] catalogRowsMatchingSearch:[self currentDatabaseSearchText]
+      showHidden:([showHiddenDatabasesButton_ state] == XPControlStateValueOn)
+      sortDescriptors:descriptors error:&error];
   }
-
-  rows = [self databaseRows:rows
-        matchingSearchText:[self currentDatabaseSearchText]];
-  rows = [databaseWhitelistView_ sortedRows:rows];
+  if (rows == nil) {
+    [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(error,
+      NSLocalizedString(@"Rows could not be loaded.",nil))];
+    return;
+  }
+  databaseCatalogDirty_ = NO;
+  [rows retain];
   [databaseRows_ release];
-  databaseRows_ = [rows copy];
+  databaseRows_ = rows;
   [databaseTableView_ reloadData];
+  [self selectDatabaseTableRowsWithIdentifiers:selectedIdentifiers];
   [self refreshDatabaseStatus];
 }
 
 - (void)loadCatalogedDatabases
 {
-  NSError *error;
-  NSArray *rows;
-
-  error = nil;
-  rows = [[FileScanner sharedScanner] catalogedSQLiteDatabasesWithError:&error];
-  if (rows != nil) {
-    databaseCatalogDirty_ = NO;
-    [allDatabaseRows_ release];
-    allDatabaseRows_ = [rows copy];
-    [self applyDatabaseRows];
-    return;
-  }
-
-  [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(
-    error,
-    NSLocalizedString(@"Rows could not be loaded.", nil))];
+  databaseCatalogDirty_ = YES;
+  [self applyDatabaseRows];
 }
 
 - (void)databaseCatalogDidChange:(NSNotification *)notification
 {
-  NSArray *rows;
-  NSArray *selectedPaths;
-  NSString *identifier;
-
+  NSString *identifier = [[[self window] toolbar] selectedItemIdentifier];
+  (void)notification;
   databaseCatalogDirty_ = YES;
-  rows = [[notification userInfo] objectForKey:@"rows"];
-  if (![rows isKindOfClass:[NSArray class]]) {
-    return;
-  }
-  identifier = [[[self window] toolbar] selectedItemIdentifier];
-  if (![identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) {
-    return;
-  }
-  databaseCatalogDirty_ = NO;
-  selectedPaths = [self selectedDatabaseTableRowPaths];
-  [allDatabaseRows_ release];
-  allDatabaseRows_ = [rows copy];
-  [self applyDatabaseRows];
-  [self selectDatabaseTableRowsWithPaths:selectedPaths];
+  if ([identifier isEqualToString:kStrappyPreferencesToolbarDatabases]) [self applyDatabaseRows];
+}
+
+- (void)catalogReadFailed:(NSNotification *)notification
+{
+  if ([notification object] != databaseRows_) return;
+  [self setDatabaseStatusErrorMessage:[[[notification userInfo] objectForKey:@"error"] localizedDescription]];
 }
 
 - (void)setScanning:(BOOL)scanning
@@ -2195,85 +2080,24 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 
 - (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode
 {
-  NSDictionary *request;
+  NSError *error = nil;
+  if (scanning_) return;
+  if (![FileScanner beginDatabaseCatalogScanAtPath:NSHomeDirectory() scanMode:scanMode error:&error])
+    [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(error,
+      NSLocalizedString(@"Database scan failed.",nil))];
+}
 
-  if (scanning_) {
-    return;
-  }
-
-  scanMode = (scanMode == FileScannerDatabaseScanModeQuick) ?
-    FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
-  request = [[NSDictionary alloc] initWithObjectsAndKeys:
-    NSHomeDirectory(), @"path",
-    [NSNumber XP_numberWithInteger:(XPInteger)scanMode], @"scan_mode",
-    nil];
+- (void)databaseCatalogScanDidStart:(NSNotification *)notification
+{
+  (void)notification;
   [self setScanning:YES];
-  [self retain];
-  [NSThread detachNewThreadSelector:@selector(scanDatabasesInBackground:)
-                           toTarget:self
-                         withObject:request];
-  [request release];
 }
 
-- (void)scanDatabasesInBackground:(NSDictionary *)request
+- (void)databaseCatalogScanDidFinish:(NSNotification *)notification
 {
-  NSAutoreleasePool *pool;
-  NSError *error;
-  NSArray *rows;
-  NSMutableDictionary *result;
-  NSString *errorMessage;
-  NSString *rootPath;
-  NSNumber *scanModeNumber;
-  FileScannerDatabaseScanMode scanMode;
-
-  pool = [[NSAutoreleasePool alloc] init];
-  rootPath = [request objectForKey:@"path"];
-  scanModeNumber = [request objectForKey:@"scan_mode"];
-  scanMode = ([scanModeNumber isKindOfClass:[NSNumber class]] &&
-              ([scanModeNumber XP_integerValue] ==
-               FileScannerDatabaseScanModeQuick)) ?
-    FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
-  error = nil;
-  rows = [[FileScanner sharedScanner] scanDirectoryForSQLiteDatabasesAtPath:rootPath
-                                                                   scanMode:scanMode
-                                            savingResultsToCatalogWithError:&error];
-  result = [[NSMutableDictionary alloc] init];
-  if (rows != nil) {
-    [result setObject:rows forKey:@"rows"];
-  } else {
-    errorMessage = StrappyPreferencesErrorMessage(
-      error,
-      NSLocalizedString(@"Database scan failed.", nil));
-    [result setObject:errorMessage forKey:@"error"];
-  }
-
-  [self performSelectorOnMainThread:@selector(scanDatabasesDidFinish:)
-                         withObject:result
-                      waitUntilDone:NO];
-  [result release];
-  [pool release];
-  [self release];
-}
-
-- (void)scanDatabasesDidFinish:(NSDictionary *)result
-{
-  NSString *errorMessage;
-  NSArray *rows;
-
-  rows = [result objectForKey:@"rows"];
-  if ([rows isKindOfClass:[NSArray class]]) {
-    [allDatabaseRows_ release];
-    allDatabaseRows_ = [rows copy];
-    [self applyDatabaseRows];
-  }
-
+  NSString *message = [[notification userInfo] objectForKey:@"error"];
   [self setScanning:NO];
-  if (![rows isKindOfClass:[NSArray class]]) {
-    errorMessage = [result objectForKey:@"error"];
-    [self setDatabaseStatusErrorMessage:
-      [errorMessage isKindOfClass:[NSString class]] ? errorMessage :
-        NSLocalizedString(@"Database scan failed.", nil)];
-  }
+  if ([message isKindOfClass:[NSString class]]) [self setDatabaseStatusErrorMessage:message];
 }
 
 - (void)whitelistTableViewDidPressSpace:(NSTableView *)tableView
@@ -2446,7 +2270,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
 - (void)tableView:(NSTableView *)tableView
   sortDescriptorsDidChange:(NSArray *)oldDescriptors
 {
-  NSArray *selectedDatabasePaths;
+  NSArray *selectedDatabaseIdentifiers;
 
   (void)oldDescriptors;
   if (tableView == modelTableView_) {
@@ -2456,10 +2280,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   }
 
   if (tableView == databaseTableView_) {
-    selectedDatabasePaths = [[self selectedDatabaseTableRowPaths] retain];
+    selectedDatabaseIdentifiers = [[self selectedDatabaseTableRowIdentifiers] retain];
     [self applyDatabaseRows];
-    [self selectDatabaseTableRowsWithPaths:selectedDatabasePaths];
-    [selectedDatabasePaths release];
+    [self selectDatabaseTableRowsWithIdentifiers:selectedDatabaseIdentifiers];
+    [selectedDatabaseIdentifiers release];
     return;
   }
 
@@ -2724,7 +2548,7 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   NSString *identifier;
   NSString *validationError;
   NSNumber *catalogId;
-  NSArray *selectedPaths;
+  NSArray *selectedIdentifiers;
   BOOL checked;
 
   identifier = [tableColumn identifier];
@@ -2816,10 +2640,10 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
     return;
   }
 
-  selectedPaths = [[self selectedDatabaseTableRowPaths] retain];
+  selectedIdentifiers = [[self selectedDatabaseTableRowIdentifiers] retain];
   [self loadCatalogedDatabases];
-  [self selectDatabaseTableRowsWithPaths:selectedPaths];
-  [selectedPaths release];
+  [self selectDatabaseTableRowsWithIdentifiers:selectedIdentifiers];
+  [selectedIdentifiers release];
 }
 
 - (BOOL)tableView:(NSTableView *)tableView
@@ -3010,7 +2834,6 @@ static NSArray *StrappyPreparedModelRowsForRows(NSArray *rows)
   [databaseStatusLabel_ release];
   [allModelRows_ release];
   [modelRows_ release];
-  [allDatabaseRows_ release];
   [databaseRows_ release];
   [allDatabaseStudyRows_ release];
   [databaseStudyRows_ release];

@@ -112,6 +112,17 @@ flowchart TB
   The offline `sidebar_harness` tests ordering, snapshot isolation, backfill,
   cascades, and indexed paging with 20,000 sessions, and prints a local timing
   comparison against the eager loader (which also benefits from the new index).
+- Database preferences use a read-only catalog snapshot with a temporary SQLite
+  index of the filtered row order. Full records load in pages of 32 with a
+  128-row cache; application sections and selection lookup use only metadata.
+  Search and column changes reuse prepared display/search keys. Substring search
+  remains linear in catalog size and preserves Foundation's Unicode matching;
+  typing is debounced by 150 ms. Scan batches post coalesced invalidations rather
+  than full catalog arrays, with a final refresh even after a partial failure.
+  The offline `catalog_harness` checks 20,000 rows, bounded page-query work,
+  filtering, sorting, identity lookup, and snapshot isolation. Run
+  `make -C source/linux catalog-foundation-test` with GNUstep installed to check
+  the actual Objective-C cache, Unicode search, lazy sections, and notifications.
 - `make -C source/linux session-sections-test` checks session date grouping,
   calendar boundaries, daylight-saving transitions, and the Tiger calendar
   fallback. This optional Foundation harness requires `libgnustep-base-dev`

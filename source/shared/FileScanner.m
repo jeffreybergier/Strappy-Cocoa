@@ -5,6 +5,8 @@
 #import "strappy_core.h"
 #import "strappy_db.h"
 #import "strappy_file_scanner.h"
+#include <stdlib.h>
+#include <string.h>
 
 NSString * const FileScannerDatabaseCatalogScanDidStartNotification =
   @"FileScannerDatabaseCatalogScanDidStartNotification";
@@ -12,6 +14,14 @@ NSString * const FileScannerDatabaseCatalogScanDidFinishNotification =
   @"FileScannerDatabaseCatalogScanDidFinishNotification";
 NSString * const FileScannerDatabaseCatalogDidChangeNotification =
   @"FileScannerDatabaseCatalogDidChangeNotification";
+
+NSString * const FileScannerCatalogReadFailedNotification = @"FileScannerCatalogReadFailedNotification";
+static BOOL FileScannerCatalogUpdatePending = NO;
+
+@interface FileScannerCatalogRows ()
+- (id)initWithPath:(NSString *)path search:(NSString *)search showHidden:(BOOL)showHidden
+  descriptors:(NSArray *)descriptors error:(NSError **)error;
+@end
 
 static BOOL FileScannerDatabaseCatalogScanInFlight = NO;
 static const size_t StrappyFileScannerCatalogBatchSize = 100U;
@@ -33,7 +43,6 @@ StrappyFileScannerPlatformProfile(void)
 
 typedef struct StrappyFileScannerCatalogBatchContext {
   NSString *databasePath;
-  NSString *rootPath;
   const char *scanRoot;
 } StrappyFileScannerCatalogBatchContext;
 
@@ -42,6 +51,9 @@ typedef struct StrappyFileScannerCatalogBatchContext {
 + (NSError *)errorFromCString:(char *)message;
 + (void)databaseCatalogDidChange:(NSDictionary *)result;
 + (void)databaseCatalogScanInBackground:(NSDictionary *)request;
++ (NSDictionary *)dictionaryFromDiscoveredDatabaseRecord:(const strappy_discovered_database_record *)record;
++ (void)queueCatalogUpdate;
++ (void)deliverCatalogUpdate;
 
 @end
 
@@ -51,44 +63,21 @@ static int StrappyFileScannerSaveCatalogBatch(
   char **error_out)
 {
   StrappyFileScannerCatalogBatchContext *context;
-  NSMutableDictionary *result;
-  NSAutoreleasePool *pool;
-  NSArray *rows;
-
   context = (StrappyFileScannerCatalogBatchContext *)userData;
   if (context == NULL) {
     strappy_set_error(error_out, "Database scan batch context is missing.");
     return 0;
   }
 
-  pool = [[NSAutoreleasePool alloc] init];
   if (!strappy_file_scanner_save_discovered_database_batch(
         [context->databasePath UTF8String],
         list,
         context->scanRoot,
         error_out)) {
-    [pool release];
     return 0;
   }
 
-  rows = [[FileScanner sharedScanner]
-    catalogedSQLiteDatabasesWithError:nil];
-  result = [[NSMutableDictionary alloc] init];
-  if ([context->rootPath isKindOfClass:[NSString class]]) {
-    [result setObject:context->rootPath forKey:@"path"];
-  }
-  if ([rows isKindOfClass:[NSArray class]]) {
-    [result setObject:rows forKey:@"rows"];
-  }
-  if ([NSThread XP_isMainThread]) {
-    [FileScanner databaseCatalogDidChange:result];
-  } else {
-    [FileScanner performSelectorOnMainThread:@selector(databaseCatalogDidChange:)
-                                  withObject:result
-                               waitUntilDone:YES];
-  }
-  [result release];
-  [pool release];
+  [FileScanner queueCatalogUpdate];
   return 1;
 }
 
@@ -133,7 +122,7 @@ static int StrappyFileScannerSaveCatalogBatch(
   NSDictionary *userInfo;
 
   if (![path isKindOfClass:[NSString class]] || ([path length] == 0U)) {
-    if (error != nil) {
+    if (error != NULL) {
       userInfo = [NSDictionary dictionaryWithObject:
         NSLocalizedString(@"Scan path is empty.", nil)
                                              forKey:NSLocalizedDescriptionKey];
@@ -146,7 +135,7 @@ static int StrappyFileScannerSaveCatalogBatch(
 
   @synchronized(self) {
     if (FileScannerDatabaseCatalogScanInFlight) {
-      if (error != nil) {
+      if (error != NULL) {
         userInfo = [NSDictionary dictionaryWithObject:
           NSLocalizedString(@"Database scan is already running.", nil)
                                                forKey:NSLocalizedDescriptionKey];
@@ -182,7 +171,7 @@ static int StrappyFileScannerSaveCatalogBatch(
 {
   NSAutoreleasePool *pool;
   NSError *error;
-  NSArray *rows;
+  BOOL success;
   NSMutableDictionary *result;
   NSString *message;
   NSString *path;
@@ -197,10 +186,8 @@ static int StrappyFileScannerSaveCatalogBatch(
                FileScannerDatabaseScanModeQuick)) ?
     FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
   error = nil;
-  rows = [[FileScanner sharedScanner]
-    scanDirectoryForSQLiteDatabasesAtPath:path
-                                 scanMode:scanMode
-           savingResultsToCatalogWithError:&error];
+  success = [[FileScanner sharedScanner] scanAndSaveDatabasesAtPath:path
+    scanMode:scanMode error:&error];
 
   result = [[NSMutableDictionary alloc] init];
   if ([path isKindOfClass:[NSString class]]) {
@@ -208,9 +195,7 @@ static int StrappyFileScannerSaveCatalogBatch(
   }
   [result setObject:[NSNumber XP_numberWithInteger:(XPInteger)scanMode]
              forKey:@"scan_mode"];
-  if (rows != nil) {
-    [result setObject:rows forKey:@"rows"];
-  } else {
+  if (!success) {
     message = [error localizedDescription];
     if ([message length] == 0U) {
       message = NSLocalizedString(@"Database scan failed.", nil);
@@ -238,15 +223,38 @@ static int StrappyFileScannerSaveCatalogBatch(
     FileScannerDatabaseCatalogScanInFlight = NO;
   }
 
-  if ([userInfo objectForKey:@"error"] == nil) {
-    [self databaseCatalogDidChange:userInfo];
-  }
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(deliverCatalogUpdate) object:nil];
+  @synchronized(self) { FileScannerCatalogUpdatePending = NO; }
+  /* Publish committed batches even when a later part of the scan failed. */
+  [self databaseCatalogDidChange:userInfo];
 
   [[NSNotificationCenter defaultCenter]
     postNotificationName:FileScannerDatabaseCatalogScanDidFinishNotification
                   object:self
                 userInfo:userInfo];
   [userInfo release];
+}
+
++ (void)queueCatalogUpdate
+{
+  @synchronized(self) {
+    if (FileScannerCatalogUpdatePending) return;
+    FileScannerCatalogUpdatePending = YES;
+  }
+  [self performSelectorOnMainThread:@selector(scheduleCatalogUpdate)
+    withObject:nil waitUntilDone:NO];
+}
+
++ (void)scheduleCatalogUpdate
+{
+  @synchronized(self) { if (!FileScannerCatalogUpdatePending) return; }
+  [self performSelector:@selector(deliverCatalogUpdate) withObject:nil afterDelay:0.25];
+}
+
++ (void)deliverCatalogUpdate
+{
+  @synchronized(self) { FileScannerCatalogUpdatePending = NO; }
+  [self databaseCatalogDidChange:nil];
 }
 
 + (void)databaseCatalogDidChange:(NSDictionary *)result
@@ -442,6 +450,13 @@ static int StrappyFileScannerSaveCatalogBatch(
                                           scanMode:(FileScannerDatabaseScanMode)scanMode
                    savingResultsToCatalogWithError:(NSError **)error
 {
+  if (![self scanAndSaveDatabasesAtPath:path scanMode:scanMode error:error]) return nil;
+  return [self catalogedSQLiteDatabasesWithError:error];
+}
+
+- (BOOL)scanAndSaveDatabasesAtPath:(NSString *)path
+  scanMode:(FileScannerDatabaseScanMode)scanMode error:(NSError **)error
+{
   NSString *databasePath;
   StrappyFileScannerCatalogBatchContext batchContext;
   strappy_file_scanner_options options;
@@ -449,7 +464,7 @@ static int StrappyFileScannerSaveCatalogBatch(
   char *strappyError;
 
   if (![path isKindOfClass:[NSString class]] || ([path length] == 0U)) {
-    if (error != nil) {
+    if (error != NULL) {
       NSDictionary *userInfo =
         [NSDictionary dictionaryWithObject:NSLocalizedString(@"Scan path is empty.", nil)
                                     forKey:NSLocalizedDescriptionKey];
@@ -457,16 +472,15 @@ static int StrappyFileScannerSaveCatalogBatch(
                                    code:2
                                userInfo:userInfo];
     }
-    return nil;
+    return NO;
   }
 
   if (![StrappySession initializeSessionStoreWithError:error]) {
-    return nil;
+    return NO;
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
   batchContext.databasePath = databasePath;
-  batchContext.rootPath = path;
   batchContext.scanRoot = [path fileSystemRepresentation];
 
   strappy_file_scanner_options_init(&options);
@@ -486,16 +500,16 @@ static int StrappyFileScannerSaveCatalogBatch(
         &options,
         &list,
         &strappyError)) {
-    if (error != nil) {
+    if (error != NULL) {
       *error = [FileScanner errorFromCString:strappyError];
     }
     strappy_free_string(strappyError);
     strappy_file_scanner_record_list_destroy(&list);
-    return nil;
+    return NO;
   }
 
   strappy_file_scanner_record_list_destroy(&list);
-  return [self catalogedSQLiteDatabasesWithError:error];
+  return YES;
 }
 
 - (NSArray *)catalogedSQLiteDatabasesWithError:(NSError **)error
@@ -516,7 +530,7 @@ static int StrappyFileScannerSaveCatalogBatch(
   if (!strappy_db_list_discovered_databases([databasePath UTF8String],
                                             &list,
                                             &strappyError)) {
-    if (error != nil) {
+    if (error != NULL) {
       *error = [FileScanner errorFromCString:strappyError];
     }
     strappy_free_string(strappyError);
@@ -537,6 +551,14 @@ static int StrappyFileScannerSaveCatalogBatch(
   return rows;
 }
 
+- (FileScannerCatalogRows *)catalogRowsMatchingSearch:(NSString *)search
+  showHidden:(BOOL)showHidden sortDescriptors:(NSArray *)descriptors error:(NSError **)error
+{
+  if (![StrappySession initializeSessionStoreWithError:error]) return nil;
+  return [[[FileScannerCatalogRows alloc] initWithPath:[StrappySession sessionsDatabasePath]
+    search:search showHidden:showHidden descriptors:descriptors error:error] autorelease];
+}
+
 - (BOOL)setCatalogedDatabaseAllowed:(BOOL)allowed
                forCatalogIdentifier:(NSNumber *)catalogIdentifier
                               error:(NSError **)error
@@ -548,7 +570,7 @@ static int StrappyFileScannerSaveCatalogBatch(
 
   if (![catalogIdentifier isKindOfClass:[NSNumber class]] ||
       ([catalogIdentifier longLongValue] <= 0LL)) {
-    if (error != nil) {
+    if (error != NULL) {
       NSDictionary *userInfo =
         [NSDictionary dictionaryWithObject:NSLocalizedString(@"Database catalog id is missing.", nil)
                                     forKey:NSLocalizedDescriptionKey];
@@ -572,7 +594,7 @@ static int StrappyFileScannerSaveCatalogBatch(
     decision,
     &strappyError);
   if (!ok) {
-    if (error != nil) {
+    if (error != NULL) {
       *error = [FileScanner errorFromCString:strappyError];
     }
     strappy_free_string(strappyError);
@@ -592,7 +614,7 @@ static int StrappyFileScannerSaveCatalogBatch(
 
   if (![catalogIdentifier isKindOfClass:[NSNumber class]] ||
       ([catalogIdentifier longLongValue] <= 0LL)) {
-    if (error != nil) {
+    if (error != NULL) {
       NSDictionary *userInfo =
         [NSDictionary dictionaryWithObject:NSLocalizedString(@"Database catalog id is missing.", nil)
                                     forKey:NSLocalizedDescriptionKey];
@@ -615,7 +637,7 @@ static int StrappyFileScannerSaveCatalogBatch(
     hidden ? 1 : 0,
     &strappyError);
   if (!ok) {
-    if (error != nil) {
+    if (error != NULL) {
       *error = [FileScanner errorFromCString:strappyError];
     }
     strappy_free_string(strappyError);
@@ -625,4 +647,242 @@ static int StrappyFileScannerSaveCatalogBatch(
   return YES;
 }
 
+@end
+
+static NSString *FileScannerCatalogString(const char *value)
+{
+  NSString *string = value != NULL ? [NSString stringWithUTF8String:value] : nil;
+  return string != nil ? string : @"";
+}
+
+static NSString *FileScannerCatalogLocation(NSString *path)
+{
+  NSString *directory = [path stringByDeletingLastPathComponent];
+  NSString *home = NSHomeDirectory();
+  NSUInteger length = [home length];
+  if ([directory length] == 0U || [directory isEqualToString:path]) return @"";
+  if (length > 0U && [directory hasPrefix:home]) {
+    if ([directory length] == length) return @"~";
+    if ([directory characterAtIndex:length] == '/')
+      return [@"~" stringByAppendingString:[directory substringFromIndex:length]];
+  }
+  return directory;
+}
+
+static char *FileScannerCatalogField(const char *kind, const char *pathValue,
+  const char *nameValue, const char *groupValue)
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  NSString *path = FileScannerCatalogString(pathValue);
+  NSString *name = FileScannerCatalogString(nameValue);
+  NSString *group = FileScannerCatalogString(groupValue);
+  NSString *value = @"";
+  char *result;
+  if (!strcmp(kind,"name")) {
+    value = [path lastPathComponent];
+    if ([value length] == 0U) value = path;
+  } else if (!strcmp(kind,"location")) {
+    value = FileScannerCatalogLocation(path);
+  } else if (!strcmp(kind,"application")) {
+    value = [name length] > 0U ? name :
+      ([group length] > 0U ? group : NSLocalizedString(@"Other",nil));
+  } else if (!strcmp(kind,"group_key")) {
+    value = [group length] > 0U ? group :
+      [@"path:" stringByAppendingString:[FileScannerCatalogLocation(path) lowercaseString]];
+  }
+  result = strdup([value UTF8String]);
+  [pool release];
+  return result;
+}
+
+static int FileScannerCatalogCompare(const char *left, const char *right)
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  NSComparisonResult result = [FileScannerCatalogString(left)
+    caseInsensitiveCompare:FileScannerCatalogString(right)];
+  [pool release];
+  return result < 0 ? -1 : (result > 0 ? 1 : 0);
+}
+
+static int FileScannerCatalogContains(const char *text, const char *needle)
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  NSRange range = [FileScannerCatalogString(text) rangeOfString:FileScannerCatalogString(needle)
+    options:NSCaseInsensitiveSearch];
+  int result = range.location != NSNotFound;
+  [pool release];
+  return result;
+}
+
+@interface FileScannerCatalogRange : NSArray {
+  NSArray *source_;
+  NSUInteger offset_;
+  NSUInteger count_;
+}
+- (id)initWithSource:(NSArray *)source offset:(NSUInteger)offset count:(NSUInteger)count;
+@end
+
+@implementation FileScannerCatalogRange
+- (id)initWithSource:(NSArray *)source offset:(NSUInteger)offset count:(NSUInteger)count
+{
+  if ((self = [super init])) {
+    source_ = [source retain]; offset_ = offset; count_ = count;
+  }
+  return self;
+}
+- (NSUInteger)count { return count_; }
+- (id)objectAtIndex:(NSUInteger)index
+{
+  if (index >= count_) [NSException raise:NSRangeException format:@"Catalog section index outside snapshot"];
+  return [source_ objectAtIndex:offset_ + index];
+}
+- (id)copyWithZone:(NSZone *)zone { (void)zone; return [self retain]; }
+- (void)dealloc { [source_ release]; [super dealloc]; }
+@end
+
+typedef struct FileScannerCatalogGroupContext {
+  FileScannerCatalogRows *source;
+  NSMutableArray *sections;
+} FileScannerCatalogGroupContext;
+
+static void FileScannerCatalogGroup(void *context, const char *name,
+  const char *group, const char *bundle, size_t offset, size_t count, int disambiguate)
+{
+  FileScannerCatalogGroupContext *groups = context;
+  NSString *title = FileScannerCatalogString(name);
+  NSArray *rows = [[[FileScannerCatalogRange alloc] initWithSource:groups->source
+    offset:(NSUInteger)offset count:(NSUInteger)count] autorelease];
+  if (disambiguate && bundle != NULL && *bundle != '\0')
+    title = [NSString stringWithFormat:@"%@ (%@)",title,FileScannerCatalogString(bundle)];
+  [groups->sections addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+    title,@"title",FileScannerCatalogString(group),@"app_group_key",rows,@"rows",nil]];
+}
+
+@implementation FileScannerCatalogRows
+- (id)initWithPath:(NSString *)path search:(NSString *)search showHidden:(BOOL)showHidden
+  descriptors:(NSArray *)descriptors error:(NSError **)error
+{
+  strappy_catalog_reader *reader = NULL;
+  strappy_catalog_sort sort[12];
+  strappy_catalog_text text = { FileScannerCatalogField,FileScannerCatalogCompare,FileScannerCatalogContains };
+  char *message = NULL;
+  NSUInteger index;
+  self = [super init];
+  if (self == nil) return nil;
+  if ([descriptors count] > 12U) {
+    if (error != NULL) *error = [FileScanner errorFromCString:"Too many catalog sort keys."];
+    [self release]; return nil;
+  }
+  for (index = 0U; index < [descriptors count]; index++) {
+    NSSortDescriptor *descriptor = [descriptors objectAtIndex:index];
+    sort[index].key = [[descriptor key] UTF8String];
+    sort[index].ascending = [descriptor ascending] ? 1 : 0;
+  }
+  if (!strappy_db_catalog_open([path fileSystemRepresentation],[search UTF8String],
+      showHidden ? 1 : 0,sort,(size_t)[descriptors count],&text,&reader,&message)) {
+    if (error != NULL) *error = [FileScanner errorFromCString:message];
+    strappy_free_string(message); [self release]; return nil;
+  }
+  reader_ = reader;
+  pages_ = [[NSMutableDictionary alloc] init];
+  pageOrder_ = [[NSMutableArray alloc] init];
+  return self;
+}
+- (void)dealloc
+{
+  strappy_db_catalog_close(reader_);
+  [pages_ release]; [pageOrder_ release]; [readError_ release]; [super dealloc];
+}
+- (id)copyWithZone:(NSZone *)zone { (void)zone; return [self retain]; }
+- (NSUInteger)count { return (NSUInteger)strappy_db_catalog_count(reader_); }
+- (NSError *)readError { return readError_; }
+- (void)recordReadError:(char *)message
+{
+  if (readError_ == nil) {
+    readError_ = [[FileScanner errorFromCString:message] retain];
+    [[NSNotificationQueue defaultQueue] enqueueNotification:
+      [NSNotification notificationWithName:FileScannerCatalogReadFailedNotification object:self
+        userInfo:[NSDictionary dictionaryWithObject:readError_ forKey:@"error"]]
+      postingStyle:NSPostASAP];
+  }
+  strappy_free_string(message);
+}
+- (NSUInteger)indexForCatalogIdentifier:(NSNumber *)identifier
+{
+  size_t index;
+  char *message = NULL;
+  if (![identifier isKindOfClass:[NSNumber class]]) return NSNotFound;
+  if (!strappy_db_catalog_index(reader_,[identifier longLongValue],&index,&message)) {
+    [self recordReadError:message]; return NSNotFound;
+  }
+  return index == (size_t)-1 ? NSNotFound : (NSUInteger)index;
+}
+- (BOOL)filterWithSearch:(NSString *)search showHidden:(BOOL)showHidden
+  sortDescriptors:(NSArray *)descriptors error:(NSError **)error
+{
+  strappy_catalog_sort sort[12];
+  NSUInteger index;
+  char *message = NULL;
+  if ([descriptors count] > 12U) {
+    if (error != NULL) *error = [FileScanner errorFromCString:"Too many catalog sort keys."];
+    return NO;
+  }
+  for (index = 0U; index < [descriptors count]; index++) {
+    NSSortDescriptor *descriptor = [descriptors objectAtIndex:index];
+    sort[index].key = [[descriptor key] UTF8String];
+    sort[index].ascending = [descriptor ascending] ? 1 : 0;
+  }
+  if (!strappy_db_catalog_query(reader_,[search UTF8String],showHidden ? 1 : 0,
+      sort,(size_t)[descriptors count],&message)) {
+    if (error != NULL) *error = [FileScanner errorFromCString:message];
+    strappy_free_string(message); return NO;
+  }
+  [pages_ removeAllObjects]; [pageOrder_ removeAllObjects];
+  [readError_ release]; readError_ = nil;
+  return YES;
+}
+- (NSArray *)applicationSectionsWithError:(NSError **)error
+{
+  FileScannerCatalogGroupContext groups;
+  char *message = NULL;
+  groups.source = self;
+  groups.sections = [NSMutableArray array];
+  if (!strappy_db_catalog_groups(reader_,FileScannerCatalogGroup,&groups,&message)) {
+    if (error != NULL) *error = [FileScanner errorFromCString:message];
+    strappy_free_string(message); return nil;
+  }
+  return groups.sections;
+}
+- (id)objectAtIndex:(NSUInteger)index
+{
+  NSUInteger offset = (index / 32U) * 32U;
+  NSNumber *key = [NSNumber XP_numberWithUnsignedInteger:offset];
+  NSArray *page = [pages_ objectForKey:key];
+  if (index >= [self count]) [NSException raise:NSRangeException format:@"Catalog index outside snapshot"];
+  if (page == nil && readError_ == nil) {
+    strappy_discovered_database_record_list records;
+    char *message = NULL;
+    if (!strappy_db_catalog_page(reader_,(size_t)offset,&records,&message)) {
+      [self recordReadError:message];
+    } else {
+      NSMutableArray *rows = [NSMutableArray arrayWithCapacity:records.count];
+      size_t row;
+      for (row = 0U; row < records.count; row++)
+        [rows addObject:[FileScanner dictionaryFromDiscoveredDatabaseRecord:&records.records[row]]];
+      strappy_discovered_database_record_list_destroy(&records);
+      if ([pageOrder_ count] >= 4U) {
+        [pages_ removeObjectForKey:[pageOrder_ objectAtIndex:0]];
+        [pageOrder_ removeObjectAtIndex:0];
+      }
+      page = rows;
+      [pages_ setObject:page forKey:key];
+    }
+  }
+  if (page != nil) {
+    [pageOrder_ removeObject:key]; [pageOrder_ addObject:key];
+    if (index - offset < [page count]) return [page objectAtIndex:index - offset];
+  }
+  /* No catalog ID: an unreadable row cannot accidentally authorize a database. */
+  return [NSDictionary dictionaryWithObject:NSLocalizedString(@"Rows could not be loaded.",nil) forKey:@"path"];
+}
 @end

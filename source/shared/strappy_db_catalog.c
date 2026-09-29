@@ -2329,28 +2329,30 @@ int strappy_db_replace_discovered_databases_for_scan_root(
                                                        error_out);
 }
 
+#define STRAPPY_CATALOG_SELECT \
+    "SELECT d.id, d.assistant_database_id, l.path, l.size_bytes, " \
+    "l.modified_at_s, l.device, l.inode, " \
+    "CASE WHEN l.validation_state = 'valid' THEN 1 ELSE 0 END, " \
+    "l.validation_error, l.validation_state, p.decision, p.hidden, " \
+    "p.auto_hidden, p.hidden_override, p.hidden_reason, " \
+    "r.path, a.stable_key, COALESCE(a.name, d.display_name), " \
+    "a.bundle_id, a.container_path, " \
+    "a.bundle_path, a.source, d.origin_kind, d.location_tail, " \
+    "strftime('%Y-%m-%dT%H:%M:%fZ', d.first_seen_at_ms / 1000.0, 'unixepoch'), " \
+    "strftime('%Y-%m-%dT%H:%M:%fZ', l.last_seen_at_ms / 1000.0, 'unixepoch'), " \
+    "strftime('%Y-%m-%dT%H:%M:%fZ', l.last_scanned_at_ms / 1000.0, 'unixepoch') " \
+    "FROM databases d " \
+    "JOIN database_locations l ON l.database_id = d.id AND l.active = 1 " \
+    "JOIN database_permissions p ON p.database_id = d.id " \
+    "LEFT JOIN applications a ON a.id = d.application_id " \
+    "LEFT JOIN scan_roots r ON r.id = l.scan_root_id "
+
 int strappy_db_list_discovered_databases(
   const char *db_path,
   strappy_discovered_database_record_list *list,
   char **error_out)
 {
-  static const char *sql =
-    "SELECT d.id, d.assistant_database_id, l.path, l.size_bytes, "
-    "l.modified_at_s, l.device, l.inode, "
-    "CASE WHEN l.validation_state = 'valid' THEN 1 ELSE 0 END, "
-    "l.validation_error, l.validation_state, p.decision, p.hidden, "
-    "p.auto_hidden, p.hidden_override, p.hidden_reason, "
-    "r.path, a.stable_key, COALESCE(a.name, d.display_name), "
-    "a.bundle_id, a.container_path, "
-    "a.bundle_path, a.source, d.origin_kind, d.location_tail, "
-    "strftime('%Y-%m-%dT%H:%M:%fZ', d.first_seen_at_ms / 1000.0, 'unixepoch'), "
-    "strftime('%Y-%m-%dT%H:%M:%fZ', l.last_seen_at_ms / 1000.0, 'unixepoch'), "
-    "strftime('%Y-%m-%dT%H:%M:%fZ', l.last_scanned_at_ms / 1000.0, 'unixepoch') "
-    "FROM databases d "
-    "JOIN database_locations l ON l.database_id = d.id AND l.active = 1 "
-    "JOIN database_permissions p ON p.database_id = d.id "
-    "LEFT JOIN applications a ON a.id = d.application_id "
-    "LEFT JOIN scan_roots r ON r.id = l.scan_root_id "
+  static const char *sql = STRAPPY_CATALOG_SELECT
     "ORDER BY l.last_seen_at_ms DESC, d.id DESC, l.path;";
   sqlite3 *db;
   sqlite3_stmt *stmt;
@@ -5232,4 +5234,289 @@ int strappy_db_get_session_model_route(
     return 0;
   }
   return 1;
+}
+
+/* A TEMP ordering makes arbitrary column sorts and random table jumps bounded
+ * after the initial key scan. Full catalog records remain in the main snapshot. */
+struct strappy_catalog_reader {
+  sqlite3 *db;
+  sqlite3_stmt *page;
+  sqlite3_stmt *identity;
+  strappy_catalog_text text;
+  size_t count;
+  int comparison_failed;
+  unsigned long long page_steps;
+};
+
+static const char *strappy_catalog_value(sqlite3_value *value)
+{
+  const unsigned char *text = sqlite3_value_text(value);
+  return text != NULL ? (const char *)text : "";
+}
+
+static void strappy_catalog_field(sqlite3_context *context, int argc,
+                                  sqlite3_value **argv)
+{
+  strappy_catalog_reader *reader = sqlite3_user_data(context);
+  char *value;
+  (void)argc;
+  value = reader->text.field(strappy_catalog_value(argv[0]),
+    strappy_catalog_value(argv[1]), strappy_catalog_value(argv[2]),
+    strappy_catalog_value(argv[3]));
+  if (value == NULL) sqlite3_result_error_nomem(context);
+  else sqlite3_result_text(context, value, -1, free);
+}
+
+static void strappy_catalog_contains(sqlite3_context *context, int argc,
+                                     sqlite3_value **argv)
+{
+  strappy_catalog_reader *reader = sqlite3_user_data(context);
+  (void)argc;
+  sqlite3_result_int(context, reader->text.contains(strappy_catalog_value(argv[0]),
+                                                  strappy_catalog_value(argv[1])));
+}
+
+static int strappy_catalog_compare(void *context, int left_length,
+  const void *left, int right_length, const void *right)
+{
+  strappy_catalog_reader *reader = context;
+  /* SQLite does not terminate collation inputs. */
+  char *a = sqlite3_mprintf("%.*s", left_length, (const char *)left);
+  char *b = sqlite3_mprintf("%.*s", right_length, (const char *)right);
+  int result = 0;
+  if (a != NULL && b != NULL) result = reader->text.compare(a, b);
+  else reader->comparison_failed = 1;
+  sqlite3_free(a);
+  sqlite3_free(b);
+  return result;
+}
+
+static int strappy_catalog_error(strappy_catalog_reader *reader, char **error_out)
+{
+  strappy_set_formatted_error(error_out, "Could not read database catalog: %s",
+                              sqlite3_errmsg(reader->db));
+  return 0;
+}
+
+void strappy_db_catalog_close(strappy_catalog_reader *reader)
+{
+  if (reader == NULL) return;
+  sqlite3_finalize(reader->page);
+  sqlite3_finalize(reader->identity);
+  if (reader->db != NULL) {
+    sqlite3_exec(reader->db, "ROLLBACK", NULL, NULL, NULL);
+    sqlite3_close(reader->db);
+  }
+  free(reader);
+}
+
+int strappy_db_catalog_open(const char *path, const char *search, int show_hidden,
+  const strappy_catalog_sort *sort, size_t sort_count,
+  const strappy_catalog_text *text, strappy_catalog_reader **out, char **error_out)
+{
+  strappy_catalog_reader *reader;
+  sqlite3_stmt *stmt = NULL;
+  int rc;
+  static const char *keys =
+    "CREATE TEMP TABLE catalog_keys AS SELECT l.id AS location_id,d.id AS catalog_id,"
+    "l.path,l.last_seen_at_ms,l.size_bytes AS size,p.hidden,"
+    "(p.decision='allowed') AS allowed,(CASE WHEN p.hidden THEN 0 ELSE 100 END) AS database_priority,"
+    "catalog_field('name',l.path,'','') AS name,"
+    "catalog_field('location',l.path,'','') AS location,"
+    "catalog_field('application',l.path,COALESCE(a.name,d.display_name),a.stable_key) AS application,"
+    "catalog_field('group_key',l.path,'',a.stable_key) AS group_key,"
+    "COALESCE(a.bundle_id,'') AS bundle "
+    "FROM databases d JOIN database_locations l ON l.database_id=d.id AND l.active=1 "
+    "JOIN database_permissions p ON p.database_id=d.id "
+    "LEFT JOIN applications a ON a.id=d.application_id;";
+  if (out == NULL || text == NULL || text->field == NULL ||
+      text->compare == NULL || text->contains == NULL || sort_count > 12U ||
+      (sort_count != 0U && sort == NULL)) {
+    strappy_set_error(error_out, "Invalid database catalog reader options.");
+    return 0;
+  }
+  *out = NULL;
+  if (!strappy_db_initialize(path, error_out)) return 0;
+  reader = calloc(1U, sizeof(*reader));
+  if (reader == NULL) {
+    strappy_set_error(error_out, "Could not allocate database catalog reader.");
+    return 0;
+  }
+  reader->text = *text;
+  rc = sqlite3_open_v2(path, &reader->db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL);
+  if (rc != SQLITE_OK) goto failure;
+  sqlite3_busy_timeout(reader->db, 5000);
+  if (sqlite3_create_function(reader->db,"catalog_field",4,SQLITE_UTF8,reader,
+        strappy_catalog_field,NULL,NULL) != SQLITE_OK ||
+      sqlite3_create_function(reader->db,"catalog_contains",2,SQLITE_UTF8,reader,
+        strappy_catalog_contains,NULL,NULL) != SQLITE_OK ||
+      sqlite3_create_collation(reader->db,"catalog_text",SQLITE_UTF8,reader,
+        strappy_catalog_compare) != SQLITE_OK ||
+      sqlite3_exec(reader->db,"BEGIN",NULL,NULL,NULL) != SQLITE_OK) goto failure;
+  if (sqlite3_prepare_v2(reader->db,keys,-1,&stmt,NULL) != SQLITE_OK) goto failure;
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt); stmt = NULL;
+  if (rc != SQLITE_DONE) goto failure;
+  if (sqlite3_exec(reader->db,"CREATE TEMP TABLE catalog_order (location_id INTEGER,"
+      "catalog_id INTEGER,application TEXT,group_key TEXT,bundle TEXT);"
+      "CREATE INDEX catalog_identity ON catalog_order(catalog_id);",NULL,NULL,NULL) != SQLITE_OK)
+    goto failure;
+  if (!strappy_db_catalog_query(reader,search,show_hidden,sort,sort_count,error_out)) {
+    strappy_db_catalog_close(reader);
+    return 0;
+  }
+  if (sqlite3_prepare_v2(reader->db,STRAPPY_CATALOG_SELECT
+      "JOIN catalog_order o ON o.location_id=l.id "
+      "WHERE o.rowid>?1 AND o.rowid<=?2 ORDER BY o.rowid",-1,&reader->page,NULL) != SQLITE_OK ||
+      sqlite3_prepare_v2(reader->db,"SELECT rowid-1 FROM catalog_order WHERE catalog_id=?1 ORDER BY rowid LIMIT 1",
+        -1,&reader->identity,NULL) != SQLITE_OK) goto failure;
+  *out = reader;
+  return 1;
+failure:
+  sqlite3_finalize(stmt);
+  strappy_catalog_error(reader,error_out);
+  strappy_db_catalog_close(reader);
+  return 0;
+}
+
+/* Reuse immutable display/search keys while typing or changing sort columns.
+ * Permission changes and scan batches open a fresh main-database snapshot. */
+int strappy_db_catalog_query(strappy_catalog_reader *reader, const char *search,
+  int show_hidden, const strappy_catalog_sort *sort, size_t sort_count, char **error_out)
+{
+  char order[2048];
+  char *sql;
+  size_t used = 0U, i;
+  sqlite3_stmt *stmt = NULL;
+  sqlite3_int64 count;
+  int rc;
+  if (sort_count > 12U || (sort_count != 0U && sort == NULL)) {
+    strappy_set_error(error_out,"Invalid catalog sort options.");
+    return 0;
+  }
+  for (i = 0U; i < sort_count; i++) {
+    const char *key = sort[i].key;
+    int numeric;
+    if (key == NULL || (strcmp(key,"allowed") && strcmp(key,"hidden") &&
+        strcmp(key,"database_priority") && strcmp(key,"size") &&
+        strcmp(key,"application") && strcmp(key,"group_key") &&
+        strcmp(key,"name") && strcmp(key,"location"))) {
+      strappy_set_error(error_out, "Unknown database catalog sort key.");
+      return 0;
+    }
+    numeric = !strcmp(key,"allowed") || !strcmp(key,"hidden") ||
+      !strcmp(key,"database_priority") || !strcmp(key,"size");
+    used += (size_t)snprintf(order + used, sizeof(order) - used, "%s%s %s,",
+      key, numeric ? "" : " COLLATE catalog_text", sort[i].ascending ? "ASC" : "DESC");
+    /* Distinct case-equivalent application/group names must stay contiguous. */
+    if (!strcmp(key,"group_key"))
+      used += (size_t)snprintf(order + used, sizeof(order) - used,
+                               "application COLLATE BINARY,group_key COLLATE BINARY,");
+  }
+  snprintf(order + used, sizeof(order) - used, "last_seen_at_ms DESC,catalog_id DESC,path");
+  reader->comparison_failed = 0;
+  if (sqlite3_exec(reader->db,"SAVEPOINT catalog_query",NULL,NULL,NULL) != SQLITE_OK)
+    return strappy_catalog_error(reader,error_out);
+  if (sqlite3_exec(reader->db,"DELETE FROM catalog_order",NULL,NULL,NULL) != SQLITE_OK) goto failure;
+  sql = sqlite3_mprintf("INSERT INTO catalog_order SELECT location_id,catalog_id,"
+    "application,group_key,bundle FROM catalog_keys WHERE (?2 OR NOT hidden OR allowed) AND (?1='' OR "
+    "catalog_contains(name,?1) OR catalog_contains(location,?1) OR "
+    "catalog_contains(application,?1) OR catalog_contains(bundle,?1) OR "
+    "catalog_contains(path,?1)) ORDER BY %s",order);
+  if (sql == NULL) goto failure;
+  rc = sqlite3_prepare_v2(reader->db,sql,-1,&stmt,NULL);
+  sqlite3_free(sql);
+  if (rc != SQLITE_OK) goto failure;
+  sqlite3_bind_text(stmt,1,search != NULL ? search : "",-1,SQLITE_TRANSIENT);
+  sqlite3_bind_int(stmt,2,show_hidden);
+  rc = sqlite3_step(stmt);
+  sqlite3_finalize(stmt); stmt = NULL;
+  if (rc != SQLITE_DONE || reader->comparison_failed) goto failure;
+  if (sqlite3_prepare_v2(reader->db,"SELECT count(*) FROM catalog_order",-1,&stmt,NULL) != SQLITE_OK ||
+      sqlite3_step(stmt) != SQLITE_ROW) goto failure;
+  count = sqlite3_column_int64(stmt,0);
+  sqlite3_finalize(stmt); stmt = NULL;
+  if (count < 0 || (unsigned long long)count > (unsigned long long)LONG_MAX) goto failure;
+  if (sqlite3_exec(reader->db,"RELEASE catalog_query",NULL,NULL,NULL) != SQLITE_OK) goto failure;
+  reader->count = (size_t)count;
+  return 1;
+failure:
+  sqlite3_finalize(stmt);
+  strappy_catalog_error(reader,error_out);
+  sqlite3_exec(reader->db,"ROLLBACK TO catalog_query; RELEASE catalog_query",NULL,NULL,NULL);
+  return 0;
+}
+
+size_t strappy_db_catalog_count(const strappy_catalog_reader *reader)
+{
+  return reader->count;
+}
+
+int strappy_db_catalog_page(strappy_catalog_reader *reader, size_t offset,
+  strappy_discovered_database_record_list *list, char **error_out)
+{
+  int rc;
+  strappy_discovered_database_record_list_init(list);
+  if (offset >= reader->count) return 1;
+  list->records = calloc(32U,sizeof(*list->records));
+  if (list->records == NULL) {
+    strappy_set_error(error_out,"Could not allocate catalog page.");
+    return 0;
+  }
+  sqlite3_bind_int64(reader->page,1,(sqlite3_int64)offset);
+  sqlite3_bind_int64(reader->page,2,(sqlite3_int64)offset + 32);
+  while ((rc = sqlite3_step(reader->page)) == SQLITE_ROW && list->count < 32U) {
+    strappy_discovered_database_record *record = &list->records[list->count++];
+    if (!strappy_db_assign_discovered_database_from_statement(record,reader->page,error_out)) {
+      reader->page_steps += (unsigned long long)sqlite3_stmt_status(reader->page,SQLITE_STMTSTATUS_VM_STEP,1);
+      sqlite3_reset(reader->page);
+      strappy_discovered_database_record_list_destroy(list);
+      return 0;
+    }
+  }
+  reader->page_steps += (unsigned long long)sqlite3_stmt_status(reader->page,SQLITE_STMTSTATUS_VM_STEP,1);
+  sqlite3_reset(reader->page);
+  if (rc != SQLITE_DONE) {
+    strappy_discovered_database_record_list_destroy(list);
+    return strappy_catalog_error(reader,error_out);
+  }
+  return 1;
+}
+
+int strappy_db_catalog_index(strappy_catalog_reader *reader, long long catalog_id,
+  size_t *index, char **error_out)
+{
+  int rc;
+  *index = (size_t)-1;
+  sqlite3_bind_int64(reader->identity,1,catalog_id);
+  rc = sqlite3_step(reader->identity);
+  if (rc == SQLITE_ROW) *index = (size_t)sqlite3_column_int64(reader->identity,0);
+  sqlite3_reset(reader->identity);
+  return (rc == SQLITE_ROW || rc == SQLITE_DONE) ? 1 : strappy_catalog_error(reader,error_out);
+}
+
+int strappy_db_catalog_groups(strappy_catalog_reader *reader,
+  strappy_catalog_group_callback callback, void *context, char **error_out)
+{
+  sqlite3_stmt *stmt = NULL;
+  int rc = sqlite3_prepare_v2(reader->db,
+    "SELECT o.application,o.group_key,o.bundle,min(o.rowid)-1,count(*),n.total>count(*) "
+    "FROM catalog_order o JOIN (SELECT application,count(*) AS total FROM catalog_order "
+    "GROUP BY application) n ON n.application=o.application "
+    "GROUP BY o.application,o.group_key ORDER BY min(o.rowid)",-1,&stmt,NULL);
+  if (rc == SQLITE_OK) {
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+      callback(context,(const char *)sqlite3_column_text(stmt,0),
+        (const char *)sqlite3_column_text(stmt,1),(const char *)sqlite3_column_text(stmt,2),
+        (size_t)sqlite3_column_int64(stmt,3),(size_t)sqlite3_column_int64(stmt,4),
+        sqlite3_column_int(stmt,5));
+    }
+  }
+  sqlite3_finalize(stmt);
+  return rc == SQLITE_DONE ? 1 : strappy_catalog_error(reader,error_out);
+}
+
+unsigned long long strappy_db_catalog_page_steps(const strappy_catalog_reader *reader)
+{
+  return reader->page_steps;
 }

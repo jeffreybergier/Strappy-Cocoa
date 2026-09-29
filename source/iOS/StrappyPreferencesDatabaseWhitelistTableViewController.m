@@ -155,46 +155,6 @@ static BOOL StrappyDatabaseStringHasValue(NSString *string)
     YES : NO;
 }
 
-static NSString *StrappyDatabaseAppNameForRow(NSDictionary *row)
-{
-  NSString *appName;
-  NSString *groupKey;
-
-  appName = [row objectForKey:@"app_name"];
-  if (StrappyDatabaseStringHasValue(appName)) {
-    return appName;
-  }
-
-  groupKey = [row objectForKey:@"app_group_key"];
-  if (StrappyDatabaseStringHasValue(groupKey)) {
-    return groupKey;
-  }
-
-  return NSLocalizedString(@"Other", nil);
-}
-
-static NSString *StrappyDatabaseAppGroupKeyForRow(NSDictionary *row)
-{
-  NSString *groupKey;
-  NSString *location;
-
-  groupKey = [row objectForKey:@"app_group_key"];
-  if (StrappyDatabaseStringHasValue(groupKey)) {
-    return groupKey;
-  }
-
-  location = StrappyDatabaseLocationForRow(row);
-  return [@"path:" stringByAppendingString:[location lowercaseString]];
-}
-
-static NSString *StrappyDatabaseBundleIdentifierForRow(NSDictionary *row)
-{
-  NSString *bundleIdentifier;
-
-  bundleIdentifier = [row objectForKey:@"app_bundle_id"];
-  return StrappyDatabaseStringHasValue(bundleIdentifier) ? bundleIdentifier : @"";
-}
-
 static BOOL StrappyDatabaseRowAllowedValue(NSDictionary *row)
 {
   NSString *decision;
@@ -212,186 +172,13 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
     YES : NO;
 }
 
-static NSString *StrappyDatabaseSectionTitle(NSString *appName,
-                                             NSString *bundleIdentifier,
-                                             BOOL disambiguate)
-{
-  NSString *title;
-
-  title = StrappyDatabaseStringHasValue(appName) ? appName :
-    NSLocalizedString(@"Other", nil);
-  if (disambiguate && ([bundleIdentifier length] > 0U)) {
-    title = [NSString stringWithFormat:@"%@ (%@)", title, bundleIdentifier];
-  }
-
-  return title;
-}
-
-static NSArray *StrappyDatabaseSectionsForRows(NSArray *rows)
-{
-  NSMutableDictionary *nameCounts;
-  NSMutableArray *sections;
-  NSString *currentGroupKey;
-  NSString *currentAppName;
-  NSString *currentBundleIdentifier;
-  NSMutableArray *currentRows;
-  NSUInteger index;
-
-  if (![rows isKindOfClass:[NSArray class]] || ([rows count] == 0U)) {
-    return [NSArray array];
-  }
-
-  nameCounts = [NSMutableDictionary dictionary];
-  for (index = 0U; index < [rows count]; index++) {
-    NSDictionary *row;
-    NSString *appName;
-    NSNumber *count;
-
-    row = [rows objectAtIndex:index];
-    if (![row isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-    appName = StrappyDatabaseAppNameForRow(row);
-    count = [nameCounts objectForKey:appName];
-    [nameCounts setObject:[NSNumber numberWithUnsignedInteger:
-      ([count isKindOfClass:[NSNumber class]] ?
-        [count unsignedIntegerValue] + 1U : 1U)]
-                    forKey:appName];
-  }
-
-  sections = [NSMutableArray array];
-  currentGroupKey = nil;
-  currentAppName = nil;
-  currentBundleIdentifier = nil;
-  currentRows = [NSMutableArray array];
-  for (index = 0U; index <= [rows count]; index++) {
-    NSDictionary *row;
-    NSString *groupKey;
-
-    row = (index < [rows count]) ? [rows objectAtIndex:index] : nil;
-    groupKey = [row isKindOfClass:[NSDictionary class]] ?
-      StrappyDatabaseAppGroupKeyForRow(row) : nil;
-    if ((currentGroupKey != nil) &&
-        ((row == nil) || ![groupKey isEqualToString:currentGroupKey])) {
-      NSNumber *appNameCount;
-      BOOL disambiguate;
-      NSString *title;
-      NSDictionary *section;
-
-      appNameCount = [nameCounts objectForKey:currentAppName];
-      disambiguate = ([appNameCount isKindOfClass:[NSNumber class]] &&
-                      ([appNameCount unsignedIntegerValue] >
-                       [currentRows count])) ? YES : NO;
-      title = StrappyDatabaseSectionTitle(currentAppName,
-                                          currentBundleIdentifier,
-                                          disambiguate);
-      section = [NSDictionary dictionaryWithObjectsAndKeys:
-        title, @"title",
-        [NSArray arrayWithArray:currentRows], @"rows",
-        currentGroupKey, @"app_group_key",
-        nil];
-      [sections addObject:section];
-      [currentRows removeAllObjects];
-      currentGroupKey = nil;
-      currentAppName = nil;
-      currentBundleIdentifier = nil;
-    }
-
-    if ([row isKindOfClass:[NSDictionary class]]) {
-      if (currentGroupKey == nil) {
-        currentGroupKey = groupKey;
-        currentAppName = StrappyDatabaseAppNameForRow(row);
-        currentBundleIdentifier = StrappyDatabaseBundleIdentifierForRow(row);
-      }
-      [currentRows addObject:row];
-    }
-  }
-
-  return sections;
-}
-
-static NSComparisonResult StrappyCompareStrings(NSString *left, NSString *right)
-{
-  if (![left isKindOfClass:[NSString class]]) {
-    left = @"";
-  }
-  if (![right isKindOfClass:[NSString class]]) {
-    right = @"";
-  }
-  return [left caseInsensitiveCompare:right];
-}
-
-static NSComparisonResult StrappyCompareLongLong(long long left,
-                                                  long long right)
-{
-  if (left < right) {
-    return NSOrderedAscending;
-  }
-  if (left > right) {
-    return NSOrderedDescending;
-  }
-  return NSOrderedSame;
-}
-
-static long long StrappyDatabaseSizeForRow(NSDictionary *row)
-{
-  NSNumber *size;
-
-  size = [row objectForKey:@"size"];
-  return [size isKindOfClass:[NSNumber class]] ? [size longLongValue] : 0LL;
-}
-
-static long long StrappyDatabaseRowPriority(NSDictionary *row)
-{
-  return StrappyDatabaseRowHiddenValue(row) ? 0LL : 100LL;
-}
-
-static BOOL StrappyDatabaseRowIsAllowed(NSDictionary *row)
-{
-  return StrappyDatabaseRowAllowedValue(row);
-}
-
-static NSComparisonResult StrappyCompareDatabaseRows(id left,
-                                                     id right,
-                                                     void *context)
-{
-  NSDictionary *leftRow;
-  NSDictionary *rightRow;
-  NSComparisonResult result;
-
-  (void)context;
-  leftRow = [left isKindOfClass:[NSDictionary class]] ? left : nil;
-  rightRow = [right isKindOfClass:[NSDictionary class]] ? right : nil;
-  result = StrappyCompareStrings(StrappyDatabaseAppNameForRow(leftRow),
-                                 StrappyDatabaseAppNameForRow(rightRow));
-  if (result != NSOrderedSame) {
-    return result;
-  }
-  result = StrappyCompareStrings(StrappyDatabaseAppGroupKeyForRow(leftRow),
-                                 StrappyDatabaseAppGroupKeyForRow(rightRow));
-  if (result != NSOrderedSame) {
-    return result;
-  }
-  result = StrappyCompareLongLong(StrappyDatabaseRowPriority(leftRow),
-                                  StrappyDatabaseRowPriority(rightRow));
-  if (result != NSOrderedSame) {
-    return -result;
-  }
-  result = StrappyCompareLongLong(StrappyDatabaseSizeForRow(leftRow),
-                                  StrappyDatabaseSizeForRow(rightRow));
-  if (result != NSOrderedSame) {
-    return -result;
-  }
-  return StrappyCompareStrings(StrappyDatabaseNameForRow(leftRow),
-                               StrappyDatabaseNameForRow(rightRow));
-}
-
 @interface StrappyPreferencesDatabaseWhitelistTableViewController ()
   <UIActionSheetDelegate>
 @property (nonatomic, assign) BOOL scanning;
 @property (nonatomic, assign) BOOL hiddenMode;
 @property (nonatomic, copy) NSArray *databaseSections;
 @property (nonatomic, strong) UIBarButtonItem *scanButton;
+- (void)loadCatalogUsingSnapshot:(BOOL)reuse;
 - (void)scanButtonPressed:(id)sender;
 - (void)updateHiddenModeButton;
 - (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode;
@@ -438,6 +225,8 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
            name:FileScannerDatabaseCatalogScanDidFinishNotification
          object:nil];
 
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(catalogReadFailed:)
+    name:FileScannerCatalogReadFailedNotification object:nil];
   [self updateHiddenModeButton];
   [self setScanning:[FileScanner isDatabaseCatalogScanInFlight]];
 }
@@ -468,73 +257,67 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
     setActionAccessibilityLabel:[self actionButtonAccessibilityLabel]];
 }
 
-- (NSArray *)loadAllRowsWithError:(NSError **)error
+- (void)reloadRows
 {
-  return [[FileScanner sharedScanner] catalogedSQLiteDatabasesWithError:error];
-}
-
-- (NSArray *)sortedRows:(NSArray *)rows
-{
-  return [rows sortedArrayUsingFunction:StrappyCompareDatabaseRows context:NULL];
-}
-
-- (BOOL)row:(NSDictionary *)row matchesSearchText:(NSString *)searchText
-{
-  NSString *appName;
-  NSString *appBundleId;
-
-  if ([searchText length] == 0U) {
-    return YES;
-  }
-  appName = StrappyDatabaseAppNameForRow(row);
-  appBundleId = StrappyDatabaseBundleIdentifierForRow(row);
-  return ([StrappyDatabaseNameForRow(row)
-            rangeOfString:searchText
-                  options:NSCaseInsensitiveSearch].location != NSNotFound) ||
-         ([appName rangeOfString:searchText
-                          options:NSCaseInsensitiveSearch].location !=
-          NSNotFound) ||
-         ([appBundleId rangeOfString:searchText
-                              options:NSCaseInsensitiveSearch].location !=
-          NSNotFound) ||
-         ([StrappyDatabaseLocationForRow(row)
-            rangeOfString:searchText
-                  options:NSCaseInsensitiveSearch].location != NSNotFound) ||
-         ([StrappyDatabasePathForRow(row)
-            rangeOfString:searchText
-                  options:NSCaseInsensitiveSearch].location != NSNotFound);
+  [self loadCatalogUsingSnapshot:NO];
 }
 
 - (void)applyRows
 {
-  NSMutableArray *matchingRows;
-  NSArray *sortedRows;
-  NSString *searchText;
-  NSUInteger index;
+  [self loadCatalogUsingSnapshot:YES];
+}
 
-  searchText = [self currentSearchText];
-  matchingRows = [NSMutableArray arrayWithCapacity:[[self allRows] count]];
-  for (index = 0U; index < [[self allRows] count]; index++) {
-    NSDictionary *row;
+- (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText
+{
+  (void)searchBar; (void)searchText;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyRows) object:nil];
+  [self performSelector:@selector(applyRows) withObject:nil afterDelay:0.15];
+}
 
-    row = [[self allRows] objectAtIndex:index];
-    if (![row isKindOfClass:[NSDictionary class]]) {
-      continue;
-    }
-    if (![self hiddenMode] &&
-        StrappyDatabaseRowHiddenValue(row) &&
-        !StrappyDatabaseRowAllowedValue(row)) {
-      continue;
-    }
-    if ([self row:row matchesSearchText:searchText]) {
-      [matchingRows addObject:row];
-    }
+- (void)searchBarSearchButtonClicked:(UISearchBar *)searchBar
+{
+  [self applyRows];
+  [searchBar resignFirstResponder];
+}
+
+- (void)loadCatalogUsingSnapshot:(BOOL)reuse
+{
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyRows) object:nil];
+  NSError *error = nil;
+  NSArray *descriptors = [NSArray arrayWithObjects:
+    [[NSSortDescriptor alloc] initWithKey:@"application" ascending:YES],
+    [[NSSortDescriptor alloc] initWithKey:@"group_key" ascending:YES],
+    [[NSSortDescriptor alloc] initWithKey:@"database_priority" ascending:NO],
+    [[NSSortDescriptor alloc] initWithKey:@"size" ascending:NO],
+    [[NSSortDescriptor alloc] initWithKey:@"name" ascending:YES],nil];
+  FileScannerCatalogRows *rows = nil;
+  if (reuse && [[self rows] isKindOfClass:[FileScannerCatalogRows class]]) {
+    rows = (FileScannerCatalogRows *)[self rows];
+    if (![rows filterWithSearch:[self currentSearchText] showHidden:[self hiddenMode]
+        sortDescriptors:descriptors error:&error]) rows = nil;
+  } else {
+    rows = [[FileScanner sharedScanner] catalogRowsMatchingSearch:[self currentSearchText]
+      showHidden:[self hiddenMode] sortDescriptors:descriptors error:&error];
   }
+  NSArray *sections = rows != nil ? [rows applicationSectionsWithError:&error] : nil;
+  if (sections == nil) {
+    [self setRows:[NSArray array]];
+    [self setDatabaseSections:[NSArray array]];
+    [[self tableView] reloadData];
+    [self setStatusMessage:[error localizedDescription]];
+  } else {
+    [self setStatusMessage:nil];
+    [self setRows:rows];
+    [self setDatabaseSections:sections];
+    [[self tableView] reloadData];
+  }
+  [self refreshStatusToolbar];
+}
 
-  sortedRows = [self sortedRows:matchingRows];
-  [self setRows:sortedRows];
-  [self setDatabaseSections:StrappyDatabaseSectionsForRows(sortedRows)];
-  [[self tableView] reloadData];
+- (void)catalogReadFailed:(NSNotification *)notification
+{
+  if ([notification object] != [self rows]) return;
+  [self setStatusMessage:[[[notification userInfo] objectForKey:@"error"] localizedDescription]];
   [self refreshStatusToolbar];
 }
 
@@ -548,7 +331,7 @@ static NSComparisonResult StrappyCompareDatabaseRows(id left,
 
 - (BOOL)allowedValueForDatabaseRow:(NSDictionary *)row
 {
-  return StrappyDatabaseRowIsAllowed(row);
+  return StrappyDatabaseRowAllowedValue(row);
 }
 
 - (void)setScanning:(BOOL)scanning
@@ -819,37 +602,15 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 
 - (void)databaseCatalogDidChange:(NSNotification *)notification
 {
-  NSArray *rows;
-
-  rows = [[notification userInfo] objectForKey:@"rows"];
-  if (![rows isKindOfClass:[NSArray class]]) {
-    return;
-  }
-  [self setAllRows:[self sortedRows:rows]];
-  [self applyRows];
+  (void)notification;
+  [self reloadRows];
 }
 
 - (void)databaseCatalogScanDidFinish:(NSNotification *)notification
 {
-  NSDictionary *result;
-  NSArray *rows;
-  NSString *errorMessage;
-
-  result = [notification userInfo];
-  rows = [result objectForKey:@"rows"];
-  errorMessage = [result objectForKey:@"error"];
-  if ([rows isKindOfClass:[NSArray class]]) {
-    [self setStatusMessage:nil];
-    [self setAllRows:[self sortedRows:rows]];
-    [self applyRows];
-  } else {
-    [self setStatusMessage:[errorMessage isKindOfClass:[NSString class]]
-      ? errorMessage
-      : NSLocalizedString(@"Database scan failed.", nil)];
-  }
-
+  NSString *errorMessage = [[notification userInfo] objectForKey:@"error"];
+  if ([errorMessage isKindOfClass:[NSString class]]) [self setStatusMessage:errorMessage];
   [self setScanning:NO];
-  [[self tableView] reloadData];
   [self refreshStatusToolbar];
 }
 

@@ -38,7 +38,6 @@
   NSTextField         *databaseStatusLabel_;
   NSArray             *allModelRows_;
   NSArray             *modelRows_;
-  NSArray             *allDatabaseRows_;
   NSArray             *databaseRows_;
   NSArray             *allDatabaseStudyRows_;
   NSArray             *databaseStudyRows_;

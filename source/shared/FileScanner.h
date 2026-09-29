@@ -11,6 +11,23 @@ typedef enum FileScannerDatabaseScanMode {
   FileScannerDatabaseScanModeQuick = 1
 } FileScannerDatabaseScanMode;
 
+extern NSString * const FileScannerCatalogReadFailedNotification;
+
+@interface FileScannerCatalogRows : NSArray {
+ @private
+  void *reader_;
+  NSMutableDictionary *pages_;
+  NSMutableArray *pageOrder_;
+  NSError *readError_;
+}
+/* Reorders the existing snapshot atomically and clears its row cache. */
+- (BOOL)filterWithSearch:(NSString *)search showHidden:(BOOL)showHidden
+  sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
+- (NSArray *)applicationSectionsWithError:(NSError **)error;
+- (NSUInteger)indexForCatalogIdentifier:(NSNumber *)identifier;
+- (NSError *)readError;
+@end
+
 @interface FileScanner : NSObject
 
 + (FileScanner *)sharedScanner;
@@ -26,6 +43,12 @@ typedef enum FileScannerDatabaseScanMode {
                                           scanMode:(FileScannerDatabaseScanMode)scanMode
                    savingResultsToCatalogWithError:(NSError **)error;
 - (NSArray *)catalogedSQLiteDatabasesWithError:(NSError **)error;
+/* Sort descriptors use application, group_key, name, location, size, allowed,
+ * hidden, or database_priority. All filtering/order belongs to this snapshot. */
+- (FileScannerCatalogRows *)catalogRowsMatchingSearch:(NSString *)search
+  showHidden:(BOOL)showHidden sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
+- (BOOL)scanAndSaveDatabasesAtPath:(NSString *)path
+  scanMode:(FileScannerDatabaseScanMode)scanMode error:(NSError **)error;
 - (BOOL)setCatalogedDatabaseAllowed:(BOOL)allowed
                 forCatalogIdentifier:(NSNumber *)catalogIdentifier
                                error:(NSError **)error;

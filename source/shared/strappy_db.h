@@ -572,6 +572,38 @@ int strappy_db_replace_discovered_databases_for_scan_root(
   size_t count,
   const char *scan_root,
   char **error_out);
+/* Catalog snapshots keep an indexed temporary ordering, not hydrated records.
+ * Callbacks provide the host's Unicode/path semantics; returned text is malloc'd.
+ * A reader and its callbacks are confined to the opening thread. */
+typedef struct strappy_catalog_reader strappy_catalog_reader;
+typedef struct strappy_catalog_text {
+  char *(*field)(const char *kind, const char *path, const char *name,
+                 const char *group);
+  int (*compare)(const char *left, const char *right);
+  int (*contains)(const char *text, const char *needle);
+} strappy_catalog_text;
+typedef struct strappy_catalog_sort {
+  const char *key;
+  int ascending;
+} strappy_catalog_sort;
+int strappy_db_catalog_open(const char *path, const char *search, int show_hidden,
+  const strappy_catalog_sort *sort, size_t sort_count,
+  const strappy_catalog_text *text, strappy_catalog_reader **out, char **error_out);
+int strappy_db_catalog_query(strappy_catalog_reader *reader, const char *search,
+  int show_hidden, const strappy_catalog_sort *sort, size_t sort_count, char **error_out);
+void strappy_db_catalog_close(strappy_catalog_reader *reader);
+size_t strappy_db_catalog_count(const strappy_catalog_reader *reader);
+unsigned long long strappy_db_catalog_page_steps(const strappy_catalog_reader *reader);
+int strappy_db_catalog_page(strappy_catalog_reader *reader, size_t offset,
+  strappy_discovered_database_record_list *list, char **error_out);
+int strappy_db_catalog_index(strappy_catalog_reader *reader, long long catalog_id,
+  size_t *index, char **error_out);
+typedef void (*strappy_catalog_group_callback)(void *context, const char *name,
+  const char *group, const char *bundle, size_t offset, size_t count,
+  int disambiguate);
+int strappy_db_catalog_groups(strappy_catalog_reader *reader,
+  strappy_catalog_group_callback callback, void *context, char **error_out);
+
 int strappy_db_list_discovered_databases(
   const char *db_path,
   strappy_discovered_database_record_list *list,

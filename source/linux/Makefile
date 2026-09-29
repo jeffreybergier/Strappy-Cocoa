@@ -226,7 +226,7 @@ endif
 	openrouter-live-test openai-oauth-test \
 	openai-oauth-poc-self-test clean
 
-test: $(BUILD_DIR)/sidebar_harness $(PROVIDER_REGISTRY_HARNESS) $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) $(OPENAI_OAUTH_HARNESS) $(CHATGPT_ADAPTER_HARNESS) $(CHATGPT_COMPATIBILITY_PROBE) $(CALENDAR_HARNESS) | $(TEST_DIR)
+test: $(BUILD_DIR)/catalog_harness $(BUILD_DIR)/sidebar_harness $(PROVIDER_REGISTRY_HARNESS) $(SCANNER_PROFILE_HARNESS) $(DATABASE_QUERY_HARNESS) $(BASH_HARNESS) $(WEBVIEW_HARNESS) $(RESPONSES_HARNESS) $(PROMPT_GENERATOR_HARNESS) $(OPENAI_OAUTH_HARNESS) $(CHATGPT_ADAPTER_HARNESS) $(CHATGPT_COMPATIBILITY_PROBE) $(CALENDAR_HARNESS) | $(TEST_DIR)
 	@echo "--- Running Linux shared-core test suite ---"
 	@echo "No live provider requests are made by this target."
 	@echo " [1/12] RUN  provider_registry_harness"
@@ -265,6 +265,7 @@ test: $(BUILD_DIR)/sidebar_harness $(PROVIDER_REGISTRY_HARNESS) $(SCANNER_PROFIL
 	@echo " [12/12] RUN  calendar_harness"
 	./$(CALENDAR_HARNESS)
 	@echo " [12/12] PASS calendar_harness"
+	./$(BUILD_DIR)/catalog_harness
 	./$(BUILD_DIR)/sidebar_harness
 	@echo "--- PASS: all offline Linux shared-core checks completed ---"
 
@@ -382,3 +383,23 @@ session-sections-test:
 SIDEBAR_HARNESS_SOURCES = sidebar_harness.c $(filter-out database_query_harness.c,$(DATABASE_QUERY_HARNESS_SOURCES))
 $(BUILD_DIR)/sidebar_harness: $(SIDEBAR_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(SIDEBAR_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) $(PLATFORM_LIBS) -lcurl
+
+CATALOG_HARNESS_SOURCES = catalog_harness.c $(filter-out database_query_harness.c,$(DATABASE_QUERY_HARNESS_SOURCES))
+$(BUILD_DIR)/catalog_harness: $(CATALOG_HARNESS_SOURCES) $(FONTAWESOME_GENERATED) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -o $@ $(CATALOG_HARNESS_SOURCES) $(SQLITE_LIBS) $(THREAD_LIBS) $(PLATFORM_LIBS) -lcurl
+
+# Compile portable C separately so GNUstep's Objective-C flags do not leak into it.
+CATALOG_FOUNDATION_C_SOURCES = $(filter-out database_query_harness.c,$(DATABASE_QUERY_HARNESS_SOURCES))
+CATALOG_FOUNDATION_OBJECTS = $(addprefix $(BUILD_DIR)/catalog-foundation/,$(notdir $(CATALOG_FOUNDATION_C_SOURCES:.c=.o)))
+vpath %.c $(SHARED_DIR) $(CJSON_DIR)
+$(BUILD_DIR)/catalog-foundation/%.o: %.c
+	@mkdir -p $(BUILD_DIR)/catalog-foundation
+	$(CC) $(CPPFLAGS) $(CFLAGS) -O2 -c $< -o $@
+.PHONY: catalog-foundation-test
+catalog-foundation-test: $(FONTAWESOME_GENERATED) $(CATALOG_FOUNDATION_OBJECTS) | $(BUILD_DIR)
+	$(GNUSTEP_OBJC) $$(gnustep-config --objc-flags) -std=gnu99 $(CPPFLAGS) \
+		catalog_foundation_harness.m $(SHARED_DIR)/FileScanner.m \
+		$(CATALOG_FOUNDATION_OBJECTS) \
+		-o $(BUILD_DIR)/catalog_foundation_harness $$(gnustep-config --base-libs) \
+		$(SQLITE_LIBS) $(THREAD_LIBS) $(PLATFORM_LIBS) -lcurl
+	$(BUILD_DIR)/catalog_foundation_harness
