@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as directory
     for run in range(2):
         previous = bytes([65 + run]) * 65536
         log.write_bytes(previous)
-        process = subprocess.Popen([binary, str(log), str(Path(directory) / 'strappy.sqlite'), str(Path('../shared/Resources').resolve())])
+        process = subprocess.Popen([binary, str(log), str(Path(directory) / 'strappy.sqlite'), str(Path('build-test/daemon-resources').resolve())])
         try:
             deadline = time.monotonic() + 5
             while True:

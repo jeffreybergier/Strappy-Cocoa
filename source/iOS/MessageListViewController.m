@@ -1146,6 +1146,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   }
 
   [self updateSendingStateFromSession];
+  if ([[event objectForKey:@"service_invalidated"] boolValue]) {
+    [self cancelPendingStreamEventFlush];
+    [self reloadContent];
+    return;
+  }
   if ([[event objectForKey:@"webview_reload_required"] boolValue]) {
     if (![self webViewReloadRequired]) {
       [self cancelPendingStreamEventFlush];
@@ -1222,7 +1227,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self updateSendingStateFromSession];
 
   sessionSummary = [result objectForKey:@"session"];
-  if ([sessionSummary isKindOfClass:[NSDictionary class]]) {
+  if ([sessionSummary isKindOfClass:[NSDictionary class]] &&
+      ![[result objectForKey:@"error"] isKindOfClass:[NSString class]]) {
     [self setStatusText:nil];
     [self updateTitleFromSession];
   } else {

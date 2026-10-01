@@ -12,7 +12,7 @@ import time
 binary, fixture = map(lambda p: str(Path(p).resolve()), sys.argv[1:3])
 HEADER = struct.Struct('!4sHHIIII')
 
-def frame(op, ident, payload=b'', version=2, kind=1, status=0):
+def frame(op, ident, payload=b'', version=3, kind=1, status=0):
     return HEADER.pack(b'STPY', version, kind, op, ident, len(payload), status) + payload
 
 def exact(sock, count):
@@ -26,7 +26,7 @@ def exact(sock, count):
 
 def receive(sock):
     magic, version, kind, op, ident, length, status = HEADER.unpack(exact(sock, 24))
-    assert magic == b'STPY' and version == 2 and length <= 4096
+    assert magic == b'STPY' and version == 3 and length <= 4096
     return kind, op, ident, status, exact(sock, length)
 
 def connect(path):
@@ -42,7 +42,7 @@ def request(sock, op, ident, payload=b'', status=0):
     return result[4]
 
 def hello(sock):
-    return request(sock, 1, 1, struct.pack('!II', 2, 2))
+    return request(sock, 1, 1, struct.pack('!II', 3, 3))
 
 def revision(payload):
     assert len(payload) == 36
@@ -51,7 +51,7 @@ def revision(payload):
 def start(directory, worker=False):
     path = directory / 'service.sock'
     process = subprocess.Popen([fixture if worker else binary,
-                                str(directory if worker else directory / 'heartbeat.log')] + ([] if worker else [str(directory / 'strappy.sqlite'), str(Path('../shared/Resources').resolve())]),
+                                str(directory if worker else directory / 'heartbeat.log')] + ([] if worker else [str(directory / 'strappy.sqlite'), str(Path('build-test/daemon-resources').resolve())]),
                                stdin=subprocess.PIPE if worker else subprocess.DEVNULL)
     for _ in range(300):
         if path.exists():
@@ -78,36 +78,36 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as temporary
         assert path.stat().st_mode & 0o777 == 0o600
         assert subprocess.run([binary, '--ipc-probe', str(path)], check=True).returncode == 0
         # A competing server cannot remove the live socket.
-        assert subprocess.run([binary, str(directory / 'other.log'), str(directory / 'strappy.sqlite'), str(Path('../shared/Resources').resolve())]).returncode != 0
+        assert subprocess.run([binary, str(directory / 'other.log'), str(directory / 'strappy.sqlite'), str(Path('build-test/daemon-resources').resolve())]).returncode != 0
         with connect(path) as sock:
             request(sock, 2, 1, status=3)
-            snapshot = request(sock, 1, 2, struct.pack('!II', 2, 2))
+            snapshot = request(sock, 1, 2, struct.pack('!II', 3, 3))
             assert revision(snapshot) == 0
-            assert struct.unpack('!III', snapshot[24:]) == (3, 4096, 1)
+            assert struct.unpack('!III', snapshot[24:]) == (7, 4096, 2)
             instance = snapshot[:16]
             request(sock, 3, 3)
             request(sock, 3, 3, status=4)
             request(sock, 2, 2, status=4)
             for op in range(16, 25):
-                request(sock, op, op, status=5)
+                request(sock, op, op, status=1 if op in (16, 17) else 5)
             request(sock, 999, 30, status=6)
             request(sock, 2, 31, b'x', status=1)
             request(sock, 4, 32)
         # Every possible header split; coalesced requests; max payload.
         for split in range(1, 25):
             with connect(path) as sock:
-                packet = frame(1, 1, struct.pack('!II', 2, 2))
+                packet = frame(1, 1, struct.pack('!II', 3, 3))
                 sock.sendall(packet[:split]); sock.sendall(packet[split:])
                 assert receive(sock)[3] == 0
                 sock.sendall(frame(2, 2) + frame(2, 3))
                 assert receive(sock)[2] == 2 and receive(sock)[2] == 3
-                request(sock, 16, 4, b'x' * 4096, status=5)
+                request(sock, 16, 4, b'x' * 4096, status=1)
         with connect(path) as sock:
             sock.sendall(frame(1, 1, version=1))
             assert receive(sock)[3] == 2
             assert sock.recv(1) == b''
         with connect(path) as sock:
-            request(sock, 1, 1, struct.pack('!II', 3, 4), status=2)
+            request(sock, 1, 1, struct.pack('!II', 4, 5), status=2)
             assert sock.recv(1) == b''
         for packet in [b'BAD!' + frame(2, 1)[4:],
                        HEADER.pack(b'STPY', 1, 1, 2, 1, 4097, 0),
@@ -122,7 +122,7 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as temporary
         # Partial payload disconnects never affect a healthy client.
         for cut in [1, 23, 24, 28]:
             with connect(path) as sock:
-                sock.sendall(frame(1, 1, struct.pack('!II', 2, 2))[:cut])
+                sock.sendall(frame(1, 1, struct.pack('!II', 3, 3))[:cut])
         # Fill a non-reading subscriber's output without delaying another client.
         with connect(path) as slow:
             hello(slow); request(slow, 3, 2)
@@ -212,6 +212,15 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as temporary
             process.stdin.write(b'\x00'); process.stdin.flush()
             time.sleep(.05)
             assert revision(request(subscriber, 2, 4)) == 106
+            request(subscriber, 3, 5)
+            # A command worker must preserve every event topic on its peer.
+            request(subscriber, 16, 6)
+            topics = set()
+            for _ in range(4):
+                event = receive(subscriber)
+                assert event[0] == 3 and revision(event[4]) == 110
+                topics.add(event[1])
+            assert topics == {32, 33, 34, 35}
     finally:
         stop(process)
 print('ipc_harness: framing, errors, peers, duplicates, slow readers, restart, worker events, atomic resync passed')

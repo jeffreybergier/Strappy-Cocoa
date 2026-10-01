@@ -17,6 +17,13 @@
 struct strappy_ipc_peer {
     int fd, negotiated, subscribed, closing;
     uint32_t last_id;
+    pthread_t worker;
+    int working, finished;
+    unsigned int refresh;
+    pthread_mutex_t *mutex;
+    void (*handler)(const strappy_ipc_message *, strappy_ipc_message *, void *);
+    void *context;
+    strappy_ipc_message command, response;
     int64_t progress;
     size_t received, needed, queued;
     unsigned char input[STRAPPY_IPC_HEADER + STRAPPY_IPC_MAX_PAYLOAD];
@@ -30,6 +37,8 @@ struct strappy_ipc_server {
     uint64_t revision;
     unsigned int pending;
     int store_ready;
+    void (*handler)(const strappy_ipc_message *, strappy_ipc_message *, void *);
+    void *context;
     struct strappy_ipc_peer peers[STRAPPY_IPC_MAX_CLIENTS];
 };
 static int strappy_ipc_nonblocking(int fd)
@@ -38,8 +47,30 @@ static int strappy_ipc_nonblocking(int fd)
         fcntl(fd, F_SETFL, O_NONBLOCK) == 0 &&
         fcntl(fd, F_SETFD, FD_CLOEXEC) == 0 ? 0 : -1;
 }
+static void strappy_ipc_error(strappy_ipc_message *reply)
+{
+    static const char *const errors[] = { "", "invalid_request", "incompatible_version",
+        "handshake_required", "duplicate_request", "execution_not_ready", "unknown_operation",
+        "service_busy", "request_conflict", "storage_error" };
+    if (reply->status >= sizeof(errors) / sizeof(errors[0])) reply->status = STRAPPY_IPC_STORAGE_ERROR;
+    if (reply->status) {
+        reply->length = (uint32_t)strlen(errors[reply->status]);
+        memcpy(reply->payload, errors[reply->status], reply->length);
+    }
+}
+static void *strappy_ipc_command(void *context)
+{
+    struct strappy_ipc_peer *p = context;
+    p->handler(&p->command, &p->response, p->context);
+    strappy_ipc_error(&p->response);
+    pthread_mutex_lock(p->mutex);
+    p->finished = 1;
+    pthread_mutex_unlock(p->mutex);
+    return NULL;
+}
 static void strappy_ipc_drop(struct strappy_ipc_peer *peer)
 {
+    if (peer->working) pthread_join(peer->worker, NULL);
     if (peer->fd >= 0) (void)close(peer->fd);
     memset(peer, 0, sizeof(*peer)); peer->fd = -1;
 }
@@ -48,6 +79,12 @@ static void strappy_ipc_queue(struct strappy_ipc_peer *peer,
 {
     size_t size = STRAPPY_IPC_HEADER + message->length;
     if (peer->fd < 0) return;
+    if (peer->working) {
+        if (message->kind == STRAPPY_IPC_EVENT &&
+            message->operation >= STRAPPY_IPC_SESSION_CHANGED && message->operation <= STRAPPY_IPC_RUN_CHANGED)
+            peer->refresh |= 1U << (message->operation - STRAPPY_IPC_SESSION_CHANGED);
+        return;
+    }
     if (size > sizeof(peer->output) - peer->queued) {
         /* Disconnect instead of silently losing an invalidation. */
         strappy_ipc_drop(peer); return;
@@ -67,7 +104,7 @@ static void strappy_ipc_snapshot(strappy_ipc_server *s, strappy_ipc_message *m)
     strappy_ipc_put32(m->payload + 16, (uint32_t)(revision >> 32));
     strappy_ipc_put32(m->payload + 20, (uint32_t)revision);
     /* bit 0 transport, bit 1 store; execution remains unavailable */
-    strappy_ipc_put32(m->payload + 24, s->store_ready ? 3U : 1U);
+    strappy_ipc_put32(m->payload + 24, s->store_ready ? (s->handler ? 7U : 3U) : 1U);
     strappy_ipc_put32(m->payload + 28, STRAPPY_IPC_MAX_PAYLOAD);
     strappy_ipc_put32(m->payload + 32, STRAPPY_IPC_STORE_ABI);
     m->length = 36;
@@ -108,16 +145,24 @@ static void strappy_ipc_request(strappy_ipc_server *s, struct strappy_ipc_peer *
             }
         } else if (request.operation >= STRAPPY_IPC_SUBMIT_PROMPT &&
                    request.operation <= STRAPPY_IPC_START_STUDY)
-            reply.status = STRAPPY_IPC_NOT_READY;
+        {
+            if (s->handler && (request.operation == STRAPPY_IPC_SUBMIT_PROMPT ||
+                               request.operation == STRAPPY_IPC_CANCEL_RUN)) {
+                memcpy(request.payload, p->input + STRAPPY_IPC_HEADER, request.length);
+                p->command = request; p->response = reply;
+                p->handler = s->handler; p->context = s->context; p->mutex = &s->mutex;
+                p->finished = 0;
+                if (pthread_create(&p->worker, NULL, strappy_ipc_command, p) == 0) {
+                    p->working = 1;
+                    p->received = 0; p->needed = STRAPPY_IPC_HEADER;
+                    return;
+                }
+                reply.status = STRAPPY_IPC_BUSY;
+            } else reply.status = STRAPPY_IPC_NOT_READY;
+        }
         else reply.status = STRAPPY_IPC_UNKNOWN_OPERATION;
     }
-    if (reply.status != 0) {
-        /* Structured error: numeric status + stable, non-sensitive UTF-8 text. */
-        static const char * const errors[] = { "", "invalid_request", "incompatible_version",
-            "handshake_required", "duplicate_request", "execution_not_ready", "unknown_operation" };
-        reply.length = (uint32_t)strlen(errors[reply.status]);
-        memcpy(reply.payload, errors[reply.status], reply.length);
-    }
+    strappy_ipc_error(&reply);
     strappy_ipc_queue(p, &reply);
     p->received = 0; p->needed = STRAPPY_IPC_HEADER;
 }
@@ -216,6 +261,24 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
     for (i = 0; i < STRAPPY_IPC_MAX_CLIENTS; ++i) {
         struct strappy_ipc_peer *p = &s->peers[i];
         if (p->fd < 0) continue;
+        if (p->working) {
+            int finished;
+            pthread_mutex_lock(&s->mutex); finished = p->finished;
+            pthread_mutex_unlock(&s->mutex);
+            if (!finished) continue;
+            pthread_join(p->worker, NULL); p->working = 0;
+            strappy_ipc_queue(p, &p->response);
+            if (p->refresh && p->subscribed) {
+                unsigned int topic;
+                for (topic = 0; topic < 4; ++topic) if (p->refresh & (1U << topic)) {
+                    strappy_ipc_message event;
+                    memset(&event, 0, sizeof(event)); event.kind = STRAPPY_IPC_EVENT;
+                    event.operation = STRAPPY_IPC_SESSION_CHANGED + topic;
+                    strappy_ipc_snapshot(s, &event); strappy_ipc_queue(p, &event);
+                }
+                p->refresh = 0;
+            }
+        }
         if ((!p->negotiated || p->received || p->queued) &&
             strappy_ipc_platform_milliseconds() - p->progress >= 30000) {
             strappy_ipc_drop(p); continue;
@@ -231,6 +294,24 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
     for (i = 0; i < STRAPPY_IPC_MAX_CLIENTS; ++i) {
         struct strappy_ipc_peer *p = &s->peers[i];
         if (p->fd < 0) continue;
+        if (p->working) {
+            int finished;
+            pthread_mutex_lock(&s->mutex); finished = p->finished;
+            pthread_mutex_unlock(&s->mutex);
+            if (!finished) continue;
+            pthread_join(p->worker, NULL); p->working = 0;
+            strappy_ipc_queue(p, &p->response);
+            if (p->refresh && p->subscribed) {
+                unsigned int topic;
+                for (topic = 0; topic < 4; ++topic) if (p->refresh & (1U << topic)) {
+                    strappy_ipc_message event;
+                    memset(&event, 0, sizeof(event)); event.kind = STRAPPY_IPC_EVENT;
+                    event.operation = STRAPPY_IPC_SESSION_CHANGED + topic;
+                    strappy_ipc_snapshot(s, &event); strappy_ipc_queue(p, &event);
+                }
+                p->refresh = 0;
+            }
+        }
         if (FD_ISSET(p->fd, &writers)) {
             ssize_t count = strappy_ipc_platform_send(p->fd, p->output, p->queued);
             if (count > 0) {
@@ -285,4 +366,19 @@ void strappy_ipc_server_close(strappy_ipc_server *s)
 void strappy_ipc_server_store_ready(strappy_ipc_server *server)
 {
     server->store_ready = 1;
+}
+
+void strappy_ipc_server_handler(strappy_ipc_server *s,
+    void (*handler)(const strappy_ipc_message *, strappy_ipc_message *, void *), void *context)
+{
+    s->handler = handler; s->context = context;
+}
+
+void strappy_ipc_server_drain(strappy_ipc_server *s)
+{
+    int i;
+    if (!s) return;
+    for (i = 0; i < STRAPPY_IPC_MAX_CLIENTS; ++i) if (s->peers[i].working) {
+        pthread_join(s->peers[i].worker, NULL); s->peers[i].working = 0;
+    }
 }

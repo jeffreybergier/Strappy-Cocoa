@@ -75,8 +75,11 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
   NSString *logPath = [logDirectory stringByAppendingPathComponent:@"heartbeat.log"];
   NSString *embedded = [[[NSBundle mainBundle] bundlePath]
       stringByAppendingPathComponent:@"Contents/Library/LaunchServices/strappyd"];
-  NSString *resourceSource = [[NSBundle mainBundle] pathForResource:@"BundledModels" ofType:@"json"];
-  NSString *resourceTarget = [support stringByAppendingPathComponent:@"BundledModels.json"];
+  NSArray *resources = [NSArray arrayWithObjects:@"BundledModels.json", @"AssistantSets.json", @"SystemPrompt.json",
+      @"GuidanceTools.json", @"GuidanceSkills.json", @"GuidanceDatabase.json", @"FontAwesomeIcons.json", @"cacert.pem", @"Info.plist", nil];
+  NSString *resource;
+  NSEnumerator *resourceEnumerator;
+  BOOL resourcesUnchanged = YES;
   NSString *database = [library stringByAppendingPathComponent:@"Application Support/Strappy/strappy.sqlite"];
   NSFileManager *manager = [NSFileManager defaultManager];
   NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithObjectsAndKeys:
@@ -108,7 +111,12 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
       goto done;
     }
   }
-  unchanged = install && [manager contentsEqualAtPath:resourceSource andPath:resourceTarget] && [manager contentsEqualAtPath:embedded andPath:installed] &&
+  resourceEnumerator = [resources objectEnumerator];
+  while ((resource = [resourceEnumerator nextObject]) != nil) {
+    if (![manager contentsEqualAtPath:[[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:resource]
+        andPath:[support stringByAppendingPathComponent:resource]]) resourcesUnchanged = NO;
+  }
+  unchanged = install && resourcesUnchanged && [manager contentsEqualAtPath:embedded andPath:installed] &&
       [[NSDictionary dictionaryWithContentsOfFile:plistPath] isEqual:plist];
   if (unchanged && StrappyServiceLoaded()) {
     success = YES;
@@ -123,14 +131,20 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
     if (error != NULL) *error = @"Could not remove the background service files.";
     if (unlink([plistPath fileSystemRepresentation]) != 0 && errno != ENOENT) goto done;
     if (unlink([installed fileSystemRepresentation]) != 0 && errno != ENOENT) goto done;
-    if (unlink([resourceTarget fileSystemRepresentation]) != 0 && errno != ENOENT) goto done;
+    resourceEnumerator = [resources objectEnumerator];
+    while ((resource = [resourceEnumerator nextObject]) != nil)
+      if (unlink([[support stringByAppendingPathComponent:resource] fileSystemRepresentation]) != 0 && errno != ENOENT) goto done;
     success = YES;
     goto done;
   }
   if (error != NULL) *error = @"Could not install the background service files.";
-  if (![[NSData dataWithContentsOfFile:resourceSource] writeToFile:resourceTarget atomically:YES] ||
-      chmod([resourceTarget fileSystemRepresentation], 0600) != 0 ||
-      ![binary writeToFile:installed atomically:YES] ||
+  resourceEnumerator = [resources objectEnumerator];
+  while ((resource = [resourceEnumerator nextObject]) != nil) {
+    NSString *target = [support stringByAppendingPathComponent:resource];
+    if (![[NSData dataWithContentsOfFile:[[[NSBundle mainBundle] resourcePath] stringByAppendingPathComponent:resource]]
+        writeToFile:target atomically:YES] || chmod([target fileSystemRepresentation], 0600) != 0) goto done;
+  }
+  if (![binary writeToFile:installed atomically:YES] ||
       chmod([installed fileSystemRepresentation], 0700) != 0 ||
       ![plist writeToFile:plistPath atomically:YES] ||
       chmod([plistPath fileSystemRepresentation], 0600) != 0) goto done;

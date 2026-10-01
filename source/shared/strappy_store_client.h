@@ -4,4 +4,9 @@
  * is a refresh hint; consumers reload committed data on their own UI thread. */
 int strappy_store_client_start(const char *socket_path, const char *database_path,
                                void (*changed)(void));
+/* One command per private connection; reconnect retry uses caller's durable key. */
+int strappy_store_client_command(unsigned int operation, const unsigned char *payload,
+    unsigned int length, unsigned int *status);
+int strappy_store_client_request_key(char key[65]);
+
 #endif

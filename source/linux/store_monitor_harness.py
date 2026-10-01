@@ -8,7 +8,7 @@ import sys
 import tempfile
 
 daemon, monitor = [str(Path(p).resolve()) for p in sys.argv[1:]]
-resources = str(Path('../shared/Resources').resolve())
+resources = str(Path('build-test/daemon-resources').resolve())
 
 def expect(process, line):
     assert select.select([process.stdout], [], [], 8)[0], 'monitor timeout'

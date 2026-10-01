@@ -427,8 +427,8 @@ daemon-test: $(BUILD_DIR)/strappyd $(BUILD_DIR)/ipc_worker_fixture $(BUILD_DIR)/
 	python3 daemon_harness.py $(BUILD_DIR)/strappyd
 	python3 ipc_harness.py $(BUILD_DIR)/strappyd $(BUILD_DIR)/ipc_worker_fixture
 
-$(BUILD_DIR)/strappyd: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+$(BUILD_DIR)/strappyd: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_IPC_SOURCES) service_credentials.c | $(BUILD_DIR) daemon-resources
+	$(CC) $(CPPFLAGS) $(CFLAGS) -D_GNU_SOURCE -DSTRAPPY_ENABLE_LOOPBACK_HTTP_TESTS=1 $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) service_credentials.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -lcurl $(PLATFORM_LIBS) -o $@
 
 test: daemon-test
 
@@ -458,3 +458,20 @@ store-monitor-test: $(BUILD_DIR)/strappyd $(BUILD_DIR)/store_monitor_harness
 	python3 store_monitor_harness.py $(BUILD_DIR)/strappyd $(BUILD_DIR)/store_monitor_harness
 
 test: store-monitor-test
+
+.PHONY: execution-test
+execution-test: $(BUILD_DIR)/strappyd
+	python3 execution_harness.py $(BUILD_DIR)/strappyd
+
+test: execution-test
+
+.PHONY: daemon-resources
+daemon-resources: | $(TEST_DIR)
+	mkdir -p $(TEST_DIR)/daemon-resources
+	cp ../shared/Resources/*.json ../macOS/Info.plist $(TEST_DIR)/daemon-resources/
+	cp /etc/ssl/certs/ca-certificates.crt $(TEST_DIR)/daemon-resources/cacert.pem
+
+$(BUILD_DIR)/run_reader_harness: run_reader_harness.c $(STRAPPY_STORE_SOURCES) ../shared/strappy_run.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) $< $(STRAPPY_STORE_SOURCES) ../shared/strappy_run.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+
+execution-test: $(BUILD_DIR)/run_reader_harness

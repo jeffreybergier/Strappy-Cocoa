@@ -734,6 +734,11 @@ static BOOL StrappyContextRoundActionValues(
   }
 
   [self updateSendingStateFromSession];
+  if ([[event objectForKey:@"service_invalidated"] boolValue]) {
+    [self cancelPendingStreamEventFlush];
+    [self reloadContent];
+    return;
+  }
   if ([[event objectForKey:@"webview_reload_required"] boolValue]) {
     if (!webViewReloadRequired_) {
       [self cancelPendingStreamEventFlush];
@@ -802,7 +807,8 @@ static BOOL StrappyContextRoundActionValues(
   [self updateSendingStateFromSession];
 
   session = [result objectForKey:@"session"];
-  if (![session isKindOfClass:[NSDictionary class]]) {
+  if (![session isKindOfClass:[NSDictionary class]] ||
+      [[result objectForKey:@"error"] isKindOfClass:[NSString class]]) {
     errorMessage = [result objectForKey:@"error"];
     if (![errorMessage isKindOfClass:[NSString class]] ||
         ([errorMessage length] == 0U)) {

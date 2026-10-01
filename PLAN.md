@@ -233,30 +233,48 @@ and iOS 15/arm64; iOS 8 SSH was unavailable and remains deferred.
 
 ## Step 3: move one prompt through the daemon
 
-- [ ] Complete a prompt through the daemon independently of the UI lifetime.
+- [x] Complete a prompt through the daemon independently of the UI lifetime.
 
 Reuse `strappy_session_send_prompt_with_events_and_load` and the existing C
 Responses runtime. Extract execution from `StrappySession` without moving
 WebView rendering into the service.
 
-- [ ] Persist accepted work and its stable client request ID before acknowledging
+- [x] Persist accepted work and its stable client request ID before acknowledging
   acceptance. Distinguish accepted, running, completed, failed, cancelled, and
   interrupted states. Deduplicate submission retries durably.
-- [ ] Move active-run tracking, processing status, and cancellation ownership out
+- [x] Move active-run tracking, processing status, and cancellation ownership out
   of UI objects. Closing the UI or losing IPC does not cancel accepted work.
-- [ ] Preserve one active prompt per session initially; define bounded concurrency
+- [x] Preserve one active prompt per session initially; define bounded concurrency
   across sessions and audit process-global configuration before expanding it.
-- [ ] Keep cancellation responsive during provider requests and tool execution.
-- [ ] Give the daemon explicit resource, CA certificate, database, and working
+- [x] Keep cancellation responsive during provider requests and tool execution.
+- [x] Give the daemon explicit resource, CA certificate, database, and working
   directory paths rather than relying on the app's main bundle.
-- [ ] Move provider credential retrieval/refresh behind the service boundary.
+- [x] Move provider credential retrieval/refresh behind the service boundary.
   Validate Keychain identity/access separately on Mac and jailbroken iOS;
   authentication presentation stays in the UI and secrets stay out of logs.
 
 - [ ] Submit one prompt, close the UI, reopen it, and recover the correct stored
   history and active/completed state.
-- [ ] Test lost acknowledgments, reconnects, cancellation, and two clients
+- [x] Test lost acknowledgments, reconnects, cancellation, and two clients
   attempting to submit to the same session.
+
+Implementation and wire semantics are documented in
+`source/daemon/EXECUTION.md` and `source/daemon/PROTOCOL.md`. The worker is globally
+serialized; configured existing sessions can submit/cancel, while creation and
+other mutations remain step 4. IPC v3 / reader ABI 2 add typed durable run state;
+SQLite `user_version` remains 1 and no migration steps were introduced.
+
+Offline tests exercise the actual Responses runtime with a loopback provider,
+including lost replies, concurrent clients, HTTP/tool cancellation, child cleanup
+on SIGTERM, and restart interruption without replay. Native iOS 15/mobile
+Keychain access and a live prompt completed independently of the submitting
+client, with the expected answer recovered by a new reader and durable retry
+returning the same run. Tiger/PPC submission and terminal retry work, but its
+existing account credential was inaccessible to the noninteractive daemon.
+The probe does not distinguish missing credentials from Keychain lock/ACL denial.
+`koolphone5` refused SSH. Full graphical submit/close/reopen validation remains
+unchecked; client-process independence is not claimed as an interactive GUI test.
+See `source/daemon/VALIDATION.md` for exact coverage and remaining work.
 
 ## Step 4: transfer remaining workers and mutations
 

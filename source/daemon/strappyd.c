@@ -1,7 +1,11 @@
-/* Launchd storage owner, service transport, and heartbeat. No provider access.
+/* Launchd storage and prompt execution owner, service transport, and heartbeat.
  * Feature-test macros belong to the build: _POSIX_C_SOURCE would force
  * Leopard-only UNIX2003 symbols even when the Apple SDK targets Tiger. */
 #include "../shared/strappy_ipc.h"
+#include "strappy_execution.h"
+#include "../shared/strappy_cocoa.h"
+#include "../shared/strappy_client.h"
+#include "../shared/strappy_openai_oauth.h"
 #include "../shared/strappy_db.h"
 #include "../shared/strappy_model_catalog.h"
 #include <errno.h>
@@ -81,7 +85,7 @@ static int strappy_probe(const char *path)
             strappy_ipc_receive(fd, &message, 3000) != 0 ||
             message.kind != STRAPPY_IPC_REPLY || message.operation != operation ||
             message.request_id != operation || message.status != STRAPPY_IPC_OK ||
-            message.length != 36 || strappy_ipc_get32(message.payload + 24) != 3 ||
+            message.length != 36 || (strappy_ipc_get32(message.payload + 24) & 3U) != 3U ||
             strappy_ipc_get32(message.payload + 32) != STRAPPY_IPC_STORE_ABI ||
             strappy_ipc_get32(message.payload + 28) != STRAPPY_IPC_MAX_PAYLOAD) {
             (void)close(fd); return EXIT_FAILURE;
@@ -92,7 +96,7 @@ static int strappy_probe(const char *path)
         }
     }
     (void)close(fd);
-    puts("IPC v2: same-user hello, snapshot, subscribe, unsubscribe passed; store ready; execution not ready");
+    puts("IPC v3: same-user hello, snapshot, subscribe, unsubscribe passed; store ready; execution ready");
     return EXIT_SUCCESS;
 }
 
@@ -144,10 +148,14 @@ int main(int argc, char **argv)
     char *backup;
     char *directory;
     strappy_ipc_server *server = NULL;
+    strappy_execution *execution = NULL;
+    char *ca_path = NULL;
+    char *configuration_error = NULL;
     time_t heartbeat;
     size_t length;
     int result = EXIT_FAILURE;
     (void)signal(SIGPIPE, SIG_IGN);
+    if (argc == 3 && strcmp(argv[1], "--credential-probe") == 0) return strappy_service_credentials_probe(argv[2]);
     if (argc == 3 && strcmp(argv[1], "--ipc-probe") == 0) return strappy_probe(argv[2]);
     if (argc != 4 || argv[1][0] != '/' || argv[2][0] != '/' || argv[3][0] != '/') return EXIT_FAILURE;
     length = strlen(argv[1]);
@@ -169,6 +177,16 @@ int main(int argc, char **argv)
     server = strappy_ipc_server_open(directory);
     if (server == NULL) goto done;
     if (!strappy_prepare_store(argv[2], argv[3])) goto done;
+    ca_path = malloc(strlen(argv[3]) + 12);
+    if (!ca_path) goto done;
+    sprintf(ca_path, "%s/Info.plist", argv[3]);
+    if (!strappy_cocoa_configure_info_plist(ca_path, &configuration_error)) goto done;
+    sprintf(ca_path, "%s/cacert.pem", argv[3]);
+    if (chdir("/") != 0 || !strappy_client_set_cainfo(ca_path, &configuration_error) ||
+        !strappy_openai_oauth_set_cainfo(ca_path, &configuration_error) ||
+        !strappy_service_credentials_configure()) goto done;
+    execution = strappy_execution_open(server, argv[2], argv[3]);
+    if (!execution) goto done;
     strappy_ipc_server_store_ready(server);
     if (strappy_log(argv[1], backup, "startup", counter) != 0) goto done;
     heartbeat = time(NULL);
@@ -182,9 +200,14 @@ int main(int argc, char **argv)
             heartbeat = now;
         }
     }
-    if (strappy_log(argv[1], backup, "shutdown", counter) == 0) result = EXIT_SUCCESS;
+    result = EXIT_SUCCESS;
 done:
+    strappy_execution_stop(execution);
+    strappy_ipc_server_drain(server);
+    strappy_execution_close(execution);
+    if (result == EXIT_SUCCESS && strappy_log(argv[1], backup, "shutdown", counter) != 0) result = EXIT_FAILURE;
     strappy_ipc_server_close(server);
+    free(ca_path); free(configuration_error);
     free(directory);
     if (strappy_signal_pipe[0] >= 0) (void)close(strappy_signal_pipe[0]);
     if (strappy_signal_pipe[1] >= 0) (void)close(strappy_signal_pipe[1]);

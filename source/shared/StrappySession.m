@@ -1,3 +1,4 @@
+#include "strappy_run.h"
 #import "strappy_store_client.h"
 #import "FileScanner.h"
 #import "StrappySession.h"
@@ -153,216 +154,6 @@ const NSUInteger StrappySessionMaximumLimit =
 static NSMutableDictionary *StrappySessionInFlightSessions = nil;
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
 
-static int StrappySessionCopyChatGPTCredentials(
-  const char *providerID,
-  const char *providerAccountID,
-  int forceRefresh,
-  char **accessTokenOut,
-  char **accountIdentifierOut,
-  void *userData,
-  char **errorOut)
-{
-  static const long long refreshLeewayMilliseconds = 5LL * 60LL * 1000LL;
-  StrappyKeychain *keychain;
-  NSString *accessToken;
-  NSString *refreshToken;
-  NSString *accountIdentifier;
-  long long expiresAtMilliseconds;
-  long long nowMilliseconds;
-  BOOL credentialReady;
-  int ok;
-
-  (void)userData;
-  if ((providerID == NULL) || (providerID[0] == '\0') ||
-      (providerAccountID == NULL) || (providerAccountID[0] == '\0') ||
-      (accessTokenOut == NULL) || (accountIdentifierOut == NULL)) {
-    strappy_set_error(errorOut, "Account credential inputs are missing.");
-    return 0;
-  }
-  *accessTokenOut = NULL;
-  *accountIdentifierOut = NULL;
-  keychain = [StrappyKeychain sharedKeychain];
-  accessToken = nil;
-  refreshToken = nil;
-  accountIdentifier = nil;
-  expiresAtMilliseconds = 0LL;
-  ok = 0;
-
-  if (strcmp(providerID, STRAPPY_PROVIDER_OPENAI_CHATGPT) != 0) {
-    NSString *providerIdentifier;
-    NSString *providerAccountIdentifier;
-    NSString *bearerToken;
-    NSObject *credentialLock;
-
-    providerIdentifier = [NSString stringWithUTF8String:providerID];
-    providerAccountIdentifier = [NSString stringWithUTF8String:
-      providerAccountID];
-    bearerToken = nil;
-    credentialLock = [keychain
-      credentialLockForProviderIdentifier:providerIdentifier
-      providerAccountIdentifier:providerAccountIdentifier];
-    @synchronized(credentialLock) {
-      BOOL loaded;
-
-      loaded = [keychain loadBearerToken:&bearerToken
-                   forProviderIdentifier:providerIdentifier
-               providerAccountIdentifier:providerAccountIdentifier];
-      if (loaded) {
-        *accessTokenOut = strappy_string_duplicate([bearerToken UTF8String]);
-        if (*accessTokenOut != NULL) {
-          return 1;
-        }
-      }
-    }
-    strappy_set_error(errorOut, "The selected account has no bearer credential.");
-    return 0;
-  }
-
-  {
-    NSString *providerAccountIdentifier;
-    NSObject *credentialLock;
-
-    providerAccountIdentifier = [NSString stringWithUTF8String:
-      providerAccountID];
-    credentialLock = [keychain
-      credentialLockForProviderIdentifier:@"openai_chatgpt"
-      providerAccountIdentifier:providerAccountIdentifier];
-  @synchronized(credentialLock) {
-    BOOL loaded;
-
-    loaded = [keychain loadChatGPTAccessToken:&accessToken
-                                  refreshToken:&refreshToken
-                             accountIdentifier:&accountIdentifier
-                          expiresAtMilliseconds:&expiresAtMilliseconds
-                     providerAccountIdentifier:providerAccountIdentifier];
-    if (!loaded &&
-        [keychain
-          migrateLegacyChatGPTCredentialToProviderAccountIdentifier:
-            providerAccountIdentifier]) {
-      loaded = [keychain loadChatGPTAccessToken:&accessToken
-                                    refreshToken:&refreshToken
-                               accountIdentifier:&accountIdentifier
-                            expiresAtMilliseconds:&expiresAtMilliseconds
-                       providerAccountIdentifier:providerAccountIdentifier];
-    }
-    if (!loaded) {
-      strappy_set_error(errorOut, "Sign in to ChatGPT before sending a prompt.");
-    } else {
-      credentialReady = YES;
-      nowMilliseconds = strappy_unix_milliseconds();
-      if (forceRefresh || (nowMilliseconds <= 0LL) ||
-          ((expiresAtMilliseconds - nowMilliseconds) <=
-           refreshLeewayMilliseconds)) {
-        strappy_openai_oauth_configuration configuration;
-        strappy_openai_oauth_credentials credentials;
-        NSString *nextAccessToken;
-        NSString *nextRefreshToken;
-        NSString *nextAccountIdentifier;
-
-        strappy_openai_oauth_default_configuration(&configuration);
-        strappy_openai_oauth_credentials_init(&credentials);
-        credentialReady = NO;
-        if (strappy_openai_oauth_refresh_credentials(
-              &configuration,
-              [refreshToken UTF8String],
-              &credentials,
-              NULL,
-              NULL,
-              errorOut)) {
-          nextAccessToken = [NSString stringWithUTF8String:
-            credentials.access_token];
-          nextRefreshToken = [NSString stringWithUTF8String:
-            credentials.refresh_token];
-          nextAccountIdentifier = [NSString stringWithUTF8String:
-            credentials.account_id];
-          if ((nextAccessToken == nil) || (nextRefreshToken == nil) ||
-              (nextAccountIdentifier == nil) ||
-              ![nextAccountIdentifier isEqualToString:accountIdentifier]) {
-            strappy_set_error(
-              errorOut,
-              "Refreshed ChatGPT credentials changed account identity.");
-          } else if (![keychain
-                       saveChatGPTAccessToken:nextAccessToken
-                       refreshToken:nextRefreshToken
-                       accountIdentifier:nextAccountIdentifier
-                       expiresAtMilliseconds:
-                         credentials.expires_at_milliseconds
-                  providerAccountIdentifier:providerAccountIdentifier]) {
-            strappy_set_error(
-              errorOut,
-              "The Keychain refused the refreshed ChatGPT credential.");
-          } else {
-            accessToken = nextAccessToken;
-            refreshToken = nextRefreshToken;
-            accountIdentifier = nextAccountIdentifier;
-            expiresAtMilliseconds = credentials.expires_at_milliseconds;
-            credentialReady = YES;
-          }
-        }
-        strappy_openai_oauth_credentials_destroy(&credentials);
-      }
-      if (credentialReady && ((errorOut == NULL) || (*errorOut == NULL))) {
-        *accessTokenOut = strappy_string_duplicate([accessToken UTF8String]);
-        *accountIdentifierOut =
-          strappy_string_duplicate([accountIdentifier UTF8String]);
-        if ((*accessTokenOut == NULL) || (*accountIdentifierOut == NULL)) {
-          strappy_secure_free_string(*accessTokenOut);
-          strappy_secure_free_string(*accountIdentifierOut);
-          *accessTokenOut = NULL;
-          *accountIdentifierOut = NULL;
-          strappy_set_error(errorOut,
-                            "Could not allocate ChatGPT credential snapshot.");
-        } else {
-          ok = 1;
-        }
-      }
-    }
-  }
-  }
-  return ok;
-}
-
-typedef struct StrappySessionResponsesContext {
-  StrappySession *session;
-  NSDictionary *context;
-  /* Presentation state belongs to the prompt worker, never to a WebView. */
-  NSString *timelineCursor;
-  strappy_session_webview_render_context *webViewRenderContext;
-  NSString *terminalAppendJavaScript;
-  NSString *terminalUpdateJavaScript;
-  NSString *terminalMessageKey;
-  BOOL presentationReloadRequired;
-} StrappySessionResponsesContext;
-
-static void StrappySessionResponsesContextClearTerminal(
-  StrappySessionResponsesContext *context)
-{
-  if (context == NULL) {
-    return;
-  }
-  [context->terminalAppendJavaScript release];
-  context->terminalAppendJavaScript = nil;
-  [context->terminalUpdateJavaScript release];
-  context->terminalUpdateJavaScript = nil;
-  [context->terminalMessageKey release];
-  context->terminalMessageKey = nil;
-}
-
-static void StrappySessionResponsesContextDestroy(
-  StrappySessionResponsesContext *context)
-{
-  if (context == NULL) {
-    return;
-  }
-  [context->context release];
-  context->context = nil;
-  [context->timelineCursor release];
-  context->timelineCursor = nil;
-  strappy_session_webview_render_context_destroy(
-    context->webViewRenderContext);
-  context->webViewRenderContext = NULL;
-  StrappySessionResponsesContextClearTerminal(context);
-}
 
 static const char *StrappySessionOptionalCString(NSString *string)
 {
@@ -433,8 +224,7 @@ static NSString *StrappySessionStringFromCString(char *value)
 - (void)updateCachedSummary:(NSDictionary *)summary;
 - (NSString *)currentProcessingStatusJSON;
 - (void)updateProcessingStatusJSON:(NSString *)statusJSON;
-- (int)handleResponsesEvent:(const strappy_responses_event *)event
-           responsesContext:(StrappySessionResponsesContext *)context;
+
 - (NSString *)webViewAppendMessagesJavaScriptAfterTimelineCursor:
                 (NSString *)timelineCursor
                                       nextTimelineCursor:
@@ -458,31 +248,6 @@ static NSString *StrappySessionStringFromCString(char *value)
 - (void)runDatabaseStudyInBackground:(id)ignored;
 - (void)promptDidFinish:(NSDictionary *)result;
 @end
-
-static int StrappySessionHandleResponsesEvent(
-  const strappy_responses_event *event,
-  void *userData)
-{
-  StrappySessionResponsesContext *context;
-  StrappySession *session;
-  NSAutoreleasePool *pool;
-  int result;
-
-  if ((event == NULL) || (userData == NULL)) {
-    return 1;
-  }
-
-  context = (StrappySessionResponsesContext *)userData;
-  session = context->session;
-  if (session == nil) {
-    return 1;
-  }
-
-  pool = [[NSAutoreleasePool alloc] init];
-  result = [session handleResponsesEvent:event responsesContext:context];
-  [pool release];
-  return result;
-}
 
 static NSString *StrappySessionWebProviderFromValue(NSString *value)
 {
@@ -948,6 +713,7 @@ static void StrappyStoreChanged(void)
 + (void)serviceStoreChanged:(id)ignored
 {
   (void)ignored;
+  [[NSNotificationCenter defaultCenter] postNotificationName:@"StrappyServiceChanged" object:nil];
   [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionDidUpdateNotification object:nil];
   [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogDidChangeNotification object:nil];
   [[NSNotificationCenter defaultCenter] postNotificationName:FileScannerDatabaseCatalogDidChangeNotification object:nil];
@@ -982,251 +748,6 @@ static void StrappyStoreChanged(void)
                                        NULL,
                                        NULL,
                                        webViewPalette));
-}
-
-- (int)handleResponsesEvent:(const strappy_responses_event *)event
-           responsesContext:(StrappySessionResponsesContext *)responsesContext
-{
-  NSDictionary *contextDictionary;
-  NSMutableDictionary *notification;
-  NSMutableString *mutations;
-  NSError *renderError;
-  NSString *appendJavaScript;
-  NSString *javaScript;
-  NSString *messageKey;
-  NSString *nextCursor;
-  NSString *statusJSON;
-  NSString *streamEvent;
-  NSString *updateJavaScript;
-  BOOL eventRenderFailed;
-  BOOL terminalPending;
-
-  if (event == NULL) {
-    return 1;
-  }
-  if (event->type == STRAPPY_RESPONSES_EVENT_CANCELLATION_POLL) {
-    return [self promptCancellationRequested] ? 0 : 1;
-  }
-  if (event->type == STRAPPY_RESPONSES_EVENT_SESSION_UPDATED) {
-    NSDictionary *summary;
-    NSDictionary *update;
-    NSError *summaryError;
-
-    /* Session metadata is native UI state. Reload it from SQLite and never
-     * route this event through the WebView stream or JavaScript renderer. */
-    summaryError = nil;
-    summary = [StrappySession
-      sessionSummaryForSessionIdentifier:[self sessionIdentifier]
-                                   error:&summaryError];
-    if ([summary isKindOfClass:[NSDictionary class]]) {
-      update = [[NSDictionary alloc] initWithObjectsAndKeys:
-        summary, @"session",
-        StrappySessionChangeKindName, StrappySessionChangeKindKey,
-        nil];
-      [self performSelectorOnMainThread:@selector(postSessionUpdateAndRelease:)
-                             withObject:update
-                          waitUntilDone:NO];
-    } else {
-      NSLog(@"StrappyResponses could not refresh the renamed session: %@",
-            ([summaryError localizedDescription] != nil) ?
-              [summaryError localizedDescription] : @"unknown summary error");
-    }
-    return 1;
-  }
-  if ((event->type != STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) &&
-      (event->type != STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) &&
-      (event->type != STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED)) {
-    return 1;
-  }
-
-  contextDictionary = (responsesContext != NULL) ?
-    responsesContext->context : nil;
-  notification = [[NSMutableDictionary alloc] init];
-  appendJavaScript = nil;
-  javaScript = nil;
-  messageKey = nil;
-  nextCursor = nil;
-  renderError = nil;
-  statusJSON = nil;
-  streamEvent = (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) ?
-    @"processing_status" :
-    ((event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) ?
-      @"ledger_updated" :
-      (event->coalesce_with_next_ledger_change ?
-        @"ledger_changed_coalescible" : @"ledger_changed"));
-  updateJavaScript = nil;
-  eventRenderFailed = NO;
-  if (contextDictionary != nil) {
-    [notification setObject:contextDictionary forKey:@"context"];
-  }
-  if (event->message_key != NULL) {
-    messageKey = [NSString stringWithUTF8String:event->message_key];
-    if (messageKey != nil) {
-      [notification setObject:messageKey forKey:@"message_key"];
-    }
-  }
-  if (event->status_json != NULL) {
-    statusJSON = [NSString stringWithUTF8String:event->status_json];
-    if (statusJSON != nil) {
-      [notification setObject:statusJSON forKey:@"status_json"];
-    }
-  }
-  if (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) {
-    [self updateProcessingStatusJSON:statusJSON];
-  }
-  [notification setObject:streamEvent forKey:@"stream_event"];
-  if (event->is_terminal) {
-    [notification setObject:[NSNumber numberWithBool:YES]
-                     forKey:@"is_terminal"];
-  }
-
-  if (event->type == STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED) {
-    appendJavaScript = [self
-      webViewAppendMessagesJavaScriptAfterTimelineCursor:
-        ((responsesContext != NULL) ? responsesContext->timelineCursor : nil)
-                                      nextTimelineCursor:&nextCursor
-                                    appendedMessageCount:NULL
-                                          renderContext:
-        ((responsesContext != NULL) ?
-          responsesContext->webViewRenderContext : NULL)
-                                                   error:&renderError];
-    if (![appendJavaScript isKindOfClass:[NSString class]]) {
-      eventRenderFailed = YES;
-      appendJavaScript = @"";
-      NSLog(@"StrappyResponses could not render a WebView append: %@",
-            ([renderError localizedDescription] != nil) ?
-              [renderError localizedDescription] : @"unknown render error");
-    }
-    if ([nextCursor isKindOfClass:[NSString class]] &&
-        (responsesContext != NULL)) {
-      [responsesContext->timelineCursor release];
-      responsesContext->timelineCursor = [nextCursor copy];
-    }
-    if (eventRenderFailed && (responsesContext != NULL)) {
-      responsesContext->presentationReloadRequired = YES;
-    }
-    if (event->is_terminal && (responsesContext != NULL)) {
-      /* Publish the final append only after its late status update arrives. */
-      StrappySessionResponsesContextClearTerminal(responsesContext);
-      responsesContext->terminalAppendJavaScript =
-        [([appendJavaScript isKindOfClass:[NSString class]] ?
-          appendJavaScript : @"") copy];
-      responsesContext->terminalMessageKey =
-        [([messageKey isKindOfClass:[NSString class]] ? messageKey : @"") copy];
-      [notification release];
-      return 1;
-    }
-
-    if (!strappy_session_webview_event_requires_message_update(event)) {
-      /* The request is visible in the append above, but a running HTTP
-       * attempt intentionally has no response-call timeline row yet. */
-      updateJavaScript = @"";
-    } else {
-      renderError = nil;
-      updateJavaScript = [self
-        webViewJavaScriptForStreamEvent:notification
-                          renderContext:
-          ((responsesContext != NULL) ?
-            responsesContext->webViewRenderContext : NULL)
-                                  error:&renderError];
-      if (![updateJavaScript isKindOfClass:[NSString class]]) {
-        eventRenderFailed = YES;
-        updateJavaScript = @"";
-        NSLog(@"StrappyResponses could not render a WebView update: %@",
-              ([renderError localizedDescription] != nil) ?
-                [renderError localizedDescription] : @"unknown render error");
-      }
-    }
-    mutations = [NSMutableString string];
-    [mutations appendString:appendJavaScript];
-    [mutations appendString:updateJavaScript];
-    javaScript =
-      [StrappySession webViewBatchedJavaScriptForJavaScript:mutations];
-    if (([mutations length] > 0U) && ([javaScript length] == 0U)) {
-      eventRenderFailed = YES;
-    }
-  } else {
-    javaScript = [self
-      webViewJavaScriptForStreamEvent:notification
-                        renderContext:
-        ((responsesContext != NULL) ?
-          responsesContext->webViewRenderContext : NULL)
-                                error:&renderError];
-    if (![javaScript isKindOfClass:[NSString class]]) {
-      eventRenderFailed = YES;
-      javaScript = @"";
-      NSLog(@"StrappyResponses could not render a WebView event: %@",
-            ([renderError localizedDescription] != nil) ?
-              [renderError localizedDescription] : @"unknown render error");
-    }
-  }
-
-  if (eventRenderFailed && (responsesContext != NULL)) {
-    responsesContext->presentationReloadRequired = YES;
-  }
-
-  terminalPending = (responsesContext != NULL) &&
-    (responsesContext->terminalMessageKey != nil);
-  if (terminalPending &&
-      (event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) &&
-      [messageKey isEqualToString:responsesContext->terminalMessageKey]) {
-    [responsesContext->terminalUpdateJavaScript release];
-    responsesContext->terminalUpdateJavaScript =
-      [([javaScript isKindOfClass:[NSString class]] ? javaScript : @"") copy];
-    [notification release];
-    return 1;
-  }
-
-  if (terminalPending &&
-      (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) &&
-      (event->status_kind == NULL)) {
-    /* Keep rounds expanded through the final append and its scroll animation. */
-    mutations = [NSMutableString string];
-    if ([responsesContext->terminalUpdateJavaScript length] > 0U) {
-      [mutations appendString:responsesContext->terminalUpdateJavaScript];
-    }
-    if ([responsesContext->terminalAppendJavaScript length] > 0U) {
-      [mutations appendString:responsesContext->terminalAppendJavaScript];
-    }
-    if ([javaScript isKindOfClass:[NSString class]]) {
-      [mutations appendString:javaScript];
-    }
-    javaScript =
-      [StrappySession webViewBatchedJavaScriptForJavaScript:mutations];
-    if (([mutations length] > 0U) && ([javaScript length] == 0U) &&
-        (responsesContext != NULL)) {
-      responsesContext->presentationReloadRequired = YES;
-    }
-    [notification setObject:@"terminal_delta" forKey:@"stream_event"];
-    [notification setObject:[NSNumber numberWithBool:YES]
-                     forKey:@"is_terminal"];
-    [notification setObject:responsesContext->terminalMessageKey
-                     forKey:@"message_key"];
-  }
-
-  if ([javaScript isKindOfClass:[NSString class]] &&
-      ([javaScript length] > 0U)) {
-    [notification setObject:javaScript forKey:@"webview_javascript"];
-  }
-  if ((responsesContext != NULL) &&
-      [responsesContext->timelineCursor isKindOfClass:[NSString class]]) {
-    [notification setObject:responsesContext->timelineCursor
-                     forKey:@"timeline_cursor"];
-  }
-  if ((responsesContext != NULL) &&
-      responsesContext->presentationReloadRequired) {
-    [notification setObject:[NSNumber numberWithBool:YES]
-                     forKey:@"webview_reload_required"];
-  }
-  [self performSelectorOnMainThread:@selector(postStreamEventAndRelease:)
-                         withObject:notification
-                      waitUntilDone:NO];
-  if (terminalPending &&
-      (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) &&
-      (event->status_kind == NULL)) {
-    StrappySessionResponsesContextClearTerminal(responsesContext);
-  }
-  return 1;
 }
 
 + (NSMutableDictionary *)inFlightSessions
@@ -1291,12 +812,7 @@ static void StrappyStoreChanged(void)
 
 + (NSUInteger)inFlightSessionCount
 {
-  NSUInteger count;
-
-  @synchronized(self) {
-    count = [[self inFlightSessions] count];
-  }
-  return count;
+  return (NSUInteger)strappy_run_active_count([[self sessionsDatabasePath] fileSystemRepresentation]);
 }
 
 + (BOOL)hasInFlightSessions
@@ -1306,10 +822,15 @@ static void StrappyStoreChanged(void)
 
 + (BOOL)isPromptInFlightForSessionIdentifier:(NSNumber *)sessionIdentifier
 {
-  StrappySession *session;
-
-  session = [self inFlightSessionForIdentifier:sessionIdentifier];
-  return ((session != nil) && [session isPromptInFlight]) ? YES : NO;
+  strappy_run_record run;
+  BOOL active = NO;
+  if ([sessionIdentifier isKindOfClass:[NSNumber class]] &&
+      strappy_run_latest([[self sessionsDatabasePath] fileSystemRepresentation],
+        [sessionIdentifier longLongValue], &run)) {
+    active = run.state == STRAPPY_RUN_ACCEPTED || run.state == STRAPPY_RUN_RUNNING;
+    strappy_run_destroy(&run);
+  }
+  return active;
 }
 
 + (BOOL)isModelCatalogRefreshInFlight
@@ -1376,8 +897,11 @@ static void StrappyStoreChanged(void)
 
   if ((self = [super init])) {
     sessionIdentifier_ = [sessionIdentifier retain];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(serviceRunChanged:)
+        name:@"StrappyServiceChanged" object:nil];
     options_ = [StrappySessionOptionsFromSummary(nil, @"") retain];
     optionsLoaded_ = NO;
+    [self performSelectorOnMainThread:@selector(serviceRunChanged:) withObject:nil waitUntilDone:NO];
     if ([summary isKindOfClass:[NSDictionary class]]) {
       cachedSummary_ = [summary retain];
       [options_ release];
@@ -1389,6 +913,7 @@ static void StrappyStoreChanged(void)
 
 - (void)dealloc
 {
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
   [StrappySession unregisterInFlightSession:self];
   [sessionIdentifier_ release];
   [cachedSummary_ release];
@@ -1431,12 +956,15 @@ static void StrappyStoreChanged(void)
 
 - (NSString *)currentProcessingStatusJSON
 {
-  NSString *statusJSON;
-
-  @synchronized(self) {
-    statusJSON = [processingStatusJSON_ retain];
+  strappy_run_record run;
+  NSString *result = nil;
+  if (strappy_run_latest([[StrappySession sessionsDatabasePath] fileSystemRepresentation],
+      [sessionIdentifier_ longLongValue], &run)) {
+    char *json = strappy_run_status_json(&run);
+    if (json) result = [NSString stringWithUTF8String:json];
+    free(json); strappy_run_destroy(&run);
   }
-  return [statusJSON autorelease];
+  return result;
 }
 
 - (void)updateProcessingStatusJSON:(NSString *)statusJSON
@@ -1456,12 +984,67 @@ static void StrappyStoreChanged(void)
 
 - (BOOL)isPromptInFlight
 {
-  BOOL inFlight;
-
-  @synchronized(self) {
-    inFlight = promptInFlight_;
+  strappy_run_record run;
+  BOOL active = NO;
+  @synchronized(self) { if (promptSubmissionPending_) return YES; }
+  if (strappy_run_latest([[StrappySession sessionsDatabasePath] fileSystemRepresentation],
+      [sessionIdentifier_ longLongValue], &run)) {
+    active = run.state == STRAPPY_RUN_ACCEPTED || run.state == STRAPPY_RUN_RUNNING;
+    strappy_run_destroy(&run);
   }
-  return inFlight;
+  return active;
+}
+
+- (void)serviceRunChanged:(id)ignored
+{
+  BOOL active;
+  BOOL previous;
+  NSDictionary *summary;
+  strappy_run_record run;
+  NSString *pendingKey;
+  NSDictionary *pending;
+  NSString *terminalError = nil;
+  BOOL terminalChanged;
+  (void)ignored;
+  @synchronized(self) { if (promptSubmissionPending_) return; }
+  if (!strappy_run_latest([[StrappySession sessionsDatabasePath] fileSystemRepresentation],
+      [sessionIdentifier_ longLongValue], &run)) return;
+  active = run.state == STRAPPY_RUN_ACCEPTED || run.state == STRAPPY_RUN_RUNNING;
+  pendingKey = [NSString stringWithFormat:@"StrappyPendingPrompt-%@", sessionIdentifier_];
+  pending = [[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey];
+  if (run.request_key && [[pending objectForKey:@"key"] isEqualToString:[NSString stringWithUTF8String:run.request_key]]) {
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:pendingKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+  }
+  else if (!active && [[pending objectForKey:@"prompt"] isKindOfClass:[NSString class]] &&
+      [[pending objectForKey:@"key"] isKindOfClass:[NSString class]] &&
+      [[pending objectForKey:@"key"] lengthOfBytesUsingEncoding:NSUTF8StringEncoding] == 64) {
+    /* Resume only the saved submission identity. A committed retry returns its
+     * original run, including interrupted/terminal states; it never replays it. */
+    strappy_run_destroy(&run);
+    (void)[self beginResponsesPrompt:[pending objectForKey:@"prompt"] context:nil error:nil];
+    return;
+  }
+  terminalChanged = run.id > 0 && (observedServiceRun_ != run.id || observedServiceState_ != run.state);
+  if (run.state == STRAPPY_RUN_FAILED) terminalError = @"The prompt failed. Check the provider account and stored request details.";
+  else if (run.state == STRAPPY_RUN_INTERRUPTED) terminalError = @"The background service stopped during this prompt. It was not replayed; check any tool effects before retrying.";
+  else if (run.state == STRAPPY_RUN_CANCELLED) terminalError = @"The prompt was cancelled.";
+  observedServiceRun_ = run.id; observedServiceState_ = run.state;
+  strappy_run_destroy(&run);
+  @synchronized(self) { previous = promptInFlight_; promptInFlight_ = active; }
+  summary = [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier_ error:nil];
+  if (summary != nil) [self updateCachedSummary:summary];
+  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionStreamEventNotification
+      object:self userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES]
+      forKey:@"service_invalidated"]];
+  if (active && !previous) [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappySessionPromptDidStartNotification object:self];
+  if (!active && (previous || (terminalChanged && terminalError))) {
+    NSMutableDictionary *result = [NSMutableDictionary dictionary];
+    if (summary) [result setObject:summary forKey:@"session"];
+    if (terminalError) [result setObject:terminalError forKey:@"error"];
+    [self promptDidFinish:result];
+  }
 }
 
 - (BOOL)isDatabaseStudySession
@@ -1472,21 +1055,46 @@ static void StrappyStoreChanged(void)
 
 - (BOOL)promptCancellationRequested
 {
-  BOOL requested;
-
-  @synchronized(self) {
-    requested = promptCancellationRequested_;
+  strappy_run_record run;
+  BOOL requested = NO;
+  if (strappy_run_latest([[StrappySession sessionsDatabasePath] fileSystemRepresentation],
+      [sessionIdentifier_ longLongValue], &run)) {
+    requested = (run.state == STRAPPY_RUN_ACCEPTED || run.state == STRAPPY_RUN_RUNNING) && run.cancel_requested;
+    strappy_run_destroy(&run);
   }
   return requested;
 }
 
 - (void)cancelPrompt
 {
-  @synchronized(self) {
-    if (promptInFlight_) {
-      promptCancellationRequested_ = YES;
-    }
+  [NSThread detachNewThreadSelector:@selector(cancelServicePrompt:) toTarget:self withObject:nil];
+}
+- (void)cancelServicePrompt:(id)ignored
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  strappy_run_record run;
+  unsigned char payload[16];
+  unsigned int status = STRAPPY_IPC_NOT_READY;
+  BOOL delivered = NO;
+  unsigned int attempt;
+  uint64_t session = (uint64_t)[sessionIdentifier_ longLongValue];
+  (void)ignored;
+  for (attempt = 0; attempt < 400; ++attempt) {
+    BOOL pending;
+    @synchronized(self) { pending = promptSubmissionPending_; }
+    if (!pending) break;
+    [NSThread sleepUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
   }
+  if (strappy_run_latest([[StrappySession sessionsDatabasePath] fileSystemRepresentation],
+      (long long)session, &run)) {
+    strappy_ipc_put32(payload, (uint32_t)(session >> 32)); strappy_ipc_put32(payload+4, (uint32_t)session);
+    strappy_ipc_put32(payload+8, (uint32_t)((uint64_t)run.id >> 32)); strappy_ipc_put32(payload+12, (uint32_t)run.id);
+    delivered = strappy_store_client_command(STRAPPY_IPC_CANCEL_RUN, payload, 16, &status) && status == STRAPPY_IPC_OK ? YES : NO;
+    strappy_run_destroy(&run);
+  }
+  if (!delivered) [self performSelectorOnMainThread:@selector(promptDidFinish:)
+      withObject:[NSDictionary dictionaryWithObject:@"Cancellation could not be confirmed. Reconnect and try again." forKey:@"error"] waitUntilDone:NO];
+  [pool release];
 }
 
 - (void)postStreamEventAndRelease:(NSDictionary *)event
@@ -1566,9 +1174,6 @@ static void StrappyStoreChanged(void)
     [NSException raise:NSInvalidArgumentException
                 format:@"%@", (message ? message : @"Could not bootstrap Strappy.")];
   }
-  strappy_responses_set_provider_credentials_callback(
-    StrappySessionCopyChatGPTCredentials,
-    NULL);
   (void)[StrappySession assistantSetCatalog];
 }
 
@@ -5534,260 +5139,83 @@ static void StrappyStoreChanged(void)
   }
   return YES;
 }
-- (NSDictionary *)submitPrompt:(NSString *)prompt
-                       context:(NSDictionary *)context
-                      isolated:(BOOL)isolated
-                         error:(NSError **)error
+- (NSDictionary *)submitPrompt:(NSString *)prompt context:(NSDictionary *)context
+                      isolated:(BOOL)isolated error:(NSError **)error
 {
-  NSString *databasePath;
-  NSString *guidanceResourceDirectory;
-  NSString *apiEndpoint;
-  NSString *apiToken;
-  char *cursorError;
-  char *renderContextError;
-  char *strappyError;
-  char *timelineCursor;
-  long long sessionId;
-  strappy_session_record record;
-  NSDictionary *session;
-  StrappySessionResponsesContext responsesContext;
-  strappy_model_route_record route;
-
-  if ((prompt == nil) || ([prompt length] == 0U)) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt is empty.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:4
-                               userInfo:userInfo];
-    }
-    return nil;
-  }
-
-  if ((context != nil) && ![context isKindOfClass:[NSDictionary class]]) {
-    context = nil;
-  }
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return nil;
-  }
-
-  guidanceResourceDirectory =
-    [StrappySession guidanceResourceDirectoryWithError:error];
-  if (guidanceResourceDirectory == nil) {
-    return nil;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return nil;
-  }
-  memset(&responsesContext, 0, sizeof(responsesContext));
-  responsesContext.session = self;
-  responsesContext.context = [context retain];
-  cursorError = NULL;
-  timelineCursor = strappy_session_timeline_cursor_for_session(
-    [databasePath UTF8String],
-    sessionId,
-    &cursorError);
-  if (timelineCursor != NULL) {
-    responsesContext.timelineCursor =
-      [StrappySessionStringFromCString(timelineCursor) copy];
-  } else {
-    if (cursorError != NULL) {
-      NSLog(@"StrappyResponses could not prepare its presentation cursor: %s",
-            cursorError);
-    }
-  }
-  strappy_session_free_string(cursorError);
-  renderContextError = NULL;
-  responsesContext.webViewRenderContext =
-    strappy_session_webview_render_context_create(
-      [databasePath fileSystemRepresentation],
-      [guidanceResourceDirectory fileSystemRepresentation],
-      &renderContextError);
-  if (responsesContext.webViewRenderContext == NULL) {
-    NSLog(@"StrappyResponses could not cache its WebView render context: %s",
-          (renderContextError != NULL) ? renderContextError : "unknown error");
-  }
-  strappy_session_free_string(renderContextError);
-  apiEndpoint = nil;
-  apiToken = nil;
-  strappy_model_route_record_init(&route);
-  if (strappy_db_get_session_model_route(
-        [databasePath fileSystemRepresentation], sessionId, &route, NULL) &&
-      (route.provider_id != NULL) &&
-      (strcmp(route.provider_id, STRAPPY_PROVIDER_OPENROUTER) == 0) &&
-      (route.provider_account_id != NULL) &&
-      (strcmp(route.provider_account_id,
-              STRAPPY_PROVIDER_ACCOUNT_OPENROUTER) == 0)) {
-    apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-    apiToken = [[StrappyKeychain sharedKeychain] apiToken];
-  }
-  strappy_model_route_record_destroy(&route);
-
-  strappy_session_record_init(&record);
-  strappyError = NULL;
-  if (!(isolated ?
-        strappy_session_send_isolated_prompt_with_events_and_load(
-          [prompt UTF8String],
-          StrappySessionOptionalCString(apiEndpoint),
-          StrappySessionOptionalCString(apiToken),
-          [guidanceResourceDirectory fileSystemRepresentation],
-          [databasePath UTF8String],
-          sessionId,
-          StrappySessionHandleResponsesEvent,
-          &responsesContext,
-          &record,
-          &strappyError) :
-        strappy_session_send_prompt_with_events_and_load(
-          [prompt UTF8String],
-          StrappySessionOptionalCString(apiEndpoint),
-          StrappySessionOptionalCString(apiToken),
-          [guidanceResourceDirectory fileSystemRepresentation],
-          [databasePath UTF8String],
-          sessionId,
-          StrappySessionHandleResponsesEvent,
-          &responsesContext,
-          &record,
-          &strappyError))) {
-    StrappySessionResponsesContextDestroy(&responsesContext);
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    strappy_session_record_destroy(&record);
-    return nil;
-  }
-  StrappySessionResponsesContextDestroy(&responsesContext);
-
-  session = [StrappySession dictionaryFromSessionRecord:&record];
-  strappy_session_record_destroy(&record);
-  return session;
+  (void)prompt; (void)context; (void)isolated;
+  if (error) *error = [StrappySession errorFromCString:"Database Study execution is unavailable until its daemon worker is implemented."];
+  return nil;
 }
 
-- (BOOL)beginResponsesPrompt:(NSString *)prompt
-                     context:(NSDictionary *)context
-                       error:(NSError **)error
+- (BOOL)beginResponsesPrompt:(NSString *)prompt context:(NSDictionary *)context error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
+  NSData *data = [prompt isKindOfClass:[NSString class]] ?
+      [prompt dataUsingEncoding:NSUTF8StringEncoding] : nil;
   NSMutableDictionary *request;
-
-  if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt is empty.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:4
-                               userInfo:userInfo];
-    }
+  NSString *pendingKey = [NSString stringWithFormat:@"StrappyPendingPrompt-%@", sessionIdentifier_];
+  NSDictionary *pending = [[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey];
+  char key[65];
+  (void)context;
+  if ([data length] == 0 || [data length] > STRAPPY_IPC_MAX_PAYLOAD - 72 || [self isPromptInFlight]) {
+    if (error) *error = [StrappySession errorFromCString:"Prompt is empty, exceeds 4024 UTF-8 bytes, or a prompt is active."];
     return NO;
   }
-
-  if ((context != nil) && ![context isKindOfClass:[NSDictionary class]]) {
-    context = nil;
+  if (pending && (![[pending objectForKey:@"key"] isKindOfClass:[NSString class]] ||
+      [[pending objectForKey:@"key"] lengthOfBytesUsingEncoding:NSUTF8StringEncoding] != 64)) {
+    if (error) *error = [StrappySession errorFromCString:"The saved submission retry key is invalid."];
+    return NO;
   }
-
-  @synchronized(self) {
-    if (promptInFlight_) {
-      if (error != nil) {
-        NSDictionary *userInfo =
-          [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt request is already running.", nil)
-                                      forKey:NSLocalizedDescriptionKey];
-        *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                     code:8
-                                 userInfo:userInfo];
-      }
+  if (pending && ![[pending objectForKey:@"prompt"] isEqual:prompt]) {
+    if (error) *error = [StrappySession errorFromCString:"Retry the previous prompt first to resolve its acceptance."];
+    return NO;
+  }
+  if (!strappy_store_client_request_key(key)) return NO;
+  request = [NSMutableDictionary dictionaryWithObjectsAndKeys:prompt, @"prompt",
+      pending ? [pending objectForKey:@"key"] : [NSString stringWithUTF8String:key], @"key", pendingKey, @"pendingKey", nil];
+  @synchronized([NSUserDefaults standardUserDefaults]) {
+    [[NSUserDefaults standardUserDefaults] setObject:request forKey:pendingKey];
+    if (![[NSUserDefaults standardUserDefaults] synchronize]) {
+      if (error) *error = [StrappySession errorFromCString:"Could not save the submission retry key."];
       return NO;
     }
-
-    [processingStatusJSON_ release];
-    processingStatusJSON_ = nil;
-    promptInFlight_ = YES;
-    promptCancellationRequested_ = NO;
   }
-
-  [StrappySession registerInFlightSession:self];
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionPromptDidStartNotification
-                  object:self];
-
-  request = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
-    prompt, @"prompt",
-    nil];
-  if (context != nil) {
-    [request setObject:context forKey:@"context"];
-  }
-
-  [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:)
-                           toTarget:self
-                         withObject:request];
-  [request release];
+  @synchronized(self) { promptSubmissionPending_ = YES; promptInFlight_ = YES; }
+  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionPromptDidStartNotification object:self];
+  [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:) toTarget:self withObject:request];
   return YES;
 }
 
 - (void)sendPromptInBackground:(NSDictionary *)request
 {
-  NSAutoreleasePool *pool;
-  NSError *error;
-  NSDictionary *session;
-  NSDictionary *context;
-  NSMutableDictionary *result;
-  NSString *prompt;
-  NSString *errorMessage;
-
-  pool = [[NSAutoreleasePool alloc] init];
-
-  prompt = [request objectForKey:@"prompt"];
-  if (![prompt isKindOfClass:[NSString class]]) {
-    prompt = @"";
-  }
-  context = [request objectForKey:@"context"];
-  if (![context isKindOfClass:[NSDictionary class]]) {
-    context = nil;
-  }
-  result = [[NSMutableDictionary alloc] init];
-  if (context != nil) {
-    [result addEntriesFromDictionary:context];
-  }
-
-  error = nil;
-  session = [self submitPrompt:prompt
-                       context:context
-                      isolated:NO
-                         error:&error];
-  if (session != nil) {
-    [result setObject:session forKey:@"session"];
-  } else {
-    errorMessage = [error localizedDescription];
-    if ([errorMessage length] == 0U) {
-      errorMessage = NSLocalizedString(@"Prompt failed.", nil);
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  unsigned char payload[STRAPPY_IPC_MAX_PAYLOAD];
+  NSData *prompt = [[request objectForKey:@"prompt"] dataUsingEncoding:NSUTF8StringEncoding];
+  uint64_t session = (uint64_t)[sessionIdentifier_ longLongValue];
+  unsigned int status = STRAPPY_IPC_NOT_READY;
+  BOOL received;
+  strappy_ipc_put32(payload, (uint32_t)(session >> 32)); strappy_ipc_put32(payload+4, (uint32_t)session);
+  memcpy(payload+8, [[request objectForKey:@"key"] UTF8String], 64);
+  memcpy(payload+72, [prompt bytes], [prompt length]);
+  received = strappy_store_client_command(STRAPPY_IPC_SUBMIT_PROMPT, payload,
+      (unsigned int)[prompt length] + 72U, &status) ? YES : NO;
+  if (received) {
+    @synchronized([NSUserDefaults standardUserDefaults]) {
+      NSDictionary *saved = [[NSUserDefaults standardUserDefaults] dictionaryForKey:[request objectForKey:@"pendingKey"]];
+      if ([[saved objectForKey:@"key"] isEqual:[request objectForKey:@"key"]]) {
+        [[NSUserDefaults standardUserDefaults] removeObjectForKey:[request objectForKey:@"pendingKey"]];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+      }
     }
-    [result setObject:errorMessage forKey:@"error"];
   }
-
-  [self performSelectorOnMainThread:@selector(promptDidFinish:)
-                         withObject:result
-                      waitUntilDone:NO];
-  [result release];
-
+  @synchronized(self) { promptSubmissionPending_ = NO; }
+  if (!received || status != STRAPPY_IPC_OK) {
+    NSString *message = !received ? @"Acceptance is unknown. Retry the same prompt to reconnect safely." :
+        (status == STRAPPY_IPC_BUSY ? @"The service is busy with another prompt. Try again when it finishes." : @"The service could not accept this prompt.");
+    [self performSelectorOnMainThread:@selector(promptDidFinish:)
+        withObject:[NSDictionary dictionaryWithObject:message forKey:@"error"] waitUntilDone:NO];
+  } else {
+    [self performSelectorOnMainThread:@selector(serviceRunChanged:) withObject:nil waitUntilDone:NO];
+  }
   [pool release];
 }
 

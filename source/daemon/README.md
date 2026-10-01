@@ -1,16 +1,19 @@
-# Local service (steps 0–2)
+# Local service (steps 0–3)
 
-`strappyd` is a portable C service supervised by launchd. It owns store
+`strappyd` has a portable C runtime and a small Cocoa credential boundary, and is a service supervised by launchd. It owns store
 initialization, bundled catalog seeding, and all database writes. The app opens
-existing stores read-only after IPC v2 readiness. Unmigrated mutation/worker
-entrypoints fail explicitly until steps 3–4. See [STORAGE.md](STORAGE.md) for
+existing stores read-only after IPC v3 readiness. Unmigrated mutation/worker
+entrypoints fail explicitly until step 4. See [STORAGE.md](STORAGE.md) for
 ownership, snapshot lifetimes, startup/upgrade behavior, and runtime validation;
 [PROTOCOL.md](PROTOCOL.md) describes the wire contract.
 
 The normal iOS `.deb` includes a signed armv7/arm64 executable (deployment
-minimums iOS 5/7). Its only dynamic dependency is `/usr/lib/libSystem.B.dylib`.
-SQLite and cJSON are statically linked from the shipped Altivec libraries.
-The daemon reads `BundledModels.json` from the explicitly supplied app directory. Both package variants
+minimums iOS 5/7). Foundation, Security, CoreFoundation and SystemConfiguration are system dependencies.
+The networking, TLS, SQLite and cJSON libraries are statically linked from Altivec.
+Daemon entitlements include the app's Keychain group while execution remains mobile.
+The daemon reads prompt resources, `Info.plist` and `cacert.pem` from its explicit
+resource directory. It executes one prompt at a time independently of UI lifetime.
+See [EXECUTION.md](EXECUTION.md) for retry, cancellation and credential behavior. Both package variants
 use the job label `com.altivecintelligence.strappyd` and run as `mobile:mobile`.
 
 | File | Rootful | Rootless |

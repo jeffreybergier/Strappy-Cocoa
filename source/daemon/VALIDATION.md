@@ -481,3 +481,98 @@ provider/scanner execution. Existing step 5 limitations (including iOS 6,
 remaining iOS 8 runtime checks, newer Mac runtime, and phone sleep/first unlock)
 remain open. No persistent main-store read transaction survives a completed
 paginated-reader open, so suspension cannot leave those row objects pinning WAL.
+
+## Step 3 — durable prompt execution (2026-10-01)
+
+### Implementation and automated checks
+
+- IPC v3 / reader ABI 2 expose submission and run-specific cancellation. The
+  canonical `prompt_runs` table persists retry identity, prompt, lifecycle,
+  cancellation and typed processing/retry fields. SQLite `user_version` stays 1;
+  there are no ALTER/migration steps.
+- The daemon serializes execution globally and reuses the real C Responses
+  runtime. UI submission and cancellation use background IPC clients. Reconnect
+  refreshes DB-backed history/status; saved unresolved submission keys survive UI
+  exit. No UI Responses-runtime callback or execution fallback remains.
+- `make -C source/linux clean test` passes, including malformed transport/input,
+  peer verification, slow subscribers, synthetic publication, WAL reader tests,
+  the complete existing shared-core suite, and the new execution tests.
+- `execution_harness.py` uses only a loopback HTTP fixture and synthetic
+  credentials. It verifies lost acknowledgments, a disconnected submitting
+  process, identical and conflicting retries, concurrent same-session clients,
+  the cross-session concurrency bound, HTTP and Bash cancellation, SIGTERM child
+  cleanup, restart interruption, and durable terminal retries. Separate
+  `STRAPPY_DB_UI` processes recover running/completed/interrupted state, refuse
+  writes, and revoke reads when service readiness is lost. Fixture response and
+  tool IDs are unique per request, matching the provider contract.
+- Clean iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64 release builds pass without
+  warnings. Both rootful/rootless packages contain the signed daemon, explicit
+  runtime resources, and the shared app Keychain access group. Mac installs all
+  runtime resources, Info.plist and CA bundle alongside the stable binary.
+- Clang static analysis of execution, IPC server, daemon main, run storage, and
+  store client reports no findings. Generated build/analysis logs remain under
+  `/tmp/strappy-step3-*` and are not committed.
+
+### Native checks and scope
+
+Tests used disposable stores and service endpoints, with no replacement of the
+normal app, installed launchd service, or user conversation history. Fixture
+seeding read only account/model configuration from the existing store; it copied
+no history or credentials. No reboot or respring was performed.
+
+| Host | Observed result |
+| --- | --- |
+| `pinkphone-rsa`, iOS 15/arm64, UID 501/mobile | The signed daemon's noninteractive Keychain probe found one configured account and one accessible credential. A real prompt completed after the submitting client process exited. A later reader reported completed state and found the expected `DAEMON_STEP3_OK` assistant answer in the normalized timeline (16 visible rows in the initial fixture). The same stable key returned the same completed run instead of another provider request. IPC negotiation and explicit resource/CA/Info.plist paths passed. |
+| `x4-vm`, Tiger 10.4.11/PPC, UID 501/me | Native v3 negotiation, durable acceptance and retry passed. The probe found one configured account but zero accessible credentials. The run became failed; a new client received the same failed run for the same submission identity. This establishes failure/dedup behavior, not successful Mac provider execution. |
+| `koolphone5`, configured iOS 8/armv7 host | SSH refused the connection. The armv7 clean build passes, but native Step 3 execution remains unverified. |
+
+A second iOS fixture using the complete typed run schema was first observed
+running (state 2) by a separate reader; a retry returned that same running run.
+A later reader observed completed state 3, found the expected assistant answer
+among 14 timeline rows, and another retry returned the same completed run.
+Both test daemons were stopped cooperatively after validation; the normal
+installed launchd services were left unchanged. The final IPC regression also
+covers a subscribed peer retaining all four invalidation topics while its own
+command handler is busy.
+
+Initial isolated endpoints were `/var/jb/var/strappy-s3/service.sock` on iOS and
+`/tmp/strappy-s3/service.sock` on Tiger. The initial iOS daemon logged startup at
+11:39:25 UTC as PID 3557; completion and history were queried by later client
+processes. Heartbeat intervals varied while the phone was idle; this does not
+establish uninterrupted execution during sleep. Device clocks differ, so cross-
+host timestamps are not used for timing assertions.
+
+Representative checks, run as the normal user:
+
+```sh
+strappyd --credential-probe /absolute/path/to/existing/strappy.sqlite
+probe seed /absolute/path/to/existing/strappy.sqlite /private/fixture.sqlite /private/workdir
+strappyd /private/heartbeat.log /private/fixture.sqlite /private/resources
+strappyd --ipc-probe /private/service.sock
+probe submit /private/service.sock 1 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa 'Reply briefly with DAEMON_STEP3_OK. Do not search the web or run Bash.'
+probe state /private/fixture.sqlite 1
+probe history /private/fixture.sqlite 1
+```
+
+`probe` is `source/linux/execution_device_probe.c`, compiled for the device with
+writer capability for fixture seeding, the store sources, `strappy_run.c`, and
+the portable IPC client/platform sources. The iOS probe must be signed and run
+from a jailbreak executable path. The production daemon uses its dedicated
+entitlements, not the probe's bare signature.
+
+### Outstanding validation
+
+The native Keychain diagnostic deliberately prints no identifiers or OS error
+strings. Zero accessible items on Tiger does not identify whether the item is
+missing, the Keychain is locked, or its ACL needs interactive approval. Successful
+Mac credential access/refresh and a live Mac provider run remain unverified.
+iOS read access and a real run passed; forced OAuth refresh/rotation, locked-phone
+access and first-unlock behavior were not independently established.
+
+Full graphical submission, UI termination and reopened-window rendering were
+not driven on these devices. The automated and native tests prove client-process
+independence and reopened DB state, not that complete interactive scenario.
+Installation/upgrade/removal with the final execution worker, newer Mac runtimes,
+iOS 6, and the remaining iOS 8/15 lifecycle matrix remain Step 5 checks. Interrupted
+runs are explicit and never replayed; full interrupted-ledger repair and orphan
+handling after SIGKILL remain recovery work.

@@ -143,6 +143,9 @@ enum {
   NSString     *processingStatusJSON_;
   BOOL          optionsLoaded_;
   BOOL          promptInFlight_;
+  BOOL          promptSubmissionPending_;
+  long long     observedServiceRun_;
+  int           observedServiceState_;
   BOOL          promptCancellationRequested_;
 }
 

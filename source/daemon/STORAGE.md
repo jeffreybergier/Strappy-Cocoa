@@ -9,10 +9,10 @@ schema, seed missing defaults, repair tables, or checkpoint. Default/fallback
 values are computed without persistence. Temporary view tables are writable;
 SQLite still rejects mutations to the persistent main database.
 
-The GUI's prompt, study, scan, catalog-refresh, and mutation entrypoints fail
+The GUI's study, scan, catalog-refresh, and remaining mutation entrypoints fail
 with an unavailable-action error. The removed UI bootstrap no longer imports
 catalogs or converts saved account credentials. Those responsibilities must be
-implemented in the daemon in steps 3–4; there is no in-process execution
+implemented in the daemon in step 4; there is no in-process execution
 fallback. Local UI presentation files/preferences are unaffected.
 
 ## Startup and compatibility
@@ -30,7 +30,7 @@ after these commits. iOS uses
 `/var/mobile/Library/Application Support/Strappy/strappy.sqlite` for both package
 layouts; resource paths include the rootless prefix where applicable. Mac uses
 `~/Library/Application Support/Strappy/strappy.sqlite`. The Mac installer copies
-`BundledModels.json` beside its stable service binary and reloads the service if
+all prompt resources, `Info.plist`, and `cacert.pem` beside its stable service binary and reloads the service if
 that resource changes. It does not depend on the app remaining at its old path.
 
 New store directories are 0700; database, WAL, and SHM files are 0600 and owned
@@ -39,8 +39,8 @@ The service rejects symlink or foreign-owned store files. Normal ownership is
 UID 501/mobile on iOS and the logged-in user on Mac. This is an ownership rule,
 not isolation from other unsandboxed programs with the same identity.
 
-A background client monitor negotiates IPC v2, subscribes, and checks reader
-ABI 1 before allowing GUI readers. The reader independently verifies the stored
+A background client monitor negotiates IPC v3, subscribes, and checks reader
+ABI 2 before allowing GUI readers. The reader independently verifies the stored
 schema identity and `user_version = 1`. A missing store is an error, never an
 invitation for a reader to create it. Startup races, service loss, old transport
 versions, and mismatched reader ABI fail closed. The monitor retries once per
@@ -76,3 +76,18 @@ GUI-capability executables verified read-only APIs, denied writes, and readiness
 revocation. Linux additionally tests catalog/model retained snapshots,
 reconnect, startup races, and incompatible schema refusal. See
 [VALIDATION.md](VALIDATION.md) for coverage limits.
+
+## Durable prompt state (step 3)
+
+The canonical schema adds `prompt_runs` with a unique client retry key, session,
+prompt text, six-state lifecycle, durable cancellation flag, timestamps and typed
+processing/retry fields. No JSON, credentials, HTTP payloads or rendered content
+are stored there. The existing normalized conversation ledger remains unchanged.
+SQLite `user_version` is still 1; there is no ALTER/migration path. This is an
+additive canonical-schema definition for the unshipped database.
+
+`strappy_run` exposes bounded read-only latest-run and active-count queries to
+the UI. Acceptance, progress, cancellation and terminal transitions use the
+writer capability, and publish notifications only after committing. Startup
+marks unfinished work interrupted before execution readiness, without rerunning
+possibly side-effecting tools. See [EXECUTION.md](EXECUTION.md).

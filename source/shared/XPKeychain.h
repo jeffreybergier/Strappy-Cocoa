@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 
 @interface XPKeychain : NSObject
+/* Daemons must fail without authentication dialogs or identity-bearing logs. */
++ (BOOL)configureBackgroundAccess;
 
 + (BOOL)findInternetPasswordForAccount:(NSString *)account
                                 outURL:(NSString **)outURL

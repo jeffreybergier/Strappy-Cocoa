@@ -1,9 +1,8 @@
-# Strappy local service protocol v2
+# Strappy local service protocol v3
 
-Step 2 adds daemon-owned storage readiness. The service initializes the schema
-and bundled catalogs before accepting application readers. GUI builds have no
-writer capability; prompts, scanning, account/catalog changes, and other
-mutations remain unavailable until steps 3–4. No provider execution is enabled.
+Step 3 adds durable prompt submission and cancellation. The daemon runs the
+existing C Responses runtime; GUI clients read history and run state from SQLite.
+Other mutations and workers remain unavailable until step 4.
 
 ## Endpoint and trust
 
@@ -36,7 +35,7 @@ A frame is a 24-byte header followed by exactly `length` payload bytes:
 | Offset | Width | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `STPY` |
-| 4 | 2 | Protocol version, currently 2 |
+| 4 | 2 | Protocol version, currently 3 |
 | 6 | 2 | Kind: request 1, reply 2, event 3 |
 | 8 | 4 | Operation |
 | 12 | 4 | Request ID; zero only for unsolicited events |
@@ -47,13 +46,11 @@ A connection starts with `hello`. Clients use nonzero strictly increasing
 request IDs per connection, including failed requests. A repeated or lower ID
 returns `duplicate_request` and is never executed, even if its payload differs.
 Reconnect before exhausting the 32-bit counter. Replies echo operation and ID.
-There is no durable request acceptance or replay cache in step 1. After a lost
-reply, control operations can be retried on a new connection. Mutation retries
-must wait for step 3's durable client-request deduplication; transport IDs are
-not durable submission identities.
+Transport request IDs are connection-local. Submission retry identities are
+separate 256-bit keys persisted with the work before acceptance, as below.
 
 Malformed magic/kind/oversized frames cause immediate disconnect. Unsupported
-header versions receive a v2 incompatible-version reply then disconnect. Invalid
+header versions receive a v3 incompatible-version reply then disconnect. Invalid
 request kind, nonzero request status, or zero request ID similarly produce an
 invalid-request reply then disconnect. The server handles partial reads/writes
 and multiple frames on one stream. Each client has one bounded input frame and
@@ -73,7 +70,7 @@ work per client; execution never occurs on this thread.
 | 3 | subscribe | Empty | Snapshot, with subscription already active |
 | 4 | unsubscribe | Empty | Snapshot, with subscription disabled |
 
-The version interval must contain 2. `hello` is accepted once per connection.
+The version interval must contain 3. `hello` is accepted once per connection.
 Operations 2–4 are repeatable with new IDs. Every successful control reply is
 exactly 36 bytes:
 
@@ -81,27 +78,20 @@ exactly 36 bytes:
 | --- | --- | --- |
 | 0 | 16 | Opaque random service-instance identity from `/dev/urandom` |
 | 16 | 8 | Instance-local committed-state revision |
-| 24 | 4 | Readiness flags: bit 0 transport ready; bit 1 store ready (not execution ready) |
+| 24 | 4 | Readiness flags: bit 0 transport ready; bit 1 store ready; bit 2 execution ready |
 | 28 | 4 | Maximum frame payload (4096) |
-| 32 | 4 | Store reader ABI, currently 1 |
+| 32 | 4 | Store reader ABI, currently 2 |
 
-The production readiness value is 3, published only after schema initialization
-and bundled model import commit. The synthetic transport fixture remains 1.
-Store ABI 1 requires the existing schema identity
-`semantic-v1-provider-owned-models-no-seeded-accounts` and `user_version = 1`.
-This ABI is distinct from SQLite's pinned version: incompatible future reader
-contracts must change the negotiated ABI/protocol without silently migrating a
-store. Old v1 clients/services are rejected. The snapshot represents service
-identity/readiness/revision; it does not claim execution or active-run state.
+Production readiness is 7 after store/resource configuration and the execution
+worker are ready. The transport fixture remains 1. Reader ABI 2 adds
+`prompt_runs`; SQLite `user_version` remains 1. Old protocol versions fail closed.
+The 36-byte snapshot is an identity/readiness/revision watermark. Read current
+run state using the read-only run API after subscribing, just like history.
 
 ## Mutation command boundary
 
-The following stable operation IDs establish the service boundary. All return
-`execution_not_ready` in steps 1–2, without parsing or executing the supplied body.
-No acknowledgement implies durable acceptance. Their required semantic inputs
-below are a contract for the later typed command implementations; body encoding
-and success-result schemas are deliberately not advertised as supported by v2
-store readiness. Negotiate an updated protocol before enabling them.
+Operations 16 and 17 are implemented. Operations 18–24 still return
+`execution_not_ready`. The latter commands' semantic inputs remain future contracts.
 
 | ID | Command | Required semantic inputs for execution implementation |
 | --- | --- | --- |
@@ -129,6 +119,40 @@ status in the header and an un-NUL-terminated ASCII error code as payload:
 
 Logs and errors never include request payloads or credentials.
 
+## Prompt and cancellation payloads
+
+`submit_prompt` (16): u64 positive session ID, exactly 64 lowercase ASCII hex
+characters representing a random 256-bit client retry key, then 1–4024 bytes of
+valid UTF-8 prompt text (no NUL). The session and account/model must already be
+configured; creation and configuration are step 4. The UI persists a pending
+submission before sending and retries the same key after an uncertain reply or
+reconnect. It does not create conversation rows itself.
+
+Success is u64 run ID followed by u32 state: accepted=1, running=2, completed=3,
+failed=4, cancelled=5, interrupted=6. A transaction stores the key, session and
+prompt before this reply. Identical retries return the original run and current
+state, including after restart. Reusing a key with different input returns
+`request_conflict` (8). There is no automatic replay of interrupted work.
+
+One run may be accepted/running across the entire daemon. A different submission
+while busy returns `service_busy` (7) without acceptance. This also enforces one
+active prompt per session. The fixed execution worker is separate from the IPC
+loop. Each peer has at most one command worker; at most 16 commands can be in
+progress, and another command on that peer waits until its previous reply.
+Storage waits and provider/tool work never block socket servicing.
+
+`cancel_run` (17): u64 session ID followed by u64 run ID. The run must be the
+session's latest run, protecting a newer prompt from a stale cancel. Success has
+the same 12-byte run/state reply and confirms the cancellation request was
+persisted; it does not promise execution has already stopped. Repeated cancels
+and cancellation of an already terminal latest run succeed without replay.
+Cancellation polls cover HTTP, retry waits, OAuth refresh and tools/Bash.
+
+Error frames contain a numeric status and a stable ASCII identifier. In addition
+to the transport errors, `storage_error` (9) means acceptance/state persistence
+failed. No provider credentials or response payloads cross this protocol. A lost
+connection never cancels work.
+
 ## Events, workers, and reconnect
 
 Event IDs 32–35 mean session, ledger, catalog, and run-state changed, respectively.
@@ -140,10 +164,12 @@ emitted for rejected commands or heartbeat ticks.
 after the corresponding transaction commits. It increments the revision under a
 mutex, records pending topic bits, and wakes the loop through a nonblocking pipe.
 A full pipe cannot lose pending topic bits. Multiple changes may coalesce into
-one refresh hint. Workers own all future database/provider work; the loop owns
+one refresh hint. Workers own database/provider work; the loop owns
 all client descriptors. Stop and join workers before destroying the server.
 The offline fixture simulates commits without touching an application database.
-Real transaction-hook integration belongs to steps 2–4.
+Prompt acceptance, run transitions and runtime ledger/session callbacks publish
+after their associated commits. While a subscribed peer has a command in
+progress, topic bits retain every pending invalidation until its reply is queued.
 
 Connect, authenticate, send `hello`, then send `subscribe`. Subscription and its
 snapshot watermark are established in one event-loop operation, so a concurrent
@@ -153,7 +179,7 @@ Events already queued before `unsubscribe` can arrive before its reply.
 
 Notifications are refresh hints. On first subscription, reconnect, changed
 instance identity, or a revision gap, refresh **all** daemon-owned state from its
-future authoritative read layer. An event can represent coalesced changes; never
+authoritative read layer. An event can represent coalesced changes; never
 interpret it as an ordered transaction log. Events for different topics may
 share a revision. Only discard events at/below a watermark after refreshing all
 state through that watermark; do not discard a second topic just because the
@@ -164,12 +190,13 @@ thread with bounded I/O and one-second retry delay, never socket I/O on the UI
 thread. Retained paginated readers hold private temporary-table snapshots, not
 live WAL read transactions. See [STORAGE.md](STORAGE.md).
 
-Do not cancel accepted future work when a client disconnects. The client API is
+Do not cancel accepted work when a client disconnects. The client API is
 synchronous, has bounded monotonic deadlines, and belongs on a background thread.
 After any I/O/protocol error, close it and resynchronize on a fresh connection.
 The current store monitor handles control-request correlation, reconnection
-backoff, and UI refresh hints. Typed mutation request/reply handling remains for
-the later `StrappySession`/`FileScanner` execution adapter.
+backoff, and UI refresh hints. The `StrappySession` adapter sends prompts and cancels on background threads.
+It renders fresh DB state on service invalidation; `FileScanner` workers remain
+for step 4.
 
 ## Validation
 

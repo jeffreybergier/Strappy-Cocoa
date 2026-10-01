@@ -10,6 +10,8 @@
 #define errSecSuccess 0
 #endif
 
+static BOOL xpkc_background = NO;
+
 #if TARGET_OS_IPHONE
 
 static NSString *xpkc_iosSchemeForProto(NSString *proto)
@@ -25,6 +27,12 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
 }
 
 @implementation XPKeychain
++ (BOOL)configureBackgroundAccess
+{
+  xpkc_background = YES;
+  return YES;
+}
+
 
 + (BOOL)findInternetPasswordForAccount:(NSString *)account
                                 outURL:(NSString **)outURL
@@ -54,7 +62,7 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
   status = SecItemCopyMatching((CFDictionaryRef)query, &result);
   if ((status != errSecSuccess) || (result == NULL)) {
     if (status != errSecItemNotFound) {
-      NSLog(@"XPKeychain.findInternetPasswordForAccount status=%d account=%@",
+      if (!xpkc_background) NSLog(@"XPKeychain.findInternetPasswordForAccount status=%d account=%@",
             (int)status,
             account);
     }
@@ -122,7 +130,7 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
 
   parsed = [NSURL URLWithString:url];
   if ((parsed == nil) || ([[parsed host] length] == 0U)) {
-    NSLog(@"XPKeychain.setInternetPasswordForAccount invalid URL: %@", url);
+    if (!xpkc_background) NSLog(@"XPKeychain.setInternetPasswordForAccount invalid URL: %@", url);
     return NO;
   }
 
@@ -145,7 +153,7 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
 
   status = SecItemAdd((CFDictionaryRef)query, NULL);
   if (status != errSecSuccess) {
-    NSLog(@"XPKeychain.setInternetPasswordForAccount SecItemAdd status=%d account=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.setInternetPasswordForAccount SecItemAdd status=%d account=%@",
           (int)status,
           account);
     return NO;
@@ -178,7 +186,7 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
   status = SecItemCopyMatching((CFDictionaryRef)query, &result);
   if ((status != errSecSuccess) || (result == NULL)) {
     if (status != errSecItemNotFound) {
-      NSLog(@"XPKeychain.findGenericPasswordData status=%d service=%@ account=%@",
+      if (!xpkc_background) NSLog(@"XPKeychain.findGenericPasswordData status=%d service=%@ account=%@",
             (int)status,
             service,
             account);
@@ -216,7 +224,7 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
     return [NSArray array];
   }
   if (status != errSecSuccess) {
-    NSLog(@"XPKeychain.genericPasswordAccounts status=%d service=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.genericPasswordAccounts status=%d service=%@",
           (int)status, service);
     return [NSArray array];
   }
@@ -250,7 +258,7 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
     account,                      (id)kSecAttrAccount, nil];
   status = SecItemDelete((CFDictionaryRef)query);
   if ((status != errSecSuccess) && (status != errSecItemNotFound)) {
-    NSLog(@"XPKeychain.deleteGenericPassword status=%d service=%@ account=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.deleteGenericPassword status=%d service=%@ account=%@",
           (int)status,
           service,
           account);
@@ -291,7 +299,7 @@ static NSString *xpkc_iosProtoForScheme(NSString *scheme)
     }
   }
   if (status != errSecSuccess) {
-    NSLog(@"XPKeychain.setGenericPasswordData status=%d service=%@ account=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.setGenericPasswordData status=%d service=%@ account=%@",
           (int)status,
           service,
           account);
@@ -403,6 +411,12 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
 }
 
 @implementation XPKeychain
++ (BOOL)configureBackgroundAccess
+{
+  xpkc_background = YES;
+  return SecKeychainSetUserInteractionAllowed(false) == errSecSuccess;
+}
+
 
 + (BOOL)findInternetPasswordForAccount:(NSString *)account
                                 outURL:(NSString **)outURL
@@ -447,7 +461,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
       CFRelease(item);
     }
     if (status != errSecItemNotFound) {
-      NSLog(@"XPKeychain.findInternetPasswordForAccount status=%d account=%@",
+      if (!xpkc_background) NSLog(@"XPKeychain.findInternetPasswordForAccount status=%d account=%@",
             (int)status,
             account);
     }
@@ -504,7 +518,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
     return YES;
   }
   if ((status != errSecSuccess) || (item == NULL)) {
-    NSLog(@"XPKeychain.deleteInternetPasswordForAccount find status=%d account=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.deleteInternetPasswordForAccount find status=%d account=%@",
           (int)status,
           account);
     return NO;
@@ -513,7 +527,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
   status = SecKeychainItemDelete(item);
   CFRelease(item);
   if (status != errSecSuccess) {
-    NSLog(@"XPKeychain.deleteInternetPasswordForAccount delete status=%d account=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.deleteInternetPasswordForAccount delete status=%d account=%@",
           (int)status,
           account);
     return NO;
@@ -544,7 +558,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
 
   parsed = [NSURL URLWithString:url];
   if ((parsed == nil) || ([[parsed host] length] == 0U)) {
-    NSLog(@"XPKeychain.setInternetPasswordForAccount invalid URL: %@", url);
+    if (!xpkc_background) NSLog(@"XPKeychain.setInternetPasswordForAccount invalid URL: %@", url);
     return NO;
   }
 
@@ -577,7 +591,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
                                           passwordCString,
                                           NULL);
   if (status != errSecSuccess) {
-    NSLog(@"XPKeychain.setInternetPasswordForAccount SecKeychainAddInternetPassword status=%d account=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.setInternetPasswordForAccount SecKeychainAddInternetPassword status=%d account=%@",
           (int)status,
           account);
     return NO;
@@ -632,7 +646,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
       CFRelease(item);
     }
     if (status != errSecItemNotFound) {
-      NSLog(@"XPKeychain.findGenericPasswordData status=%d service=%@ account=%@",
+      if (!xpkc_background) NSLog(@"XPKeychain.findGenericPasswordData status=%d service=%@ account=%@",
             (int)status,
             service,
             account);
@@ -676,7 +690,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
     return [NSArray array];
   }
   if ((status != errSecSuccess) || (matches == NULL)) {
-    NSLog(@"XPKeychain.genericPasswordAccounts status=%d service=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.genericPasswordAccounts status=%d service=%@",
           (int)status,
           service);
     if (matches != NULL) {
@@ -726,7 +740,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
     NULL, kSecGenericPasswordItemClass, &searchAttributes, &search);
   if ((status != errSecSuccess) || (search == NULL)) {
     if (status != errSecItemNotFound) {
-      NSLog(@"XPKeychain.genericPasswordAccounts search status=%d service=%@",
+      if (!xpkc_background) NSLog(@"XPKeychain.genericPasswordAccounts search status=%d service=%@",
             (int)status, service);
     }
     if (search != NULL) {
@@ -773,7 +787,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
     }
   }
   if ((status != errSecItemNotFound) && (status != errSecSuccess)) {
-    NSLog(@"XPKeychain.genericPasswordAccounts next status=%d service=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.genericPasswordAccounts next status=%d service=%@",
           (int)status, service);
   }
   CFRelease(search);
@@ -816,7 +830,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
     return YES;
   }
   if ((status != errSecSuccess) || (item == NULL)) {
-    NSLog(@"XPKeychain.deleteGenericPassword find status=%d service=%@ account=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.deleteGenericPassword find status=%d service=%@ account=%@",
           (int)status,
           service,
           account);
@@ -825,7 +839,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
   status = SecKeychainItemDelete(item);
   CFRelease(item);
   if (status != errSecSuccess) {
-    NSLog(@"XPKeychain.deleteGenericPassword delete status=%d service=%@ account=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.deleteGenericPassword delete status=%d service=%@ account=%@",
           (int)status,
           service,
           account);
@@ -872,7 +886,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
                                            &item);
   if (status == errSecSuccess) {
     if (item == NULL) {
-      NSLog(@"XPKeychain.setGenericPasswordData found no item service=%@ account=%@",
+      if (!xpkc_background) NSLog(@"XPKeychain.setGenericPasswordData found no item service=%@ account=%@",
             service,
             account);
       return NO;
@@ -918,7 +932,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
     }
   }
   if (status != errSecSuccess) {
-    NSLog(@"XPKeychain.setGenericPasswordData status=%d service=%@ account=%@",
+    if (!xpkc_background) NSLog(@"XPKeychain.setGenericPasswordData status=%d service=%@ account=%@",
           (int)status,
           service,
           account);
