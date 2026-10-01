@@ -1,9 +1,10 @@
 # Strappy daemon migration plan
 
 Status: step 0 heartbeat implementation is present. Device validation on
-`koolphone5` covers iOS 8.4.1, not iOS 5; the iOS 5 and rootless device gates
-remain open. See `source/daemon/README.md` for operation and
-`source/daemon/VALIDATION.md` for recorded evidence. Harness migration has not
+`koolphone5` covers rootful iOS 8.4.1, and `pinkphone-rsa` covers rootless
+iOS 15.0/Dopamine. The iOS 5 gate remains open; rootless screen-state and
+reboot/first-unlock coverage remain incomplete. See `source/daemon/README.md`
+for operation and `source/daemon/VALIDATION.md` for recorded evidence. Harness migration has not
 started.
 
 ## Objective

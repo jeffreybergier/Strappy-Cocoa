@@ -31,7 +31,10 @@ new logs have mode 0600. Logs contain no user content. Removal retains these
 bounded diagnostic files, but removes the executable and job registration.
 
 The package provisions the log directory and uses `/bin/launchctl load` and
-`unload`, compatible with the legacy lifecycle interface. `RunAtLoad` starts
+`unload` on rootful devices, or `/var/jb/bin/launchctl` on rootless devices,
+compatible with the legacy lifecycle interface. Package script interpreters
+also use the installation prefix (`/bin/sh` or `/var/jb/bin/sh`); their PATH
+explicitly includes the matching jailbreak tools. `RunAtLoad` starts
 without opening Strappy; `KeepAlive` restarts an exited process with launchd
 throttling. Pre-install and pre-removal scripts unload an existing job before
 replacement/removal; configuration loads exactly one job. All runtime paths
@@ -43,4 +46,6 @@ For device acceptance, install the normal `.deb`, inspect `launchctl list
 com.altivecintelligence.strappyd`, and follow the checklist in `PLAN.md`.
 A scheduled timer does not keep iOS awake: locked-screen observations must not
 be described as guaranteed execution during deep sleep. Rootless installation
-and an actual iOS 5 device require their own validation.
+has been exercised on iOS 15.0/Dopamine; see
+`VALIDATION.md` for coverage and remaining screen-state/reboot checks. An
+actual iOS 5 device still requires validation.

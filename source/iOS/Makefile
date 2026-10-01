@@ -136,7 +136,8 @@ $(PHONE_DEBS): $(APP_BUNDLE) $(STRAPPY_DAEMON) $(STRAPPY_DAEMON_INPUTS) Makefile
 	  echo "Description: $(DEB_DESCRIPTION)"; \
 	} > "$(DEB_STAGE)/DEBIAN/control"
 	@{ \
-	  echo '#!/bin/sh'; \
+	  echo '#!$(DEB_INSTALL_PREFIX)/bin/sh'; \
+	  echo 'export PATH=$(DEB_INSTALL_PREFIX)/usr/sbin:$(DEB_INSTALL_PREFIX)/usr/bin:$(DEB_INSTALL_PREFIX)/sbin:$(DEB_INSTALL_PREFIX)/bin:/usr/sbin:/usr/bin:/sbin:/bin'; \
 	  echo 'set -e'; \
 	  sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/lifecycle.sh.in; \
 	  echo ''; \
@@ -157,7 +158,8 @@ $(PHONE_DEBS): $(APP_BUNDLE) $(STRAPPY_DAEMON) $(STRAPPY_DAEMON_INPUTS) Makefile
 	  echo 'exit 0'; \
 	} > "$(DEB_STAGE)/DEBIAN/preinst"
 	@{ \
-	  echo '#!/bin/sh'; \
+	  echo '#!$(DEB_INSTALL_PREFIX)/bin/sh'; \
+	  echo 'export PATH=$(DEB_INSTALL_PREFIX)/usr/sbin:$(DEB_INSTALL_PREFIX)/usr/bin:$(DEB_INSTALL_PREFIX)/sbin:$(DEB_INSTALL_PREFIX)/bin:/usr/sbin:/usr/bin:/sbin:/bin'; \
 	  echo 'set -e'; \
 	  sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/lifecycle.sh.in; \
 	  echo ''; \
@@ -178,7 +180,8 @@ $(PHONE_DEBS): $(APP_BUNDLE) $(STRAPPY_DAEMON) $(STRAPPY_DAEMON_INPUTS) Makefile
 	  echo 'exit 0'; \
 	} > "$(DEB_STAGE)/DEBIAN/prerm"
 	@{ \
-	  echo '#!/bin/sh'; \
+	  echo '#!$(DEB_INSTALL_PREFIX)/bin/sh'; \
+	  echo 'export PATH=$(DEB_INSTALL_PREFIX)/usr/sbin:$(DEB_INSTALL_PREFIX)/usr/bin:$(DEB_INSTALL_PREFIX)/sbin:$(DEB_INSTALL_PREFIX)/bin:/usr/sbin:/usr/bin:/sbin:/bin'; \
 	  echo 'set -e'; \
 	  sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/lifecycle.sh.in; \
 	  echo ''; \

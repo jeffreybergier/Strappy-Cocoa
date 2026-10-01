@@ -3,9 +3,8 @@
 The implementation is complete; the original **iOS 5 acceptance gate remains
 open**. `koolphone5` is an iPhone 5 (`iPhone5,2`, armv7) running **iOS 8.4.1,
 build 12H321**, with a rootful jailbreak. Its package inventory reports
-`com.lukezgd.everuntether-bin 1.3.6`. Rootless packaging is built and inspected,
-but has not been installed on a newer rootless device. No harness migration
-has started.
+`com.lukezgd.everuntether-bin 1.3.6`. Rootless iOS 15.0/Dopamine was subsequently tested on `pinkphone-rsa`; see
+the rootless section below. No harness migration has started.
 
 ## Build and offline checks
 
@@ -160,9 +159,82 @@ The temporary process probe and copied package were removed after testing.
 
 - Run the full checklist on an actual **iOS 5 rootful device**. The unchecked
   iOS 5 acceptance items in `PLAN.md` are intentional.
-- Install/test the rootless `.deb` on a newer rootless device; local packaging
-  inspection is not rootless runtime validation.
+- Complete the rootless UI/screen-state and reboot/first-unlock coverage
+  identified below; installation and service lifecycle checks now have actual
+  iOS 15.0/Dopamine device coverage.
 - Establish first-unlock/jailbreak activation dependencies for each target
   configuration; this run does not resolve first-unlock timing.
 - Do not infer uninterrupted locked-device work from process survival: the
   measured 188-second gap is a concrete limit of this experiment.
+
+## Rootless follow-up: pinkphone-rsa, iOS 15.0
+
+On 2026-10-01, tested the normal **1.1.2 rootless `.deb`** on an iPhone SE
+(first generation), `iPhone8,4`, **iOS 15.0 build 19A346**. `/var/jb` resolves
+to a Dopamine/Procursus installation under `/private/preboot`; installed
+packages include `dopamine-basebin-link`, `libkrw0-dopamine`, and
+`libroot-dopamine`. SSH logs in as mobile; package and system-launchd operations
+used passwordless `sudo -n`.
+
+The device has no `/bin/sh` or `/bin/launchctl` files. Package scripts now use
+the layout's interpreter and launchctl paths explicitly: `/var/jb/bin/sh` and
+`/var/jb/bin/launchctl` for rootless, retaining `/bin/...` for rootful. Their
+PATH includes the corresponding jailbreak tools before stock system paths.
+No daemon C changes were needed.
+
+Validation commands included:
+
+```sh
+scp -O source/iOS/build-release/Strappy-rootless.deb pinkphone-rsa:/var/tmp/strappy-rootless-test.deb
+ssh pinkphone-rsa 'sudo -n dpkg -i /var/tmp/strappy-rootless-test.deb'
+ssh pinkphone-rsa 'sudo -n /var/jb/bin/launchctl print system/com.altivecintelligence.strappyd'
+ssh pinkphone-rsa 'cat /var/jb/var/log/strappy/heartbeat.log'
+ssh pinkphone-rsa 'ps -A -o pid,user,comm | grep -E "Strappy|strappyd"'
+```
+
+The package upgraded the existing 1.1.1 installation. Without opening the UI,
+launchd started exactly one daemon as **mobile, UID 501**, PID **3058**:
+
+```text
+2026-10-01T08:28:05Z event=startup pid=3058 euid=501 heartbeat=0
+2026-10-01T08:29:05Z event=heartbeat pid=3058 euid=501 heartbeat=1
+2026-10-01T08:30:05Z event=heartbeat pid=3058 euid=501 heartbeat=2
+2026-10-01T08:31:05Z event=heartbeat pid=3058 euid=501 heartbeat=3
+```
+
+All three intervals were exactly 60 seconds. Screen/power state was not
+independently verified, so these intervals do not establish sleep behavior.
+
+- `killall -TERM strappyd` at **08:31:25** logged shutdown with counter 3 and
+  launchd started PID **3121**. `killall -9 strappyd` then caused one replacement,
+  PID **3128**, to start at **08:31:35**, after launchd throttling.
+- Reinstall and removal used `sudo -n dpkg -i` and `sudo -n dpkg -r
+  com.altivecintelligence.strappy`. Removal completed at **08:31:52** with no
+  daemon, no system job, and no executable/plist. At **08:33:01**, 69 seconds
+  later, it remained unloaded. The diagnostic log was retained.
+- Restoration started PID **3229** at **08:33:05**. Another reinstall replaced
+  it with exactly one process, PID **3277**, starting at **08:33:44**. The
+  transient half-configured state observed during that reinstall resolved
+  normally; at **08:34:07** dpkg reported `install ok installed`, version 1.1.2.
+- Per the user's instruction, **no reboot was performed**. Instead,
+  `sudo -n /var/jb/usr/bin/sbreload` ran at **08:34:07**. SpringBoard changed
+  from PID **487** to **3310**, while the daemon retained PID **3277**.
+  Its next record was `2026-10-01T08:36:01Z event=heartbeat pid=3277 euid=501
+  heartbeat=1`, 137 seconds after startup. This confirms continued execution
+  after respring, with a scheduling gap; the device power state was not
+  instrumented, so the gap is not assigned a specific cause.
+
+The rootless package was left installed. UI launch requests through `uiopen
+--bundleid com.altivecintelligence.Strappy` did not produce a Strappy UI process,
+although the app was registered in `uicache -l`. No manual UI confirmation was
+available during this run; UI foreground/background/termination and explicit
+lock/unlock checks remain unverified on this device. The daemon works without
+a UI process. Reboot, jailbreak reactivation, and first-unlock behavior remain
+untested; respring survival is not reboot validation.
+
+After the path fix, `make -C source clean release` passed for all required
+Apple architectures with no warnings/errors, and `make -C source/linux
+daemon-test` passed. Both staged package variants passed shell syntax,
+interpreter/launchctl path, and plist checks. Full local logs were captured in
+`/tmp/strappy-rootless-build.log` and `/tmp/strappy-rootless-device.log` and are
+not committed.
