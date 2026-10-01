@@ -1,11 +1,15 @@
 # Strappy daemon migration plan
 
-Status: step 0 heartbeat implementation is present. Device validation on
-`koolphone5` covers rootful iOS 8.4.1, and `pinkphone-rsa` covers rootless
-iOS 15.0/Dopamine. The iOS 5 gate remains open; rootless screen-state and
-reboot/first-unlock coverage remain incomplete. See `source/daemon/README.md`
-for operation and `source/daemon/VALIDATION.md` for recorded evidence. Harness migration has not
-started.
+Status: step 0 is complete for iOS 8/15 and Mac heartbeat integration. The heartbeat
+daemon was validated on `koolphone5` (rootful iOS 8.4.1) and `pinkphone-rsa`
+(rootless iOS 15.0/Dopamine), plus `x4-vm` (Mac OS X 10.4.11/PowerPC),
+with the coverage limits recorded below. Harness
+migration has not started; step 1 is next. iOS 6 device testing is future
+compatibility validation, not a blocker for starting migration.
+
+See `source/daemon/README.md` for operation and `source/daemon/VALIDATION.md`
+for device evidence. This plan supersedes the earlier iOS 5 acceptance gate
+mentioned in those implementation-era notes.
 
 ## Objective
 
@@ -15,13 +19,16 @@ the UI sends commands, receives change notifications, and reads stored state
 through a dedicated read-only database layer.
 
 The first milestone is deliberately smaller: install one heartbeat daemon with
-Strappy and prove that it runs independently on a jailbroken iPhone running
-iOS 5. Complete that device experiment before moving harness responsibilities.
+Strappy and prove that it runs independently on rootful iOS 8 and rootless
+iOS 15. That initial device experiment is complete. Preserve the legacy armv7
+build and APIs for eventual iOS 6 testing: the iOS 8 build is expected to work
+there, but compatibility remains unverified until tested on an actual device.
 
-## Step 0: install and verify a heartbeat daemon on iOS 5
+## Step 0: install and verify the heartbeat service on iOS 8/15 and Mac
 
-- [ ] Complete the heartbeat implementation and real-device acceptance checks
-  below before starting harness migration.
+- [x] Complete the heartbeat implementation and initial iOS 8/15 device
+  experiment before starting harness migration. Carry the explicitly deferred
+  coverage below into later platform validation.
 
 ### Deliverable
 
@@ -49,55 +56,90 @@ once the real service exists.
 
 - [x] Extend `source/iOS/Makefile` to build, sign, and package the executable and
   launchd plist alongside the app. Include all required runtime dependencies.
-- [x] Support the existing rootful and rootless package layouts. The iOS 5 gate is
-  specifically the rootful package; rootless support requires a separate,
-  newer-device test. Resolve executable, resource, library, and log paths
-  explicitly instead of relying on a shell environment or current directory.
+- [x] Support the existing rootful and rootless package layouts, validated on
+  iOS 8.4.1 and iOS 15.0 respectively. Resolve executable, resource, library,
+  and log paths explicitly instead of relying on a shell environment or
+  current directory.
 - [x] Start by configuring the service to run as `mobile`. Confirm the effective
   identity in its startup log and provision writable log directories for it.
 - [x] Use launchd configuration compatible with the target OS to start on load and
   restart after unexpected exit. Keep lifecycle compatibility handling in the
   appropriate platform boundary; modern launchctl commands cannot be assumed
-  to exist on iOS 5.
+  to exist on the legacy iOS targets, including eventual iOS 6 support.
 - [x] Package scripts load the job after installation and unload it before upgrade
   or removal. Upgrade replaces the executable and reloads exactly one job.
   Removal stops the process and removes its registration.
 - [x] Do not rely on modern XPC, ServiceManagement, or unified logging APIs in this
   first executable. Do not fork or detach it from launchd.
 
-### Acceptance checks on a real iOS 5 device
+### Accepted iOS 8/15 device checks
 
-The same lifecycle checks were exercised on `koolphone5` (iOS 8.4.1); see
-`source/daemon/VALIDATION.md`. These boxes remain unchecked because they are
-specifically the iOS 5 gate. Locked-screen scheduling gaps and unobserved
-first-unlock timing are documented there.
+Device/OS/jailbreak, package version, identity, commands, timestamps, and log
+excerpts are recorded in `source/daemon/VALIDATION.md`. Completion here means
+the initial service experiment is accepted with these specific coverage limits;
+it does not mean every scenario has been tested on both devices.
 
-Record the device/OS/jailbreak, package version, service identity, commands,
-timestamps, and relevant log excerpts for these checks:
+- [x] Install the normal Strappy package without opening the UI; verify one
+  daemon running as `mobile` and at least three heartbeats roughly 60 seconds
+  apart. Verified on both devices. Awake state was established on iOS 8;
+  iOS 15 screen/power state was not independently verified.
+- [x] Open, background, and terminate the UI while the daemon retains its PID
+  and continues its counter. Verified on iOS 8. The iOS 15 UI launch attempt
+  was inconclusive and remains a follow-up.
+- [x] Observe locking for several minutes and inspect the log after unlocking.
+  On iOS 8 the PID survived with a 188-second heartbeat gap. This establishes
+  process survival, not continuous execution during sleep. An explicit iOS 15
+  lock/unlock observation remains a follow-up.
+- [x] Terminate the daemon unexpectedly and verify exactly one replacement
+  with a new startup record and PID. Verified on both devices. Explicit
+  SIGTERM also logged cooperative shutdown on both devices.
+- [x] Verify automatic startup after reboot on iOS 8 without opening Strappy.
+  On iOS 15, use the user-requested respring instead: SpringBoard restarted,
+  the daemon kept its PID, and a later heartbeat confirmed continued execution.
+  The post-respring heartbeat arrived 137 seconds after daemon startup; its
+  delay was not assigned a specific power-state cause. Respring is not reboot
+  validation. Do not reboot `pinkphone-rsa` without a new user instruction.
+- [x] Upgrade/reinstall and verify one daemon; remove and verify no process or
+  job remains for over a minute. Verified on both devices, then restored the
+  normal package and left the daemon running.
 
-- [ ] Install the normal Strappy package. Without opening Strappy, verify one
-   daemon process and observe startup plus at least three heartbeats roughly
-   60 seconds apart while the device is awake.
-- [ ] Open, background, and terminate the UI. Verify the daemon keeps the same PID
-   and its heartbeat counter continues.
-- [ ] Lock the device for several minutes, then unlock it and inspect the log.
-   Record whether heartbeats continued, paused during sleep, or the process
-   restarted. A timer does not guarantee CPU execution during device sleep;
-   observed gaps must be understood before claiming locked-device execution.
-- [ ] Terminate the daemon unexpectedly. Verify launchd starts one replacement,
-   with a new startup record and PID, rather than duplicate processes.
-- [ ] Reboot and, where the jailbreak requires it, reactivate the jailbreak.
-   Verify automatic startup without launching Strappy. Document any dependency
-   on jailbreak activation or first unlock.
-- [ ] Upgrade/reinstall the package and verify only one job/process remains.
-   Remove the package and verify the service stops and stays unloaded.
-
-Build success is not device validation. If no iOS 5 device is available, leave
-this milestone explicitly awaiting verification. Do not proceed to harness
-migration until the basic service behavior is established.
+Build success alone is not device validation. The recorded iOS 8/15 results
+establish the basic service behavior needed to begin step 1. iOS 6 device
+coverage, remaining iOS 15 UI/screen-state checks, and reboot/first-unlock
+questions are tracked under step 5 rather than blocking this initial milestone.
 
 Step 0 introduces no IPC, database access, provider requests, scanning, tools,
 or changes to how the UI currently runs the harness.
+
+
+### Mac implementation and acceptance
+
+Mac background-service support is an established platform capability. Follow
+Retro-Cloud-Sync's working `RCServiceController` pattern rather than treating
+this as another feasibility experiment: embed the daemon in the app, install
+a stable per-user copy in Application Support, and register a LaunchAgent.
+The heartbeat remains the initial workload; harness migration is still step 1
+onward.
+
+- [x] Build and bundle `strappyd` for PPC, i386, x86_64, and arm64 alongside the
+  Mac app, retaining Mac OS X 10.4 support for the legacy slices.
+- [x] Install/update the per-user service on app launch before credential
+  bootstrap. Keep it running when Strappy quits, preserve its PID on unchanged
+  relaunch, and provide explicit install/uninstall maintenance commands.
+- [x] Keep Tiger/newer launchd compatibility in `XPAppKit`; use `OnDemand` on
+  Tiger, `KeepAlive` on newer systems, and the appropriate login-session flags.
+- [x] Verify startup, three heartbeats, UI-process independence, SIGTERM,
+  unexpected-exit recovery, update, and uninstall on `x4-vm` (Tiger 10.4.11,
+  PowerPC). Record results and any UI test limitations in
+  `source/daemon/VALIDATION.md`. The GUI Keychain prompt was not approved;
+  process termination was tested, while normal interactive quit remains
+  unverified.
+
+Actual logout/login and newer Mac runtime checks remain later platform
+validation. A LaunchAgent runs for its user session; do not describe it as a
+system daemon that continues through logout. The per-user installation and
+bounded diagnostic logs do not introduce IPC, database ownership, or provider
+execution.
 
 ## Target ownership after migration
 
@@ -227,13 +269,23 @@ remaining UI database writes or competing in-process harness fallback.
   not prove whether an interrupted external operation already happened.
 - [ ] Implement cooperative shutdown, cancellation of owned child processes,
   bounded logging, checkpoint policy, and clean upgrade/uninstall behavior.
-- [ ] On Mac, install one per-user LaunchAgent using Retro-Cloud-Sync as a reference
-  for service installation, resources, paths, and logs. Use suitable modern
-  registration where supported while preserving the legacy compatibility path.
+- [ ] Extend the step 0 Mac LaunchAgent integration for the real harness,
+  including resources and recovery. Validate logout/login and newer Mac
+  runtimes while preserving the verified Tiger compatibility path.
 - [ ] On iPhone, validate credentials, entitlements, filesystem access, rootful and
   rootless packaging, first unlock, sleep, and memory-pressure behavior. Start
   with `mobile`; any need for additional privilege must be established rather
   than making all Bash/file execution root by default.
+- [ ] Test on a real iOS 6 device using the legacy armv7 build. Compatibility
+  with the iOS 8 implementation is expected, not yet demonstrated. Cover
+  installation, heartbeats, UI independence, shutdown/restart, and removal.
+- [ ] Complete iOS 15 UI foreground/background/termination and explicit
+  lock/unlock checks. Preserve observed scheduling gaps as limitations; do
+  not claim uninterrupted work during sleep.
+- [ ] Establish first-unlock and jailbreak-reactivation dependencies. iOS 8
+  reboot startup and iOS 15 respring survival are recorded, but first-unlock
+  timing and iOS 15 reboot behavior remain unverified. Keep `pinkphone-rsa`
+  respring-only unless the user explicitly authorizes a reboot later.
 - [ ] Revisit heartbeat logging after validation. Define real service health and
   idle behavior without keeping a phone awake merely to emit log messages.
 
@@ -253,7 +305,9 @@ add meaningful offline IPC/recovery tests. Keep generated logs out of commits.
 Device tests must cover UI termination, daemon termination during a provider
 request and during a tool call, duplicate submission, reconnect, cancellation,
 WAL readers during ongoing writes, installation, upgrade, and removal. Include
-the iOS 5 device and a legacy Mac as well as newer supported configurations.
+rootful iOS 8, rootless iOS 15, eventual iOS 6 device validation, and a legacy
+Mac as well as newer supported configurations. Honor the respring-only
+restriction on `pinkphone-rsa`.
 Separate verified outcomes from untested assumptions in milestone notes.
 
 ## Effort and uncertainties
