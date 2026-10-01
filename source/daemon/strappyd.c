@@ -1,5 +1,6 @@
-/* Step-zero launchd heartbeat. No app state or provider access. */
-#define _POSIX_C_SOURCE 200809L
+/* Step-zero launchd heartbeat. No app state or provider access.
+ * Feature-test macros belong to the build: _POSIX_C_SOURCE would force
+ * Leopard-only UNIX2003 symbols even when the Apple SDK targets Tiger. */
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>

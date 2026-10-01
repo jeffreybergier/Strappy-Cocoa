@@ -49,3 +49,47 @@ be described as guaranteed execution during deep sleep. Rootless installation
 has been exercised on iOS 15.0/Dopamine; see
 `VALIDATION.md` for coverage and remaining screen-state/reboot checks. An
 actual iOS 5 device still requires validation.
+
+## Mac installation and lifecycle
+
+The Mac app embeds a PPC/i386/x86_64/arm64 `strappyd` under
+`Contents/Library/LaunchServices`. Like Retro-Cloud-Sync's
+`RCServiceController`, Strappy installs a stable per-user copy and a
+LaunchAgent. This is standard macOS background-service support; the heartbeat
+is the step 0 validation workload, not a separate daemon feasibility experiment.
+
+On app launch, before provider/Keychain bootstrap, `StrappyServiceController`
+installs or updates these files:
+
+- `~/Library/Application Support/Strappy/Service/strappyd` (mode 0700).
+- `~/Library/LaunchAgents/com.altivecintelligence.strappyd.plist` (mode 0600).
+- Log: `~/Library/Logs/Strappy/heartbeat.log`, with the same 64 KiB rotation
+  and `.1` backup as iOS. New log directories/files are 0700/0600.
+
+The agent runs as the logged-in user, without root privileges. It has no app
+resource or bundled framework dependencies; the legacy compiler also links
+Apple's system `libgcc_s.1.dylib`. Paths in the plist are absolute. A stable copy
+outside the bundle lets the service survive closing, moving, or replacing the
+app. A per-user file lock serializes installation; reopening an unchanged app
+keeps the existing daemon. Changed binary/plist content unloads the old job,
+atomically replaces the files, and loads one replacement.
+
+`XPAppKit` owns launchd compatibility: Tiger uses `OnDemand = false` and plain
+`load`/`unload`; newer systems use `KeepAlive = true` and the Aqua session flag.
+The plist registers startup at login. Actual logout/login and newer Mac runtime
+coverage remain separate from the recorded Tiger tests.
+
+Explicit maintenance commands (run as the same user, not with sudo):
+
+```sh
+"/Applications/Strappy.app/Contents/MacOS/Strappy" --install-daemon
+"/Applications/Strappy.app/Contents/MacOS/Strappy" --uninstall-daemon
+tail -F "$HOME/Library/Logs/Strappy/heartbeat.log"
+```
+
+Quit Strappy and run `--uninstall-daemon` before removing the app if the service
+should also be removed. It unloads the job and deletes the plist and installed
+executable, retaining logs, the installation lock file, and all user app data.
+Deleting the app alone leaves the installed service; launching Strappy again
+installs it again. The command-line options do not initialize the UI, database,
+or provider credentials. No harness work has moved into the daemon yet.

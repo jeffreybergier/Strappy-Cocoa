@@ -238,3 +238,102 @@ daemon-test` passed. Both staged package variants passed shell syntax,
 interpreter/launchctl path, and plist checks. Full local logs were captured in
 `/tmp/strappy-rootless-build.log` and `/tmp/strappy-rootless-device.log` and are
 not committed.
+
+## Mac follow-up: x4-vm, Tiger 10.4.11
+
+Tested on `x4-vm`, **Mac OS X 10.4.11 build 8S165, PowerPC**, as user `me`
+(**UID 501**). All timestamps here come from the VM's UTC clock; that clock
+was ahead of the build host. Reference implementation inspected:
+`Retro-Cloud-Sync/source/macOS-app/RCServiceController.m` and
+`source/make/daemon.mk`. The Mac implementation uses the same stable per-user
+installation/LaunchAgent pattern. No Retro-Cloud-Sync files or jobs were changed.
+
+The test app was extracted under `~/Desktop/Strappy-Daemon-Step0/Strappy.app`.
+The pre-existing `/Applications/Strappy.app` was not overwritten. The installed
+service and log locations are documented in `README.md`.
+
+The first device run found a Tiger loader failure (`_fcntl$UNIX2003`) caused
+by defining `_POSIX_C_SOURCE` in the portable daemon source. That macro is now
+supplied only by the Linux daemon build, allowing Apple SDK deployment targets
+to select their own libc ABI. Tiger also revealed that a captured output pipe
+can stay open when `launchctl load` spawns a per-user launchd. Load/unload now
+use the null device for output; only `launchctl list` is captured. Both fixes
+were tested on the real target before recording the results below.
+
+Installation used the actual bundled app executable:
+
+```sh
+"$HOME/Desktop/Strappy-Daemon-Step0/Strappy.app/Contents/MacOS/Strappy" --install-daemon
+launchctl list
+cat "$HOME/Library/Logs/Strappy/heartbeat.log"
+```
+
+Without opening the UI, launchd started one daemon, PID **9974**, with these
+records:
+
+```text
+2026-10-01T09:14:40Z event=startup pid=9974 euid=501 heartbeat=0
+2026-10-01T09:15:40Z event=heartbeat pid=9974 euid=501 heartbeat=1
+2026-10-01T09:16:40Z event=heartbeat pid=9974 euid=501 heartbeat=2
+2026-10-01T09:17:40Z event=heartbeat pid=9974 euid=501 heartbeat=3
+```
+
+Repeated installation retained PID 9974. Opening the test app created UI
+PID **10003**; activating Finder and subsequently terminating the UI left
+PID 9974 alive with a continuing heartbeat counter. A normal AppleScript quit
+request was blocked by Tiger's Keychain application-change dialog. No credential
+access change was approved; the UI was terminated with SIGTERM instead. This
+verifies independence from UI-process termination, but does not claim a normal
+interactive quit or complete UI acceptance. Service installation now precedes
+provider/Keychain bootstrap so credential dialogs cannot block service startup.
+
+Explicit SIGTERM and unexpected SIGKILL both recovered with one replacement:
+
+```text
+2026-10-01T09:18:16Z event=shutdown pid=9974 euid=501 heartbeat=3
+2026-10-01T09:18:16Z event=startup pid=10075 euid=501 heartbeat=0
+2026-10-01T09:18:30Z event=startup pid=10081 euid=501 heartbeat=0
+```
+
+`--uninstall-daemon` at **09:19:09–09:19:10** unloaded the job and removed its
+plist and executable. The daemon logged cooperative shutdown at **09:19:10**;
+logs and user app data remained intact.
+
+At **09:20:44**, after 94 seconds, the job and daemon were still absent.
+Opening the app (without the CLI installer) then created one daemon, PID
+**10113**, at **09:20:48**, before the credential prompt. It emitted its first
+heartbeat at **09:21:48**. Adding a test-only key to the installed launchd
+plist and running `--install-daemon` exercised configuration replacement:
+PID 10113 logged shutdown at **09:21:53**, exactly one replacement, PID
+**10130**, started, and the generated plist no longer contained the test key.
+A second unchanged install retained PID 10130. Terminating the UI again did
+not affect the service.
+
+A missing-embedded-binary negative test temporarily moved only the test app's
+bundled `strappyd` aside. Installation failed with the expected message and
+left the already-running service intact. The bundled binary was restored.
+
+Final checks:
+
+- `make -C source clean release`: passed for iOS armv7/arm64 and Mac
+  PPC/i386/x86_64/arm64, with no warnings or errors.
+- `make -C source/linux daemon-test`: passed.
+- Clang static analysis of `StrappyServiceController.m` and the app's
+  command-line entry point: no findings.
+- All four daemon Mach-O slices are present. PPC/i386 have no `UNIX2003`
+  undefined symbols. The only runtime dependencies are Apple's system
+  `libSystem.B.dylib` and, for legacy slices, `libgcc_s.1.dylib`.
+- Full local logs are `/tmp/strappy-mac-daemon-build.log`,
+  `/tmp/strappy-mac-daemon-test.log`, `/tmp/strappy-mac-daemon-analysis.log`,
+  and `/tmp/strappy-mac-daemon-device.log`; generated logs are not committed.
+
+The per-user service remains installed and running; the test app remains in
+its Desktop folder. No machine reboot or logout was performed. Login loading,
+newer Mac runtime behavior, and normal UI interaction past the existing
+Keychain prompt remain follow-up coverage, not claims established by this run.
+
+At **09:23:33**, the final clean-build ZIP had been recopied to the test folder
+and installed. The unchanged daemon retained PID **10130**, with exactly one
+launchd job and a heartbeat at **09:22:53**. The service directory/executable
+were 0700, the launchd plist was 0600, and the log directory/file were 0700/0600,
+all owned by `me`. The normal app remained closed after the termination test.

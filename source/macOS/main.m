@@ -1,5 +1,8 @@
 #import <AppKit/AppKit.h>
 #import "AppDelegate.h"
+#import "StrappyServiceController.h"
+#include <stdio.h>
+#include <string.h>
 
 int main(int argc, char *argv[])
 {
@@ -7,6 +10,16 @@ int main(int argc, char *argv[])
   (void)argv;
 
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  if (argc == 2 && (strcmp(argv[1], "--install-daemon") == 0 ||
+                    strcmp(argv[1], "--uninstall-daemon") == 0)) {
+    NSString *error = nil;
+    BOOL success = strcmp(argv[1], "--install-daemon") == 0
+        ? [StrappyServiceController installWithError:&error]
+        : [StrappyServiceController uninstallWithError:&error];
+    if (!success) fprintf(stderr, "%s\n", [error UTF8String]);
+    [pool release];
+    return success ? 0 : 1;
+  }
   NSApplication *app = [NSApplication sharedApplication];
 
   AppDelegate *delegate = [[[AppDelegate alloc] init] autorelease];

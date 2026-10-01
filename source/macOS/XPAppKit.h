@@ -197,3 +197,7 @@
 + (XPUserNotificationCenter *)defaultCenter;
 - (void)postNotificationWithTitle:(NSString *)title body:(NSString *)body;
 @end
+
+/* LaunchAgent compatibility: Tiger has OnDemand and no Aqua session flag. */
+NSArray *XPLaunchAgentArguments(NSString *action, NSString *path);
+void XPConfigurePersistentLaunchAgent(NSMutableDictionary *plist);

@@ -685,3 +685,21 @@ static id XPAppKitLegacyWebFrameViewForView(NSView *view)
 }
 
 @end
+
+NSArray *XPLaunchAgentArguments(NSString *action, NSString *path)
+{
+  if (NSAppKitVersionNumber >= 949.0) {
+    return [NSArray arrayWithObjects:action, @"-S", @"Aqua", path, nil];
+  }
+  return [NSArray arrayWithObjects:action, path, nil];
+}
+
+void XPConfigurePersistentLaunchAgent(NSMutableDictionary *plist)
+{
+  [plist setObject:[NSNumber numberWithBool:YES] forKey:@"RunAtLoad"];
+  if (NSAppKitVersionNumber >= 949.0) {
+    [plist setObject:[NSNumber numberWithBool:YES] forKey:@"KeepAlive"];
+  } else {
+    [plist setObject:[NSNumber numberWithBool:NO] forKey:@"OnDemand"];
+  }
+}

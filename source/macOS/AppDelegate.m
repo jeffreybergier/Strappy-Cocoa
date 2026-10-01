@@ -1,4 +1,5 @@
 #import "AppDelegate.h"
+#import "StrappyServiceController.h"
 #import "PreferencesWindowController.h"
 #import "SessionWindowController.h"
 #import "StrappySession.h"
@@ -60,6 +61,12 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)applicationDidFinishLaunching:(NSNotification *)notification
 {
   (void)notification;
+  {
+    NSString *serviceError = nil;
+    if (![StrappyServiceController installWithError:&serviceError]) {
+      NSLog(@"Strappy background service: %@", serviceError);
+    }
+  }
   {
     NSString *cacert = [AltivecCore certPath];
     NSParameterAssert(cacert);

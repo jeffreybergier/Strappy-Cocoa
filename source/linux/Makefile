@@ -422,6 +422,6 @@ daemon-test: $(BUILD_DIR)/strappyd | $(TEST_DIR)
 	python3 daemon_harness.py $(BUILD_DIR)/strappyd
 
 $(BUILD_DIR)/strappyd: ../daemon/strappyd.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS) -D_POSIX_C_SOURCE=200809L $< -o $@
 
 test: daemon-test
