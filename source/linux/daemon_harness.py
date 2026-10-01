@@ -26,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as directory
                 assert process.poll() is None, "daemon exited before startup"
                 assert time.monotonic() < deadline, "startup timed out"
                 time.sleep(0.01)
-            process.send_signal(signal.SIGTERM)
+            process.send_signal(signal.SIGTERM if run == 0 else signal.SIGINT)
             assert process.wait(timeout=2) == 0, "shutdown failed"
         finally:
             if process.poll() is None:
@@ -36,7 +36,7 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as directory
         assert len(records) == 2, records
         assert "event=startup" in records[0]
         assert "event=shutdown" in records[1]
-        assert all(f"pid={process.pid} euid={os.geteuid()} heartbeat=0" in r for r in records)
+        assert all(f"pid={process.pid} euid={os.geteuid()}" in r for r in records)
         assert backup.read_bytes() == previous, "rotation must replace the sole backup"
         assert log.stat().st_size <= 65536
         assert log.stat().st_mode & 0o777 == 0o600

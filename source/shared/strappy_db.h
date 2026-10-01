@@ -531,6 +531,10 @@ int strappy_db_writer_available(char **error_out);
 /* Service monitor only: readiness never grants write capability. */
 void strappy_db_set_service_ready(const char *path, int ready);
 int strappy_db_check_reader(const char *db_path, char **error_out);
+/* After all workers join: passive checkpoint and close the writer. Readers
+ * never call this. SQLite automatic checkpoints remain enabled while running. */
+void strappy_db_shutdown_connection(void);
+
 int strappy_db_initialize(const char *db_path, char **error_out);
 int strappy_db_create_provider_account(const char *db_path,
                                        const char *provider_id,

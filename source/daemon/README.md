@@ -1,9 +1,9 @@
-# Local service (steps 0–3)
+# Local service
 
 `strappyd` has a portable C runtime and a small Cocoa credential boundary, and is a service supervised by launchd. It owns store
 initialization, bundled catalog seeding, and all database writes. The app opens
-existing stores read-only after IPC v3 readiness. Unmigrated mutation/worker
-entrypoints fail explicitly until step 4. See [STORAGE.md](STORAGE.md) for
+existing stores read-only after IPC v4 readiness. The service also owns scans,
+study, catalog refresh, account changes and shared mutations. See [STORAGE.md](STORAGE.md) for
 ownership, snapshot lifetimes, startup/upgrade behavior, and runtime validation;
 [PROTOCOL.md](PROTOCOL.md) describes the wire contract.
 
@@ -25,10 +25,12 @@ use the job label `com.altivecintelligence.strappyd` and run as `mobile:mobile`.
 Follow the rootful log with `tail -F /var/log/strappy/heartbeat.log` (prefix
 `/var/jb` for rootless). If the device lacks `tail`, fetch snapshots with
 `ssh koolphone5 'cat /var/log/strappy/heartbeat.log'` or copy it with `scp -O`.
-Records contain UTC time, event, PID, effective UID, and a per-process counter.
-Startup has counter zero; the first heartbeat follows a 60-second interruptible
-wait. Every record is flushed and closed. SIGTERM wakes the wait through a
-nonblocking self-pipe; only normal execution writes the shutdown record.
+Records contain UTC time, event, PID and effective UID. The historical filename
+is retained, but periodic heartbeats and their counter were removed in step 5.
+Every startup/shutdown record is flushed and closed. SIGTERM/SIGINT wake the
+event loop through a nonblocking self-pipe; only normal execution writes the
+shutdown record. Use `--ipc-probe /absolute/path/service.sock` for on-demand
+readiness. See [RECOVERY.md](RECOVERY.md) for recovery, health and idle policy.
 
 Before a record would exceed 65,536 bytes, the current log replaces
 `heartbeat.log.1`. At most two 64 KiB files are retained (128 KiB total for
@@ -61,8 +63,7 @@ actual iOS 5 device still requires validation.
 The Mac app embeds a PPC/i386/x86_64/arm64 `strappyd` under
 `Contents/Library/LaunchServices`. Like Retro-Cloud-Sync's
 `RCServiceController`, Strappy installs a stable per-user copy and a
-LaunchAgent. This is standard macOS background-service support; the heartbeat
-is the step 0 validation workload, not a separate daemon feasibility experiment.
+LaunchAgent that runs the same durable execution and recovery code as iOS.
 
 On app launch, before provider/Keychain bootstrap, `StrappyServiceController`
 installs or updates these files:
@@ -73,7 +74,7 @@ installs or updates these files:
   and `.1` backup as iOS. New log directories/files are 0700/0600.
 
 The agent runs as the logged-in user, without root privileges. It statically links Altivec SQLite/cJSON and uses a stable copy of
-`BundledModels.json` beside the installed service. It has no bundled framework
+the complete prompt catalogs, `Info.plist` and CA bundle beside the installed service. It has no bundled framework
 dependency; the legacy compiler also links
 Apple's system `libgcc_s.1.dylib`. Paths in the plist are absolute. A stable copy
 outside the bundle lets the service survive closing, moving, or replacing the

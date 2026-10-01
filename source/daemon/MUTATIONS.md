@@ -42,8 +42,10 @@ progress cancellation interrupts a download during shutdown.
 Scan and catalog status are transient per service instance. `work_status` reports
 the active operation and the last worker's operation/terminal state. Restart
 clears that status; the UI reports an observed in-flight operation as failed or
-interrupted rather than reporting success. Persisted scan-run crash reconciliation
-and durable worker scheduling remain step 5. Study and prompt state are durable.
+interrupted rather than reporting success. Startup marks persisted unfinished
+scan runs as errors without claiming a complete inventory or sweeping unseen
+files. Scans/catalog refresh are not durably scheduled or automatically replayed.
+Study and prompt state are durable. See [RECOVERY.md](RECOVERY.md).
 
 ## Accounts, credentials, and settings
 

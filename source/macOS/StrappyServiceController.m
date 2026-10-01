@@ -88,6 +88,7 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
       [NSNumber numberWithInt:10], @"ThrottleInterval",
       [NSNumber numberWithInt:10], @"ExitTimeOut", nil];
   int lockFD;
+  int serviceFD = -1;
   BOOL success = NO;
   BOOL unchanged;
   NSData *binary = nil;
@@ -127,6 +128,20 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
     int status = StrappyLaunchctl(XPLaunchAgentArguments(@"unload", plistPath), NULL);
     if (status != 0 && StrappyServiceLoaded()) goto done;
   }
+  /* launchctl can return before the worker has released its resources. Hold
+     its exclusion lock through replacement/removal, including on Tiger. */
+  if ([manager fileExistsAtPath:[logDirectory stringByAppendingPathComponent:@"service.lock"]]) {
+    int attempt;
+    serviceFD = open([[logDirectory stringByAppendingPathComponent:@"service.lock"]
+        fileSystemRepresentation], O_RDWR | O_NOFOLLOW);
+    if (serviceFD < 0) goto done;
+    for (attempt = 0; attempt < 150; ++attempt) {
+      if (flock(serviceFD, LOCK_EX | LOCK_NB) == 0) break;
+      if (errno != EWOULDBLOCK && errno != EINTR) goto done;
+      usleep(100000);
+    }
+    if (attempt == 150) goto done;
+  }
   if (!install) {
     if (error != NULL) *error = @"Could not remove the background service files.";
     if (unlink([plistPath fileSystemRepresentation]) != 0 && errno != ENOENT) goto done;
@@ -149,8 +164,10 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
       ![plist writeToFile:plistPath atomically:YES] ||
       chmod([plistPath fileSystemRepresentation], 0600) != 0) goto done;
   if (error != NULL) *error = @"Could not load the background service with launchd.";
+  if (serviceFD >= 0) { (void)close(serviceFD); serviceFD = -1; }
   success = StrappyLaunchctl(XPLaunchAgentArguments(@"load", plistPath), NULL) == 0;
 done:
+  if (serviceFD >= 0) (void)close(serviceFD);
   (void)flock(lockFD, LOCK_UN);
   (void)close(lockFD);
   if (success && error != NULL) *error = nil;

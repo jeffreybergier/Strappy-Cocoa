@@ -6,7 +6,29 @@ strappy_service() {
     case "$1" in
         stop)
             if @PREFIX@/bin/launchctl list com.altivecintelligence.strappyd >/dev/null 2>&1; then
+                # Unload may return before the old worker has exited. Never
+                # replace its executable/resources while it is still running.
+                strappy_pid=$(@PREFIX@/bin/launchctl list com.altivecintelligence.strappyd |
+                    while read -r strappy_key strappy_equals strappy_value; do
+                        if [ "$strappy_key" = '"PID"' ]; then
+                            echo "${strappy_value%;}"
+                        fi
+                    done)
                 @PREFIX@/bin/launchctl unload "$strappy_plist"
+                case "$strappy_pid" in
+                    ''|*[!0-9]*) ;;
+                    *)
+                        strappy_wait=0
+                        while kill -0 "$strappy_pid" 2>/dev/null; do
+                            if [ "$strappy_wait" -ge 15 ]; then
+                                echo 'Strappy service did not stop; refusing to replace its files.' >&2
+                                return 1
+                            fi
+                            sleep 1
+                            strappy_wait=$((strappy_wait + 1))
+                        done
+                        ;;
+                esac
             fi
             ;;
         start)

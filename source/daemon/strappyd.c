@@ -1,4 +1,4 @@
-/* Launchd storage and prompt execution owner, service transport, and heartbeat.
+/* Launchd storage and prompt execution owner, service transport and lifecycle.
  * Feature-test macros belong to the build: _POSIX_C_SOURCE would force
  * Leopard-only UNIX2003 symbols even when the Apple SDK targets Tiger. */
 #include "../shared/strappy_ipc.h"
@@ -35,7 +35,7 @@ static void strappy_stop(int signal_number)
 }
 
 static int strappy_log(const char *path, const char *backup,
-                       const char *event, unsigned long long counter)
+                       const char *event)
 {
     char timestamp[32];
     char record[192];
@@ -49,8 +49,8 @@ static int strappy_log(const char *path, const char *backup,
         strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", &utc) == 0)
         return -1;
     length = snprintf(record, sizeof(record),
-                      "%s event=%s pid=%ld euid=%ld heartbeat=%llu\n",
-                      timestamp, event, (long)getpid(), (long)geteuid(), counter);
+                      "%s event=%s pid=%ld euid=%ld\n",
+                      timestamp, event, (long)getpid(), (long)geteuid());
     if (length < 0 || (size_t)length >= sizeof(record)) return -1;
     if (stat(path, &info) == 0) {
         if (info.st_size + length > STRAPPY_LOG_LIMIT && rename(path, backup) != 0)
@@ -144,14 +144,12 @@ static int strappy_prepare_store(const char *path, const char *resources)
 int main(int argc, char **argv)
 {
     struct sigaction action;
-    unsigned long long counter = 0;
     char *backup;
     char *directory;
     strappy_ipc_server *server = NULL;
     strappy_execution *execution = NULL;
     char *ca_path = NULL;
     char *configuration_error = NULL;
-    time_t heartbeat;
     size_t length;
     int result = EXIT_FAILURE;
     (void)signal(SIGPIPE, SIG_IGN);
@@ -169,11 +167,14 @@ int main(int argc, char **argv)
     memcpy(backup + length, ".1", 3);
     (void)umask(077);
     if (pipe(strappy_signal_pipe) != 0) goto done;
-    if (fcntl(strappy_signal_pipe[1], F_SETFL, O_NONBLOCK) == -1) goto done;
+    if (strappy_signal_pipe[0] >= FD_SETSIZE ||
+        fcntl(strappy_signal_pipe[0], F_SETFD, FD_CLOEXEC) == -1 ||
+        fcntl(strappy_signal_pipe[1], F_SETFD, FD_CLOEXEC) == -1 ||
+        fcntl(strappy_signal_pipe[1], F_SETFL, O_NONBLOCK) == -1) goto done;
     memset(&action, 0, sizeof(action));
     action.sa_handler = strappy_stop;
     (void)sigemptyset(&action.sa_mask);
-    if (sigaction(SIGTERM, &action, NULL) != 0) goto done;
+    if (sigaction(SIGTERM, &action, NULL) != 0 || sigaction(SIGINT, &action, NULL) != 0) goto done;
     server = strappy_ipc_server_open(directory);
     if (server == NULL) goto done;
     if (!strappy_prepare_store(argv[2], argv[3])) goto done;
@@ -188,24 +189,18 @@ int main(int argc, char **argv)
     execution = strappy_execution_open(server, argv[2], argv[3]);
     if (!execution) goto done;
     strappy_ipc_server_store_ready(server);
-    if (strappy_log(argv[1], backup, "startup", counter) != 0) goto done;
-    heartbeat = time(NULL);
-    while (!strappy_stopping) {
-        time_t now;
-        if (strappy_ipc_server_step(server, strappy_signal_pipe[0], 1000) != 0) goto done;
-        if (strappy_stopping) break;
-        now = time(NULL);
-        if (now - heartbeat >= 60 || now < heartbeat) {
-            if (strappy_log(argv[1], backup, "heartbeat", ++counter) != 0) goto done;
-            heartbeat = now;
-        }
-    }
+    if (strappy_log(argv[1], backup, "startup") != 0) goto done;
+    /* Socket activity, worker completions and signals wake the service. No
+     * periodic heartbeat or idle polling keeps a sleeping phone awake. */
+    while (!strappy_stopping)
+        if (strappy_ipc_server_step(server, strappy_signal_pipe[0], -1) != 0) goto done;
     result = EXIT_SUCCESS;
 done:
     strappy_execution_stop(execution);
     strappy_ipc_server_drain(server);
     strappy_execution_close(execution);
-    if (result == EXIT_SUCCESS && strappy_log(argv[1], backup, "shutdown", counter) != 0) result = EXIT_FAILURE;
+    strappy_db_shutdown_connection();
+    if (result == EXIT_SUCCESS && strappy_log(argv[1], backup, "shutdown") != 0) result = EXIT_FAILURE;
     strappy_ipc_server_close(server);
     free(ca_path); free(configuration_error);
     free(directory);

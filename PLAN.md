@@ -302,20 +302,21 @@ See `source/daemon/VALIDATION.md` for verified outcomes and explicit limitations
 
 ## Step 5: recovery and platform lifecycle
 
-- [ ] On restart, reconcile persisted accepted/running work and publish truthful
+- [x] On restart, reconcile persisted accepted/running work and publish truthful
   run state. Initially mark interrupted work explicitly instead of blindly
   replaying side-effecting Bash or file tools. Conversation history alone does
   not prove whether an interrupted external operation already happened.
-- [ ] Implement cooperative shutdown, cancellation of owned child processes,
+- [x] Implement cooperative shutdown, cancellation of owned child processes,
   bounded logging, checkpoint policy, and clean upgrade/uninstall behavior.
-- [ ] Extend the step 0 Mac LaunchAgent integration for the real harness,
-  including resources and recovery. Validate logout/login and newer Mac
-  runtimes while preserving the verified Tiger compatibility path.
+- [x] Extend the step 0 Mac LaunchAgent integration for the real harness,
+  including resources, recovery and safe replacement on Tiger.
+- [ ] Validate actual logout/login and newer Mac runtimes.
 - [ ] On iPhone, validate credentials, entitlements, filesystem access, rootful and
   rootless packaging, first unlock, sleep, and memory-pressure behavior. Start
   with `mobile`; any need for additional privilege must be established rather
   than making all Bash/file execution root by default.
-- [ ] Test on a real iOS 6 device using the legacy armv7 build. Compatibility
+- [ ] Test on a real iOS 6 device using the legacy armv7 build (deferred by
+  user instruction; no device available yet). Compatibility
   with the iOS 8 implementation is expected, not yet demonstrated. Cover
   installation, heartbeats, UI independence, shutdown/restart, and removal.
 - [ ] Complete iOS 15 UI foreground/background/termination and explicit
@@ -325,14 +326,22 @@ See `source/daemon/VALIDATION.md` for verified outcomes and explicit limitations
   reboot startup and iOS 15 respring survival are recorded, but first-unlock
   timing and iOS 15 reboot behavior remain unverified. Keep `pinkphone-rsa`
   respring-only unless the user explicitly authorizes a reboot later.
-- [ ] Revisit heartbeat logging after validation. Define real service health and
+- [x] Revisit heartbeat logging after validation. Define real service health and
   idle behavior without keeping a phone awake merely to emit log messages.
+
+Step 5 implementation and health/checkpoint policy are documented in
+`source/daemon/RECOVERY.md`. Atomic reconciliation repairs unfinished ledger and
+scan records and closes missing tool-output pairs without replay; Bash guardians
+stop owned groups after runtime death. Native recovery checks passed on Tiger,
+iOS 8 and iOS 15. Platform coverage and remaining physical-device scenarios are
+recorded separately in `source/daemon/VALIDATION.md`; unchecked items above are
+not implied complete by implementation or build success.
 
 ## Validation and completion
 
-- [ ] Complete clean iOS/macOS builds for all required architectures and review
+- [x] Complete clean iOS/macOS builds for all required architectures and review
   the full output for warnings.
-- [ ] Run shared-core offline tests and add IPC/recovery tests as applicable.
+- [x] Run shared-core offline tests and add IPC/recovery tests as applicable.
 - [ ] Complete the device scenarios below and record verified outcomes.
 - [ ] Keep generated build and analysis logs out of commits.
 

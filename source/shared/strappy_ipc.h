@@ -58,6 +58,7 @@ void strappy_ipc_server_handler(strappy_ipc_server *server,
 void strappy_ipc_server_store_ready(strappy_ipc_server *server);
 /* Single event-loop thread only. Wait at most timeout_ms (0..1000).
  * wake_fd is the daemon's signal pipe, or -1. */
+/* timeout_ms=-1 sleeps until I/O, worker completion, signal or peer deadline. */
 int strappy_ipc_server_step(strappy_ipc_server *server, int wake_fd, int timeout_ms);
 /* Thread-safe worker boundary: call ONLY AFTER the state transaction commits.
  * Coalesced invalidations cover an entire topic, never individual ledger rows.

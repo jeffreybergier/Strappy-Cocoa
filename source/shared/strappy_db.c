@@ -118,7 +118,7 @@ static void strappy_db_close_connection_locked(void)
   strappy_db_connection_schema_ready = 0;
 }
 
-static void strappy_db_shutdown_connection(void)
+void strappy_db_shutdown_connection(void)
 {
   if (pthread_mutex_lock(&strappy_db_connection_mutex) != 0) {
     return;

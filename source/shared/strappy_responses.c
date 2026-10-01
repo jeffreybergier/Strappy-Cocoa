@@ -2922,6 +2922,21 @@ static int strappy_responses_execute_tool_calls(
     output_truncated = 0;
     tool_cancelled = 0;
     started_at_ms = strappy_responses_now_ms();
+    /* Commit the execution intent before any external side effect. Recovery
+     * must distinguish an unfinished tool from one that never started. */
+    memset(&execution, 0, sizeof(execution));
+    execution.session_id = session_id;
+    execution.response_call_id = response_call_id;
+    execution.output_index = call->output_index;
+    execution.call_id = call->call_id;
+    execution.tool_name = call->name;
+    execution.arguments_json = call->arguments;
+    execution.status = "running";
+    execution.started_at_ms = started_at_ms;
+    if (!strappy_db_save_response_tool_execution(session_db_path, &execution, error_out)) {
+      strappy_responses_owned_items_destroy(outputs);
+      return 0;
+    }
     output = strappy_tools_execute_for_function_call_with_cancellation(
       session_db_path,
       session_id,

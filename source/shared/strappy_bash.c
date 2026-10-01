@@ -1032,6 +1032,56 @@ static int strappy_bash_read_child_error(int fd,
   return (length == sizeof(*error_out)) ? 1 : 0;
 }
 
+/* The group leader remains the shell's parent. A private pipe detects loss
+ * of the owning runtime even after SIGKILL; no persisted PID can be reused.
+ * Only async-signal-safe operations are used after fork. The guardian holds
+ * no SQLite, socket, service lock, or output descriptors. */
+static void strappy_bash_guard_owner(int owner_fd, long descriptor_limit,
+                                      int error_fd)
+{
+  pid_t shell;
+  int status, fd;
+  (void)signal(SIGTERM, SIG_DFL);
+  (void)signal(SIGINT, SIG_DFL);
+  shell = fork();
+  if (shell < 0) {
+    strappy_bash_child_report_error(error_fd, STRAPPY_BASH_CHILD_ERROR_EXEC);
+    _exit(127);
+  }
+  if (shell == 0) { close(owner_fd); return; }
+  (void)signal(SIGTERM, SIG_IGN);
+  (void)signal(SIGINT, SIG_IGN);
+  for (fd = 0; fd < descriptor_limit; ++fd)
+    if (fd != owner_fd) close(fd);
+  for (;;) {
+    fd_set readers;
+    struct timeval timeout;
+    pid_t waited = waitpid(shell, &status, WNOHANG);
+    int ready;
+    if (waited == shell) {
+      if (WIFEXITED(status)) _exit(WEXITSTATUS(status));
+      if (WIFSIGNALED(status)) {
+        int sig = WTERMSIG(status);
+        (void)signal(sig, SIG_DFL);
+        (void)kill(getpid(), sig);
+      }
+      _exit(127);
+    }
+    if (waited < 0 && errno != EINTR) break;
+    FD_ZERO(&readers); FD_SET(owner_fd, &readers);
+    timeout.tv_sec = 0; timeout.tv_usec = 100000;
+    ready = select(owner_fd + 1, &readers, NULL, NULL, &timeout);
+    if (ready > 0) {
+      char byte;
+      ssize_t count = read(owner_fd, &byte, 1);
+      if (count == 0 || (count < 0 && errno != EINTR)) break;
+    } else if (ready < 0 && errno != EINTR) break;
+  }
+  /* Also kills this group leader, so group identity cannot race PID reuse. */
+  (void)kill(-getpid(), SIGKILL);
+  _exit(127);
+}
+
 static int strappy_bash_supervise(const char *shell_path,
                                   const char *working_directory,
                                   const strappy_bash_arguments *arguments,
@@ -1042,6 +1092,8 @@ static int strappy_bash_supervise(const char *shell_path,
 {
   int output_pipe[2];
   int child_error_pipe[2];
+  int owner_pipe[2] = {-1, -1};
+  long descriptor_limit = sysconf(_SC_OPEN_MAX);
   int null_fd;
   int log_fd;
   pid_t pid;
@@ -1067,7 +1119,8 @@ static int strappy_bash_supervise(const char *shell_path,
   if (!strappy_bash_create_log(&result->log_path, &log_fd, error_out)) {
     return 0;
   }
-  if ((pipe(output_pipe) != 0) || (pipe(child_error_pipe) != 0)) {
+  if ((pipe(output_pipe) != 0) || (pipe(child_error_pipe) != 0) ||
+      (pipe(owner_pipe) != 0)) {
     int saved_errno;
 
     saved_errno = errno;
@@ -1079,6 +1132,8 @@ static int strappy_bash_supervise(const char *shell_path,
       close(child_error_pipe[0]);
       close(child_error_pipe[1]);
     }
+    if (owner_pipe[0] >= 0) close(owner_pipe[0]);
+    if (owner_pipe[1] >= 0) close(owner_pipe[1]);
     close(log_fd);
     unlink(result->log_path);
     strappy_set_formatted_error(error_out,
@@ -1087,7 +1142,12 @@ static int strappy_bash_supervise(const char *shell_path,
     return 0;
   }
   null_fd = open("/dev/null", O_RDONLY);
-  if ((null_fd < 0) ||
+  if ((null_fd < 0) || descriptor_limit <= 0 || descriptor_limit > INT_MAX ||
+      !strappy_bash_move_fd_above_stdio(&owner_pipe[0]) ||
+      !strappy_bash_move_fd_above_stdio(&owner_pipe[1]) ||
+      owner_pipe[0] >= FD_SETSIZE ||
+      !strappy_bash_set_close_on_exec(owner_pipe[0]) ||
+      !strappy_bash_set_close_on_exec(owner_pipe[1]) ||
       !strappy_bash_move_fd_above_stdio(&output_pipe[0]) ||
       !strappy_bash_move_fd_above_stdio(&output_pipe[1]) ||
       !strappy_bash_move_fd_above_stdio(&child_error_pipe[0]) ||
@@ -1106,6 +1166,8 @@ static int strappy_bash_supervise(const char *shell_path,
     close(output_pipe[1]);
     close(child_error_pipe[0]);
     close(child_error_pipe[1]);
+    if (owner_pipe[0] >= 0) close(owner_pipe[0]);
+    if (owner_pipe[1] >= 0) close(owner_pipe[1]);
     close(log_fd);
     unlink(result->log_path);
     strappy_set_formatted_error(error_out,
@@ -1126,6 +1188,8 @@ static int strappy_bash_supervise(const char *shell_path,
     close(output_pipe[1]);
     close(child_error_pipe[0]);
     close(child_error_pipe[1]);
+    if (owner_pipe[0] >= 0) close(owner_pipe[0]);
+    if (owner_pipe[1] >= 0) close(owner_pipe[1]);
     close(log_fd);
     unlink(result->log_path);
     strappy_set_formatted_error(error_out,
@@ -1142,6 +1206,7 @@ static int strappy_bash_supervise(const char *shell_path,
       NULL
     };
 
+    close(owner_pipe[1]);
     close(output_pipe[0]);
     close(child_error_pipe[0]);
     close(log_fd);
@@ -1174,12 +1239,14 @@ static int strappy_bash_supervise(const char *shell_path,
     }
     close(null_fd);
     close(output_pipe[1]);
+    strappy_bash_guard_owner(owner_pipe[0], descriptor_limit, child_error_pipe[1]);
     execve(shell_path, child_arguments, environ);
     strappy_bash_child_report_error(child_error_pipe[1],
                                     STRAPPY_BASH_CHILD_ERROR_EXEC);
     _exit(127);
   }
 
+  close(owner_pipe[0]);
   close(null_fd);
   close(output_pipe[1]);
   close(child_error_pipe[1]);
@@ -1342,6 +1409,7 @@ static int strappy_bash_supervise(const char *shell_path,
   if (output_pipe[0] >= 0) {
     close(output_pipe[0]);
   }
+  close(owner_pipe[1]);
   (void)strappy_bash_read_child_error(child_error_pipe[0],
                                       &result->child_error);
   close(child_error_pipe[0]);

@@ -165,8 +165,25 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
         assert submit(directory, key)[0] == 0
         wait_for(entered.is_set)
         process.kill(); process.wait(timeout=5)
+        # Simulate a scan that was durably started before the crash too.
+        with sqlite3.connect(dbpath) as db:
+            db.execute("INSERT INTO scan_roots(id,path) VALUES(999,'/fixture-recovery')")
+            db.execute("INSERT INTO scan_runs(scan_root_id,state,started_at_ms) VALUES(999,'running',1)")
+            db.execute("CREATE TRIGGER reject_recovery BEFORE UPDATE ON scan_runs BEGIN SELECT RAISE(ABORT,'fixture'); END")
+        failed = subprocess.Popen([binary, str(directory/'heartbeat.log'), str(dbpath), resources])
+        assert failed.wait(timeout=5) != 0
+        assert state(key) == 2, 'failed reconciliation must roll back and refuse readiness'
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT COUNT(*) FROM http_attempts WHERE state='running'").fetchone()[0] > 0
+            db.execute("DROP TRIGGER reject_recovery")
         process = start()
         assert state(key) == 6
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT COUNT(*) FROM http_attempts WHERE state IN ('pending','running')").fetchone()[0] == 0
+            assert db.execute("SELECT COUNT(*) FROM model_requests WHERE state IN ('pending','running')").fetchone()[0] == 0
+            assert db.execute("SELECT COUNT(*) FROM turns WHERE state='running'").fetchone()[0] == 0
+            assert db.execute("SELECT state FROM scan_runs WHERE scan_root_id=999").fetchone()[0] == 'error'
+            assert db.execute("SELECT COUNT(*) FROM http_attempts WHERE transport_error LIKE 'Service interrupted%'").fetchone()[0] == 1
         subprocess.run([reader, str(dbpath), '6'], check=True)
         assert struct.unpack('!QI', submit(directory, key)[1])[1] == 6
         gate.set()
@@ -187,6 +204,31 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
             raise AssertionError('cancelled tool child survived')
         except ProcessLookupError:
             pass
+        # Abrupt owner death: the guardian stops the tool group without replay.
+        (directory/'tool.pid').unlink()
+        key = '6'*64
+        assert submit(directory, key, prompt=b'Crash during fixture tool')[0] == 0
+        wait_for(lambda: (directory/'tool.pid').exists())
+        child = int((directory/'tool.pid').read_text())
+        process.kill(); process.wait(timeout=5)
+        def child_stopped():
+            try:
+                # Containers may have a PID 1 that does not promptly reap orphans.
+                return Path(f'/proc/{child}/stat').read_text().split(') ')[1][0] == 'Z'
+            except FileNotFoundError:
+                return True
+        wait_for(child_stopped, timeout=5)
+        process = start()
+        assert state(key) == 6
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT COUNT(*) FROM tool_executions WHERE state IN ('pending','running')").fetchone()[0] == 0
+            assert db.execute("SELECT COUNT(*) FROM tool_executions WHERE error_code='service_interrupted'").fetchone()[0] == 1
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute("SELECT COUNT(*) FROM function_outputs WHERE error_code='service_interrupted'").fetchone()[0] == 1
+            assert db.execute("SELECT COUNT(*) FROM function_calls f WHERE NOT EXISTS(SELECT 1 FROM function_outputs o WHERE o.function_call_item_id=f.item_id)").fetchone()[0] == 0
+        count = len(requests)
+        assert struct.unpack('!QI', submit(directory, key, prompt=b'Crash during fixture tool')[1])[1] == 6
+        assert len(requests) == count
         # Cooperative shutdown cancels the owned Bash process before exiting.
         (directory/'tool.pid').unlink()
         key = '7'*64

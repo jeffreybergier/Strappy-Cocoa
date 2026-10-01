@@ -659,3 +659,116 @@ wait "$pid"
 The fixture contains `work/` and `scan/fixture.sqlite`, plus explicit resources.
 The probe has no provider or live-store dependency. Temporary remote fixtures
 were removed after capturing the final stores and logs locally.
+
+## Step 5: recovery and lifecycle — 2026-10-01
+
+See [RECOVERY.md](RECOVERY.md) for the implemented contract. IPC v4, reader ABI 2
+and SQLite `user_version=1` are unchanged. No migration or automatic replay was
+introduced. iOS 6 is explicitly deferred at the user's request because no device
+is ready. No newer Mac host was supplied.
+
+### Local validation
+
+- Clean iOS armv7/arm64 release builds and both Debian variants passed.
+- Clean Mac PPC/i386/x86_64/arm64 app and daemon builds passed.
+- Full `make -C source/linux clean test` passed. Full captured build output was
+  reviewed; there were no compiler warnings.
+- Execution tests now kill a runtime during both HTTP and real Bash execution,
+  recover interrupted runs and scans, verify durable tool intent and missing
+  output diagnostics, and reject automatic retry/replay. A deliberately failing
+  recovery trigger verifies transaction rollback and refusal of readiness.
+  Existing duplicate submissions, contention, reconnect, cancellation, reader/WAL,
+  mutation/study, malformed IPC and slow-peer tests still pass.
+- The Bash suite retains exit-status, timeout, cancellation and output-limit
+  coverage with the guardian enabled. A daemon SIGKILL test verifies its tool
+  stops; Linux container zombies count as stopped, not live processes.
+- Signal/rotation tests now cover SIGINT as well as SIGTERM. Lifecycle logs keep
+  one 64 KiB backup and owner-only permissions, without heartbeat counters.
+- Clang static analysis of Bash supervision, durable recovery, IPC server and
+  daemon main produced no findings. Shell syntax checks passed.
+
+Logs are local `/tmp/strappy-step5-*` files and are not committed. Final clean
+build/suite output is in the `*-verified.log` files; analysis is in
+`strappy-step5-analysis-final.log`.
+
+### Native isolated fixtures
+
+`source/linux/recovery_device_probe.c` seeds unfinished prompt, turn, request,
+HTTP, tool and scan records in a private fixture. It checks terminal recovery,
+a normalized interruption output, foreign keys and unchanged schema version.
+`recovery_device_harness.sh` starts/stops the actual daemon, checks IPC before and
+after more than a minute idle, then SIGKILLs a native Bash-owning probe and verifies
+its shell no longer exists. The probe uses the same Bash/storage code and the
+Altivec library shipped in the app. It makes no provider requests and touches no
+live account/store. Run the script only in a fresh private directory containing
+`strappyd`, `probe`, and the full `resources/` directory.
+
+All final native fixtures passed as UID 501:
+
+| Host | Final fixture daemon | Observations |
+| --- | --- | --- |
+| `x4-vm`, Tiger 10.4.11/PPC | PID 11021, startup 13:32:31Z, shutdown 13:33:35Z | Recovery/output pairing, idle IPC, cooperative shutdown and owner-death Bash cleanup passed. |
+| `koolphone5`, iOS 8.4.1/armv7 | PID 1223, startup 13:15:26Z, shutdown 13:16:30Z | Same checks passed as mobile, launched with `su` from root SSH. |
+| `pinkphone-rsa`, iOS 15.0/arm64 | PID 3851, startup 13:15:29Z, shutdown 13:18:41Z | Same checks passed as mobile, using signed binaries under `/var/jb`. |
+
+Only startup/shutdown records appeared during these idle intervals; on-demand IPC
+was healthy. The iOS 15 interval took 192 seconds despite 64 seconds of scripted
+waits. Its cause was not assigned to a particular power state. Device clocks
+also differ; these timestamps are not cross-device timing measurements. This
+is not evidence of continuous execution during sleep.
+
+Final fixture stores were copied back after shutdown for independent integrity,
+foreign-key, schema-version and repaired-output checks. Temporary test daemons
+were stopped and their fixture directories removed; the production services
+were left installed and healthy. No reboot or respring was performed.
+
+### Complete app/package service lifecycle
+
+Both production iOS packages (version 1.1.2) installed the real worker/resource
+configuration and answered IPC readiness without opening the UI. Reinstall
+replaced the old PID, removal left no job or old process after a 12-second wait,
+and reinstall restored one healthy launchd service with retained user data.
+Rootful/mobile and rootless/mobile paths were both exercised. The initial test
+exposed an unavailable `awk` command in the stop script; the final script uses
+only shell built-ins to extract the PID and wait for exit. The final packages
+were tested again over the corrected installed scripts without package-script
+warnings. Final production PIDs were 1360 (iOS 8) and 3985 (iOS 15), both healthy.
+
+Tiger installed the complete worker and resources, preserved its PID on unchanged
+installation, uninstalled its registration/executable, and reinstalled a healthy
+service. Replacing the app/service build then produced a new PID. The final app
+is installed at `/Applications/Strappy.app`; its prior app bundle was retained
+at `/tmp/strappy-pre-step5.app`. Opening the final UI produced PID 11065; killing
+that UI left daemon PID 11001 and IPC readiness intact. Normal interactive quit,
+logout/login and Keychain authorization were not simulated by that process test.
+
+On iOS 8, Activator reported `com.altivecintelligence.Strappy` as the current app
+and `application` mode after opening the final UI. Returning home and killing
+Strappy left daemon PID 1254 and readiness intact. An explicit lock command
+reported `lockscreen`; a later check still reported that mode, and the test
+restored `springboard` with the normal dismiss command. These observations
+establish UI-process independence;
+they do not establish a completed graphical prompt/reopen workflow.
+
+The signed production credential diagnostic reported one account and one
+accessible credential on each phone, without printing identifiers, values or
+making a provider request. Tiger reported one account and zero accessible
+credentials, as before; missing items versus lock/ACL denial remain
+indistinguishable with this deliberately bounded diagnostic. OAuth rotation and
+first-unlock access are not established by a read probe.
+
+### Remaining platform observations
+
+The iOS 15 `uiopen` attempts did not establish a live Strappy UI process;
+subsequent termination found no matching process. Its daemon stayed healthy.
+Full graphical foreground/background/termination, explicit observed lock/unlock,
+and graphical prompt/close/reopen remain unverified on that phone. A simulated
+memory-pressure command was attempted, but produced no diagnostic confirming
+delivery before it was stopped; only subsequent daemon PID/readiness were
+verified. This is not real jetsam or memory-pressure validation.
+
+Actual iOS first-unlock timing, jailbreak reactivation, iOS 15 reboot, forced
+OAuth refresh, true memory pressure, newer Mac runtime and logout/login remain
+open. `pinkphone-rsa` remains respring-only for any future disruptive testing.
+iOS 6 remains deferred until the user supplies a device. No phone was kept awake
+by a new service power assertion, and no additional execution privilege was added.

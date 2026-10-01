@@ -33,8 +33,9 @@ and set a mutex-protected cancellation flag. HTTP, retry waits, OAuth refresh an
 tools cooperate through the existing cancellation callbacks. Bash terminates and
 reaps its owned child group. SIGTERM stops acceptance, drains command handlers,
 cancels/joins execution and then logs shutdown. Unfinished persisted work becomes
-interrupted at startup and is never automatically replayed. Full crash-ledger
-repair, orphan cleanup after SIGKILL, and power/lifecycle recovery remain step 5.
+interrupted at startup and is never automatically replayed. [RECOVERY.md](RECOVERY.md)
+describes atomic ledger repair, missing tool-result diagnostics, owned Bash
+group cleanup after SIGKILL, and remaining platform validation.
 
 ## Paths and credentials
 

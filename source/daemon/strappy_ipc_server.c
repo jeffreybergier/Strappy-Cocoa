@@ -18,7 +18,7 @@ struct strappy_ipc_peer {
     int fd, negotiated, subscribed, closing;
     uint32_t last_id;
     pthread_t worker;
-    int working, finished;
+    int working, finished, wake_fd;
     unsigned int refresh;
     pthread_mutex_t *mutex;
     void (*handler)(const strappy_ipc_message *, strappy_ipc_message *, void *);
@@ -66,6 +66,8 @@ static void *strappy_ipc_command(void *context)
     pthread_mutex_lock(p->mutex);
     p->finished = 1;
     pthread_mutex_unlock(p->mutex);
+    /* Even rejected/read-only commands must wake an idle event loop. */
+    while (write(p->wake_fd, "c", 1) < 0 && errno == EINTR) {}
     return NULL;
 }
 static void strappy_ipc_drop(struct strappy_ipc_peer *peer)
@@ -150,7 +152,7 @@ static void strappy_ipc_request(strappy_ipc_server *s, struct strappy_ipc_peer *
                 memcpy(request.payload, p->input + STRAPPY_IPC_HEADER, request.length);
                 p->command = request; p->response = reply;
                 p->handler = s->handler; p->context = s->context; p->mutex = &s->mutex;
-                p->finished = 0;
+                p->finished = 0; p->wake_fd = s->wake[1];
                 if (pthread_create(&p->worker, NULL, strappy_ipc_command, p) == 0) {
                     p->working = 1;
                     p->received = 0; p->needed = STRAPPY_IPC_HEADER;
@@ -249,10 +251,11 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
 {
     fd_set readers, writers;
     struct timeval timeout;
+    int wait_ms = timeout_ms;
     int maximum, i, ready;
     unsigned int pending;
     char bytes[128];
-    if (!s || timeout_ms < 0 || timeout_ms > 1000 || wake_fd >= FD_SETSIZE) return -1;
+    if (!s || timeout_ms < -1 || wake_fd >= FD_SETSIZE) return -1;
     FD_ZERO(&readers); FD_ZERO(&writers);
     FD_SET(s->listener, &readers); FD_SET(s->wake[0], &readers);
     maximum = s->listener > s->wake[0] ? s->listener : s->wake[0];
@@ -282,12 +285,17 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
             strappy_ipc_platform_milliseconds() - p->progress >= 30000) {
             strappy_ipc_drop(p); continue;
         }
+        if (!p->negotiated || p->received || p->queued) {
+            int remaining = (int)(30000 - (strappy_ipc_platform_milliseconds() - p->progress));
+            if (remaining < 0) remaining = 0;
+            if (wait_ms < 0 || remaining < wait_ms) wait_ms = remaining;
+        }
         if (!p->closing) FD_SET(p->fd, &readers);
         if (p->queued) FD_SET(p->fd, &writers);
         if (p->fd > maximum) maximum = p->fd;
     }
-    timeout.tv_sec = timeout_ms / 1000; timeout.tv_usec = (timeout_ms % 1000) * 1000;
-    ready = select(maximum + 1, &readers, &writers, NULL, &timeout);
+    timeout.tv_sec = wait_ms < 0 ? 0 : wait_ms / 1000; timeout.tv_usec = (wait_ms < 0 ? 0 : wait_ms % 1000) * 1000;
+    ready = select(maximum + 1, &readers, &writers, NULL, wait_ms < 0 ? NULL : &timeout);
     if (ready < 0) return errno == EINTR ? 0 : -1;
     /* Process only descriptors in this select's set before accepting new ones. */
     for (i = 0; i < STRAPPY_IPC_MAX_CLIENTS; ++i) {
