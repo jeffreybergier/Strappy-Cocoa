@@ -576,3 +576,86 @@ Installation/upgrade/removal with the final execution worker, newer Mac runtimes
 iOS 6, and the remaining iOS 8/15 lifecycle matrix remain Step 5 checks. Interrupted
 runs are explicit and never replayed; full interrupted-ledger repair and orphan
 handling after SIGKILL remain recovery work.
+
+## Step 4: remaining workers and mutations — 2026-10-01
+
+Implemented service commands for scanning, Database Study, model refresh,
+accounts/credentials, manual models, approvals, session changes, context
+inclusion and shared defaults. The UI bridges now contain only command clients,
+readers and presentation work; the old in-process scan/study/refresh paths and
+unused UI run registry were removed. IPC is v4, reader ABI remains 2, and SQLite
+`user_version` remains 1. See [MUTATIONS.md](MUTATIONS.md) for command behavior and
+limitations, including unknown mutation acknowledgments and transient scan state.
+
+### Local checks
+
+- Clean universal iOS build: armv7 and arm64, rootful/rootless packages.
+- Clean Mac build: PPC, i386, x86_64 and arm64, including daemon slices.
+- Full offline Linux shared-core suite, original execution/IPC/WAL/read-only
+  regressions, and the new mutation harness. No live provider credentials used.
+- The mutation harness verifies account/model/default/session commands with
+  independent read-only SQLite queries, malformed command rejection, real
+  filesystem scanning, approvals/visibility, mutation conflicts during work,
+  Database Study cancellation and three-batch no-progress failure. A successful
+  study executes actual `database_context`, a real-table `database_query`, and
+  `database_study` tools through the loopback Responses provider. It also verifies
+  model catalog download/persistence, cancellation of a blocked catalog download
+  on SIGTERM, status reset on reconnect after service restart, and durable prompt retry
+  lookup while a different worker is busy.
+- Clang static analysis of execution, mutations, IPC server, store client, HTTP client and durable run storage produced no
+  findings.
+
+Generated build/test/analysis logs are local under `/tmp/strappy-step4-*` and are
+not committed. Warnings are reviewed in the full captured build output.
+
+### Isolated native checks
+
+The same `source/linux/mutation_device_probe.c` ran against freshly created test
+stores. The probe uses a new authenticated connection for every command. It
+creates a fixture account and manual model, approves the model, sets defaults,
+creates/deletes a session, asks the daemon to scan a real fixture SQLite file,
+polls completion from separate connections, approves/hides/unhides the database,
+and archives the fixture model/account. It never sends a provider request or
+uses an existing account's credentials. The production launchd job and live
+Strappy store were not replaced or modified.
+
+| Host | Verified result |
+| --- | --- |
+| `x4-vm`, Tiger 10.4.11/PPC | Probe passed; daemon PID 10833, euid 501. Device log startup 13:05:33Z and cooperative shutdown 13:05:40Z. |
+| `koolphone5`, iOS 8.4.1/armv7 | SSH was reachable. Probe and daemon ran as mobile via `su` from the root SSH account. Probe passed; PID 1006, euid 501; startup 12:49:28Z and shutdown 12:49:32Z. |
+| `pinkphone-rsa`, iOS 15.0/arm64 | Probe passed from the mobile SSH account, using signed executables under the jailbreak prefix; PID 3642, euid 501; startup 12:49:24Z and shutdown 12:49:40Z. No reboot or respring. |
+
+Device clocks differ; these timestamps are not used for cross-device timing.
+The isolated paths were `/tmp/strappy-s4-20261001` on Tiger and iOS 8, and
+`/var/jb/var/strappy-s4-20261001` on iOS 15. After orderly shutdown, each fixture
+store was copied back and independently checked: integrity `ok`, schema version
+1, zero remaining sessions, one archived fixture account, and one approved,
+unhidden discovered database. All test daemons were stopped.
+
+These are native command/storage/worker checks, not a full graphical UI test.
+New sign-in/refresh/archive Keychain behavior has build coverage and reuses the
+previously validated daemon credential boundary, but a fresh interactive OAuth
+sign-in and live provider catalog refresh were not exercised in this milestone.
+The existing Tiger Keychain ACL limitation remains. Newer Mac runtime, iOS 6,
+graphical foreground/background/reopen flows, first unlock, sleep, package
+upgrade/removal of the complete harness, and broader recovery remain step 5.
+
+The final binaries were rerun on all three hosts. On both phones, overwriting the
+previously executed test binary in place caused termination before startup
+logging; uploading to a new file and renaming it over the old executable restored
+successful execution. This was a deployment observation, not a daemon crash after
+readiness. Use replacement-file semantics when copying signed test executables.
+
+Representative native invocation (normal user, private fresh fixture):
+
+```sh
+strappyd /private/fixture/heartbeat.log /private/fixture/strappy.sqlite /private/fixture/resources &
+pid=$!
+probe /private/fixture/service.sock /private/fixture
+kill "$pid"
+wait "$pid"
+```
+
+The fixture contains `work/` and `scan/fixture.sqlite`, plus explicit resources.
+The probe has no provider or live-store dependency. Temporary remote fixtures
+were removed after capturing the final stores and logs locally.

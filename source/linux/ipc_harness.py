@@ -12,7 +12,7 @@ import time
 binary, fixture = map(lambda p: str(Path(p).resolve()), sys.argv[1:3])
 HEADER = struct.Struct('!4sHHIIII')
 
-def frame(op, ident, payload=b'', version=3, kind=1, status=0):
+def frame(op, ident, payload=b'', version=4, kind=1, status=0):
     return HEADER.pack(b'STPY', version, kind, op, ident, len(payload), status) + payload
 
 def exact(sock, count):
@@ -26,7 +26,7 @@ def exact(sock, count):
 
 def receive(sock):
     magic, version, kind, op, ident, length, status = HEADER.unpack(exact(sock, 24))
-    assert magic == b'STPY' and version == 3 and length <= 4096
+    assert magic == b'STPY' and version == 4 and length <= 4096
     return kind, op, ident, status, exact(sock, length)
 
 def connect(path):
@@ -42,7 +42,7 @@ def request(sock, op, ident, payload=b'', status=0):
     return result[4]
 
 def hello(sock):
-    return request(sock, 1, 1, struct.pack('!II', 3, 3))
+    return request(sock, 1, 1, struct.pack('!II', 4, 4))
 
 def revision(payload):
     assert len(payload) == 36
@@ -81,7 +81,7 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as temporary
         assert subprocess.run([binary, str(directory / 'other.log'), str(directory / 'strappy.sqlite'), str(Path('build-test/daemon-resources').resolve())]).returncode != 0
         with connect(path) as sock:
             request(sock, 2, 1, status=3)
-            snapshot = request(sock, 1, 2, struct.pack('!II', 3, 3))
+            snapshot = request(sock, 1, 2, struct.pack('!II', 4, 4))
             assert revision(snapshot) == 0
             assert struct.unpack('!III', snapshot[24:]) == (7, 4096, 2)
             instance = snapshot[:16]
@@ -89,14 +89,14 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as temporary
             request(sock, 3, 3, status=4)
             request(sock, 2, 2, status=4)
             for op in range(16, 25):
-                request(sock, op, op, status=1 if op in (16, 17) else 5)
+                request(sock, op, op, status=1)
             request(sock, 999, 30, status=6)
             request(sock, 2, 31, b'x', status=1)
             request(sock, 4, 32)
         # Every possible header split; coalesced requests; max payload.
         for split in range(1, 25):
             with connect(path) as sock:
-                packet = frame(1, 1, struct.pack('!II', 3, 3))
+                packet = frame(1, 1, struct.pack('!II', 4, 4))
                 sock.sendall(packet[:split]); sock.sendall(packet[split:])
                 assert receive(sock)[3] == 0
                 sock.sendall(frame(2, 2) + frame(2, 3))
@@ -107,7 +107,7 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as temporary
             assert receive(sock)[3] == 2
             assert sock.recv(1) == b''
         with connect(path) as sock:
-            request(sock, 1, 1, struct.pack('!II', 4, 5), status=2)
+            request(sock, 1, 1, struct.pack('!II', 5, 6), status=2)
             assert sock.recv(1) == b''
         for packet in [b'BAD!' + frame(2, 1)[4:],
                        HEADER.pack(b'STPY', 1, 1, 2, 1, 4097, 0),
@@ -122,7 +122,7 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as temporary
         # Partial payload disconnects never affect a healthy client.
         for cut in [1, 23, 24, 28]:
             with connect(path) as sock:
-                sock.sendall(frame(1, 1, struct.pack('!II', 3, 3))[:cut])
+                sock.sendall(frame(1, 1, struct.pack('!II', 4, 4))[:cut])
         # Fill a non-reading subscriber's output without delaying another client.
         with connect(path) as slow:
             hello(slow); request(slow, 3, 2)

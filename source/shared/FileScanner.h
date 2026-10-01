@@ -34,6 +34,8 @@ extern NSString * const FileScannerCatalogReadFailedNotification;
 @interface FileScanner : NSObject
 
 + (FileScanner *)sharedScanner;
+/* Service monitor delivery on the UI thread. */
++ (void)serviceWorkDidChange;
 + (BOOL)isDatabaseCatalogScanInFlight;
 + (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
                                  error:(NSError **)error;

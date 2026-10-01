@@ -92,6 +92,9 @@ typedef int (*strappy_responses_event_callback)(
 void strappy_responses_http_result_init(strappy_responses_http_result *result);
 void strappy_responses_http_result_destroy(strappy_responses_http_result *result);
 int strappy_client_set_cainfo(const char *path, char **error_out);
+int strappy_client_fetch_openrouter_user_models_json_with_cancel(
+  const strappy_config *config, char **json_out, long *http_status_out,
+  int (*should_cancel)(void *), void *context, char **error_out);
 int strappy_client_fetch_openrouter_user_models_json(
   const strappy_config *config,
   char **json_out,

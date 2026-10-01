@@ -514,13 +514,7 @@ static void StrappyAuthenticationReplaceString(NSString **slot,
     StrappyAuthenticationReplaceString(&userCode_, nil);
   }
   providerAccountIdentifier = [self designatedProviderAccountIdentifier];
-  @synchronized([[StrappyKeychain sharedKeychain]
-    credentialLockForProviderIdentifier:@"openai_chatgpt"
-    providerAccountIdentifier:providerAccountIdentifier]) {
-    deleted = [[StrappyKeychain sharedKeychain]
-      deleteChatGPTCredentialsForProviderAccountIdentifier:
-        providerAccountIdentifier];
-  }
+  deleted = [StrappySession deleteChatGPTCredentialsForProviderAccountIdentifier:providerAccountIdentifier error:NULL];
   @synchronized(self) {
     StrappyAuthenticationReplaceString(&accountIdentifier_, nil);
     if (deleted) {

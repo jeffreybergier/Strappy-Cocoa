@@ -1,6 +1,6 @@
 # Prompt execution (step 3)
 
-The daemon accepts prompts for existing configured sessions, persists their
+The daemon accepts prompts for configured sessions, persists their
 stable client request keys, and runs `strappy_session_send_prompt_with_events_and_load`
 on its own worker. Closing the UI, terminating a client or losing a reply leaves
 accepted work owned by the service. Reopened clients read normalized conversation
@@ -50,7 +50,9 @@ Altivec framework.
 `source/daemon/StrappySession.m` is the daemon-side Objective-C/C session boundary.
 It uses the existing Keychain account formats and owns provider credential
 retrieval and OAuth refresh, including refresh cancellation and identity checks.
-Secrets never enter IPC, diagnostic logs, or the run table. macOS disables
+Prompt execution never returns secrets through IPC. Step 4 authentication
+commands transfer user-entered credentials over the authenticated private socket;
+credentials never enter diagnostic logs or the run table. macOS disables
 Keychain interaction for the background executable; inaccessible credentials
 fail the run. Unlock/access authorization belongs to the user-facing application
 or Keychain UI. The implementation does not bypass an existing Keychain ACL.
@@ -68,10 +70,9 @@ It prints only account and accessible counts, never identifiers, tokens or
 expiry data. It performs no refresh or provider request. An accessible count of
 zero does not distinguish a locked Keychain, an ACL denial, or a missing item.
 
-Account creation, login/account changes, model refresh/approvals, session
-creation/options/deletion, scanning and Database Study remain step 4. In
-particular, this slice requires an already configured session. Authentication
-presentation stays in the UI; the old UI execution callback was removed.
+Step 4 supplies account changes, model refresh/approvals, session
+creation/options/deletion, scanning and Database Study. Authentication
+presentation stays in the UI; see [MUTATIONS.md](MUTATIONS.md).
 
 ## Verification
 

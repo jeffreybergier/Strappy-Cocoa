@@ -154,6 +154,7 @@ enum {
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
 + (BOOL)prepareProviderCredentialsWithError:(NSError **)error;
 + (BOOL)isChatGPTProviderEnabled;
++ (BOOL)deleteChatGPTCredentialsForProviderAccountIdentifier:(NSString *)identifier error:(NSError **)error;
 + (long long)currentTimestampMilliseconds;
 + (NSString *)performChatGPTDeviceAuthorizationForProviderAccountIdentifier:
                 (NSString *)providerAccountIdentifier

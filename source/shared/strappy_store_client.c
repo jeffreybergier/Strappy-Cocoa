@@ -9,6 +9,32 @@
 #include <unistd.h>
 
 static char *strappy_command_socket;
+static pthread_mutex_t strappy_status_mutex = PTHREAD_MUTEX_INITIALIZER;
+static unsigned int strappy_active_job, strappy_last_job, strappy_job_result;
+static int strappy_store_exchange(unsigned int operation, const unsigned char *payload,
+    unsigned int length, unsigned int *status, char **response, int attempts, int timeout);
+static void strappy_store_refresh_work(void)
+{
+    unsigned int status = 0;
+    char *response = NULL;
+    unsigned int active = 0, last = 0, result = 0;
+    if (strappy_store_exchange(STRAPPY_IPC_WORK_STATUS,NULL,0,&status,&response,1,2000) &&
+        status == STRAPPY_IPC_OK && response) {
+        active = strappy_ipc_get32((unsigned char *)response);
+        last = strappy_ipc_get32((unsigned char *)response+4);
+        result = strappy_ipc_get32((unsigned char *)response+8);
+    }
+    free(response);
+    pthread_mutex_lock(&strappy_status_mutex);
+    strappy_active_job = active; strappy_last_job = last; strappy_job_result = result;
+    pthread_mutex_unlock(&strappy_status_mutex);
+}
+void strappy_store_client_work_status(unsigned int *active, unsigned int *last, unsigned int *result)
+{
+    pthread_mutex_lock(&strappy_status_mutex);
+    *active = strappy_active_job; *last = strappy_last_job; *result = strappy_job_result;
+    pthread_mutex_unlock(&strappy_status_mutex);
+}
 
 typedef struct strappy_store_monitor {
     char *socket_path;
@@ -44,6 +70,7 @@ static void *strappy_store_monitor_run(void *context)
         ready = fd >= 0 && operation > STRAPPY_IPC_SUBSCRIBE;
         if (ready) {
             strappy_db_set_service_ready(monitor->database_path, 1);
+            strappy_store_refresh_work();
             monitor->changed();
         }
         while (ready) {
@@ -56,10 +83,11 @@ static void *strappy_store_monitor_run(void *context)
                 message.kind != STRAPPY_IPC_EVENT) break;
             /* An instance/revision gap always causes a full refresh. Nothing
              * relies on reconstructing state solely from notifications. */
+            strappy_store_refresh_work();
             monitor->changed();
         }
         strappy_db_set_service_ready(monitor->database_path, 0);
-        if (ready) monitor->changed();
+        if (ready) { strappy_store_refresh_work(); monitor->changed(); }
         if (fd >= 0) close(fd);
         {
             struct timeval delay;
@@ -85,8 +113,8 @@ int strappy_store_client_start(const char *socket_path, const char *database_pat
     if (monitor->socket_path == NULL || monitor->database_path == NULL) goto fail;
     strcpy(monitor->socket_path, socket_path);
     strcpy(monitor->database_path, database_path);
-    if (pthread_create(&thread, NULL, strappy_store_monitor_run, monitor) != 0) goto fail;
     strappy_command_socket = monitor->socket_path;
+    if (pthread_create(&thread, NULL, strappy_store_monitor_run, monitor) != 0) { strappy_command_socket = NULL; goto fail; }
     pthread_detach(thread);
     return 1;
 fail:
@@ -112,12 +140,12 @@ int strappy_store_client_request_key(char key[65])
     }
     key[64] = 0; return 1;
 }
-int strappy_store_client_command(unsigned int operation, const unsigned char *payload,
-    unsigned int length, unsigned int *status)
+static int strappy_store_exchange(unsigned int operation, const unsigned char *payload,
+    unsigned int length, unsigned int *status, char **response, int attempts, int timeout)
 {
     int attempt;
     if (!strappy_command_socket || length > STRAPPY_IPC_MAX_PAYLOAD) return 0;
-    for (attempt = 0; attempt < 3; ++attempt) {
+    for (attempt = 0; attempt < attempts; ++attempt) {
         int fd = strappy_ipc_connect(strappy_command_socket, geteuid(), 2000);
         strappy_ipc_message m;
         int ok;
@@ -132,12 +160,40 @@ int strappy_store_client_command(unsigned int operation, const unsigned char *pa
             (strappy_ipc_get32(m.payload + 24) & 7U) == 7U;
         if (ok) {
             memset(&m, 0, sizeof(m)); m.kind = STRAPPY_IPC_REQUEST; m.operation = operation;
-            m.request_id = 2; m.length = length; memcpy(m.payload, payload, length);
-            ok = strappy_ipc_send(fd, &m, 2000) == 0 && strappy_ipc_receive(fd, &m, 10000) == 0 &&
+            m.request_id = 2; m.length = length; if (length) memcpy(m.payload, payload, length);
+            ok = strappy_ipc_send(fd, &m, 2000) == 0 && strappy_ipc_receive(fd, &m, timeout) == 0 &&
                 m.kind == STRAPPY_IPC_REPLY && m.operation == operation && m.request_id == 2;
         }
         close(fd);
-        if (ok) { *status = m.status; return 1; }
+        if (ok) {
+            *status = m.status;
+            if (response) {
+                if (operation == STRAPPY_IPC_WORK_STATUS && m.length != 12) return 0;
+                *response = calloc((size_t)m.length+1,1);
+                if (!*response) return 0;
+                memcpy(*response,m.payload,m.length);
+            }
+            return 1;
+        }
     }
     return 0;
+}
+
+int strappy_store_client_command(unsigned int operation, const unsigned char *payload,
+    unsigned int length, unsigned int *status)
+{
+    return strappy_store_exchange(operation,payload,length,status,NULL,3,10000);
+}
+char *strappy_store_client_mutation(unsigned int operation, const cJSON *command, unsigned int *status)
+{
+    char *json = cJSON_PrintUnformatted(command), *result = NULL;
+    *status = STRAPPY_IPC_INVALID;
+    if (json) {
+        if (!strappy_store_exchange(operation,(unsigned char *)json,(unsigned int)strlen(json),status,&result,1,
+            cJSON_GetObjectItemCaseSensitive(command,"identity") ? 120000 : 2000))
+            *status = STRAPPY_IPC_NOT_READY;
+        memset(json,0,strlen(json)); free(json);
+    }
+    if (*status != STRAPPY_IPC_OK) { free(result); result = NULL; }
+    return result;
 }

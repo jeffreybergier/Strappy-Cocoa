@@ -1,8 +1,8 @@
-# Strappy local service protocol v3
+# Strappy local service protocol v4
 
-Step 3 adds durable prompt submission and cancellation. The daemon runs the
-existing C Responses runtime; GUI clients read history and run state from SQLite.
-Other mutations and workers remain unavailable until step 4.
+The daemon runs the C Responses runtime, scans, study, catalog refresh and
+shared mutations. GUI clients read history, run state and catalogs from SQLite.
+This is the step 4 protocol; prompt semantics from step 3 are retained.
 
 ## Endpoint and trust
 
@@ -23,8 +23,8 @@ only by the lock owner. Regular-file/symlink collisions fail closed. The lock
 file is retained across shutdown; unlinking a live lock would break exclusion.
 
 The C `XPFoundation/strappy_ipc_platform` compatibility module isolates OS-specific credential, monotonic-clock, and
-SIGPIPE-safe send APIs. The portable client and server use only system C
-libraries. Server sockets, wake descriptors, and locks are close-on-exec.
+SIGPIPE-safe send APIs. The transport uses only system C libraries; execution commands additionally use
+the shared C runtime and transient cJSON serialization. Server sockets, wake descriptors, and locks are close-on-exec.
 
 ## Framing
 
@@ -35,7 +35,7 @@ A frame is a 24-byte header followed by exactly `length` payload bytes:
 | Offset | Width | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `STPY` |
-| 4 | 2 | Protocol version, currently 3 |
+| 4 | 2 | Protocol version, currently 4 |
 | 6 | 2 | Kind: request 1, reply 2, event 3 |
 | 8 | 4 | Operation |
 | 12 | 4 | Request ID; zero only for unsolicited events |
@@ -50,7 +50,7 @@ Transport request IDs are connection-local. Submission retry identities are
 separate 256-bit keys persisted with the work before acceptance, as below.
 
 Malformed magic/kind/oversized frames cause immediate disconnect. Unsupported
-header versions receive a v3 incompatible-version reply then disconnect. Invalid
+header versions receive a v4 incompatible-version reply then disconnect. Invalid
 request kind, nonzero request status, or zero request ID similarly produce an
 invalid-request reply then disconnect. The server handles partial reads/writes
 and multiple frames on one stream. Each client has one bounded input frame and
@@ -70,7 +70,7 @@ work per client; execution never occurs on this thread.
 | 3 | subscribe | Empty | Snapshot, with subscription already active |
 | 4 | unsubscribe | Empty | Snapshot, with subscription disabled |
 
-The version interval must contain 3. `hello` is accepted once per connection.
+The version interval must contain 4. `hello` is accepted once per connection.
 Operations 2–4 are repeatable with new IDs. Every successful control reply is
 exactly 36 bytes:
 
@@ -90,20 +90,8 @@ run state using the read-only run API after subscribing, just like history.
 
 ## Mutation command boundary
 
-Operations 16 and 17 are implemented. Operations 18–24 still return
-`execution_not_ready`. The latter commands' semantic inputs remain future contracts.
-
-| ID | Command | Required semantic inputs for execution implementation |
-| --- | --- | --- |
-| 16 | submit_prompt | Stable client submission identity, session ID, UTF-8 prompt |
-| 17 | cancel_run | Stable run ID |
-| 18 | set_session_options | Session ID, typed changed options, expected revision |
-| 19 | create_session | Stable client request identity, assistant-set ID, optional name |
-| 20 | delete_session | Session ID, expected revision |
-| 21 | approve_model | Model ID, approval boolean, expected revision |
-| 22 | approve_database | Database ID, approval boolean, expected revision |
-| 23 | start_scan | Stable client request identity, scan profile |
-| 24 | start_study | Stable client request identity, approved database ID |
+Operations 16 (submit prompt) and 17 (cancel run) use the binary payloads below.
+Operations 18–27 are defined in the Step 4 command table at the end of this file.
 
 Unknown operations return `unknown_operation`. Error replies use the numeric
 status in the header and an un-NUL-terminated ASCII error code as payload:
@@ -124,7 +112,7 @@ Logs and errors never include request payloads or credentials.
 `submit_prompt` (16): u64 positive session ID, exactly 64 lowercase ASCII hex
 characters representing a random 256-bit client retry key, then 1–4024 bytes of
 valid UTF-8 prompt text (no NUL). The session and account/model must already be
-configured; creation and configuration are step 4. The UI persists a pending
+configured through the metadata commands below. The UI persists a pending
 submission before sending and retries the same key after an uncertain reply or
 reconnect. It does not create conversation rows itself.
 
@@ -150,7 +138,9 @@ Cancellation polls cover HTTP, retry waits, OAuth refresh and tools/Bash.
 
 Error frames contain a numeric status and a stable ASCII identifier. In addition
 to the transport errors, `storage_error` (9) means acceptance/state persistence
-failed. No provider credentials or response payloads cross this protocol. A lost
+failed. Prompt commands carry no credentials or provider response payloads. Step 4
+authentication commands carry credentials only to the daemon over the private,
+authenticated socket; they are never logged or persisted in SQLite. A lost
 connection never cancels work.
 
 ## Events, workers, and reconnect
@@ -195,8 +185,11 @@ synchronous, has bounded monotonic deadlines, and belongs on a background thread
 After any I/O/protocol error, close it and resynchronize on a fresh connection.
 The current store monitor handles control-request correlation, reconnection
 backoff, and UI refresh hints. The `StrappySession` adapter sends prompts and cancels on background threads.
-It renders fresh DB state on service invalidation; `FileScanner` workers remain
-for step 4.
+It renders fresh DB state on service invalidation. `FileScanner` sends commands
+and reads catalog snapshots; it no longer performs scanning in the UI.
+Short metadata/acceptance commands preserve the existing synchronous Cocoa
+interfaces with bounded I/O. OAuth refresh is called by the authentication
+background thread. No metadata command is automatically retried after a lost reply.
 
 ## Validation
 
@@ -210,3 +203,50 @@ strappyd --ipc-probe /absolute/private/directory/service.sock
 
 See `VALIDATION.md` for observed platforms and limitations. The probe does not
 connect to providers or access application data.
+
+## Step 4 command payloads (IPC v4, reader ABI 2)
+
+Operations 18–25 and 27 accept bounded UTF-8 JSON objects with string values only.
+JSON is transient wire serialization, never a database document. Integer fields
+are decimal strings, preserving 64-bit identifiers on PPC/32-bit clients and
+avoiding floating-point rounding. Duplicate keys, non-string values, embedded
+NUL, invalid UTF-8 and trailing input are rejected. The frame limit remains 4096
+bytes, including all keys and credential text. Replies contain an identifier as
+UTF-8 text for creation, the refreshed account identity for OAuth refresh, or an
+empty success body. Other failures use the existing structured status codes.
+
+| Operation | Payload |
+| --- | --- |
+| 18 set session options | `action=options`, fields below |
+| 19 create session | `action=create_session`, `directory` |
+| 20 delete session | `action=delete_session`, `session` |
+| 21 approve model | `action=approve_model`, `id`, `value` (0/1) |
+| 22 approve database | `action=approve_database`, numeric `id`, `value` (0/1) |
+| 23 start scan | `path` (absolute), `quick` (0/1) |
+| 24 start study | `directory`, `key` (64 lowercase hexadecimal characters) |
+| 25 mutate | One of the actions below |
+| 26 work status | Empty request; reply is three network-order u32 values: active operation, last worker operation, terminal run-state enum (0 means none) |
+| 27 refresh catalog | `id` (provider account ID) |
+
+Operation 25 actions:
+
+- `options` / `defaults`: `session` (options only), `mask`, `model`, `account`,
+  `assistant`, `directory`, `fallback` (defaults), `rounds`, `web_provider`,
+  `web`, `bash`, `one_tool`, `quality`. Flags are 0/1; mask is the existing
+  `strappy_session_option_mask`. The Cocoa adapter sends the complete options
+  record; only selected fields change.
+- `create_session`, `delete_session`, `approve_model`, `approve_database`: same
+  payload as their dedicated operation IDs.
+- `default_model`: `id`; `hide_database`: numeric `id`, `value` (0/1).
+- `create_account`: provider `id`, `name`; `update_account`: account `id`, `name`,
+  `endpoint`, `output`, optional `token`; `archive_account`: account `id`.
+- `create_model` / `update_model`: provider `id`, `wire`, `name`, `context`,
+  `output`, `reasoning`, `image`, `functions`, `price_input`, `price_output`,
+  `price_read`, `price_write`. `archive_model`: provider `id`, `wire`.
+- `delete_study`: assistant database `id`; `reset_study`: no other fields.
+- `include_context`: `session`, model request `id`, `value` (0/1).
+- `save_oauth`: account `id`, `access`, `refresh`, `identity`, `expiry` in Unix
+  milliseconds; `refresh_oauth`: `id`, expected `identity`; `delete_oauth`: `id`.
+
+Only prompt submission is automatically retried by the client. A lost mutation
+acknowledgment requires reading committed state before an explicit retry.

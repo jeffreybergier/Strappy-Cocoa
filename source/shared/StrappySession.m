@@ -151,7 +151,6 @@ const NSUInteger StrappySessionDefaultRoundLimit =
 const NSUInteger StrappySessionMaximumLimit =
   (NSUInteger)STRAPPY_SESSION_MAX_LIMIT;
 
-static NSMutableDictionary *StrappySessionInFlightSessions = nil;
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
 
 
@@ -192,26 +191,9 @@ static NSString *StrappySessionStringFromCString(char *value)
 + (NSArray *)providerAccountCatalogVerifyingCredentials:
                (BOOL)verifyCredentials
                                                    error:(NSError **)error;
-+ (NSMutableDictionary *)inFlightSessions;
-+ (void)registerInFlightSession:(StrappySession *)session;
-+ (void)unregisterInFlightSession:(StrappySession *)session;
-+ (StrappySession *)inFlightSessionForIdentifier:(NSNumber *)identifier;
 + (NSArray *)messagesForSessionIdentifier:(NSNumber *)sessionIdentifier
                                     error:(NSError **)error;
 + (NSArray *)modelCatalogFromList:(const strappy_model_record_list *)list;
-+ (BOOL)manualModelInput:(strappy_manual_model_input *)input
-             wireModelID:(NSString *)wireModelID
-             displayName:(NSString *)displayName
-      contextWindowTokens:(long long)contextWindowTokens
-          maxOutputTokens:(long long)maxOutputTokens
-        reasoningEnabled:(BOOL)reasoningEnabled
-       imageInputEnabled:(BOOL)imageInputEnabled
-   localFunctionsEnabled:(BOOL)localFunctionsEnabled
-       inputPricePerToken:(NSString *)inputPricePerToken
-      outputPricePerToken:(NSString *)outputPricePerToken
-   cacheReadPricePerToken:(NSString *)cacheReadPricePerToken
-  cacheWritePricePerToken:(NSString *)cacheWritePricePerToken
-                    error:(NSError **)error;
 + (NSDictionary *)dictionaryFromModelRecord:
     (const strappy_model_record *)record;
 + (NSDictionary *)dictionaryFromAssistantSetRecord:
@@ -219,7 +201,6 @@ static NSString *StrappySessionStringFromCString(char *value)
 + (NSDictionary *)dictionaryFromDatabaseStudyStatusRecord:
     (const strappy_study_database_status_record *)record;
 + (NSString *)guidanceResourceDirectoryWithError:(NSError **)error;
-+ (void)refreshOpenRouterModelCatalogInBackground:(id)ignored;
 + (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result;
 - (void)updateCachedSummary:(NSDictionary *)summary;
 - (NSString *)currentProcessingStatusJSON;
@@ -238,14 +219,7 @@ static NSString *StrappySessionStringFromCString(char *value)
                                 renderContext:
                 (const strappy_session_webview_render_context *)renderContext
                                         error:(NSError **)error;
-- (void)postSessionUpdateAndRelease:(NSDictionary *)update;
-- (void)postStreamEventAndRelease:(NSDictionary *)event;
-- (NSDictionary *)submitPrompt:(NSString *)prompt
-                       context:(NSDictionary *)context
-                      isolated:(BOOL)isolated
-                         error:(NSError **)error;
 - (void)sendPromptInBackground:(NSDictionary *)request;
-- (void)runDatabaseStudyInBackground:(id)ignored;
 - (void)promptDidFinish:(NSDictionary *)result;
 @end
 
@@ -700,6 +674,52 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
+static NSString *StrappyServiceCommand(unsigned int operation, NSDictionary *values, NSError **error)
+{
+  cJSON *command = cJSON_CreateObject();
+  NSEnumerator *keys = [values keyEnumerator];
+  NSString *key;
+  char *result;
+  unsigned int status;
+  NSString *text;
+  while ((key = [keys nextObject]) != nil)
+    cJSON_AddStringToObject(command,[key UTF8String],[[[values objectForKey:key] description] UTF8String]);
+  result = strappy_store_client_mutation(operation,command,&status);
+  cJSON_Delete(command);
+  text = result ? [NSString stringWithUTF8String:result] : nil;
+  free(result);
+  if (text == nil && error != nil) {
+    NSString *message = status == STRAPPY_IPC_BUSY ?
+      @"The background service is busy. Try again after the current work finishes." :
+      (status == STRAPPY_IPC_NOT_READY ? @"The service did not acknowledge this change. Reload stored state before trying again." :
+       @"The background service could not apply this change. Check the selected values and account credentials.");
+    *error = [NSError errorWithDomain:@"StrappyServiceErrorDomain" code:(NSInteger)status
+      userInfo:[NSDictionary dictionaryWithObject:message forKey:NSLocalizedDescriptionKey]];
+  }
+  return text;
+}
+static NSString *StrappyText(NSString *text) { return text ? text : @""; }
+static NSString *StrappyNumber(long long value) { return [NSString stringWithFormat:@"%lld",value]; }
+static NSString *StrappyWorkingDirectory(void)
+{
+  NSArray *paths = [StrappySession codingWorkingDirectoryPaths];
+  return [paths count] ? [paths objectAtIndex:0] : NSHomeDirectory();
+}
+static NSDictionary *StrappyOptionsCommand(StrappySessionOptions *options,
+    StrappySessionOptionMask mask, NSNumber *session, NSError **error)
+{
+  strappy_session_options record;
+  if (!StrappySessionRecordFromOptions(options,&record,error)) return nil;
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    session ? @"options" : @"defaults",@"action",session ? [session stringValue] : @"0",@"session",
+    StrappyNumber((long long)mask),@"mask",StrappyText([options modelIdentifier]),@"model",
+    StrappyText([options providerAccountIdentifier]),@"account",StrappyText([options assistantSetIdentifier]),@"assistant",
+    StrappyText([options workingDirectory]),@"directory",StrappyWorkingDirectory(),@"fallback",
+    StrappyText([options webProvider]),@"web_provider",StrappyNumber([options webSearchEnabled]),@"web",
+    StrappyNumber([options bashEnabled]),@"bash",StrappyNumber([options limitToOneTool]),@"one_tool",
+    StrappyNumber([options answerQualityEnabled]),@"quality",StrappyNumber((long long)[options roundLimit]),@"rounds",nil];
+}
+
 static void StrappyStoreChanged(void)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
@@ -713,6 +733,17 @@ static void StrappyStoreChanged(void)
 + (void)serviceStoreChanged:(id)ignored
 {
   (void)ignored;
+  unsigned int active, last, result;
+  strappy_store_client_work_status(&active,&last,&result);
+  if ([self isModelCatalogRefreshInFlight] && active != STRAPPY_IPC_REFRESH_CATALOG) {
+    [self openRouterModelCatalogRefreshDidFinish:(last == STRAPPY_IPC_REFRESH_CATALOG && result == STRAPPY_RUN_COMPLETED) ?
+      [NSDictionary dictionary] : [NSDictionary dictionaryWithObject:@"Model refresh failed or the service restarted." forKey:@"error"]];
+  } else if (![self isModelCatalogRefreshInFlight] && active == STRAPPY_IPC_REFRESH_CATALOG) {
+    @synchronized(self) { StrappySessionModelCatalogRefreshInFlight = YES; }
+    [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification object:self];
+  }
+  [FileScanner serviceWorkDidChange];
+  [[NSNotificationCenter defaultCenter] postNotificationName:StrappyProviderAccountsDidChangeNotification object:nil];
   [[NSNotificationCenter defaultCenter] postNotificationName:@"StrappyServiceChanged" object:nil];
   [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionDidUpdateNotification object:nil];
   [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogDidChangeNotification object:nil];
@@ -750,66 +781,6 @@ static void StrappyStoreChanged(void)
                                        webViewPalette));
 }
 
-+ (NSMutableDictionary *)inFlightSessions
-{
-  if (StrappySessionInFlightSessions == nil) {
-    StrappySessionInFlightSessions = [[NSMutableDictionary alloc] init];
-  }
-  return StrappySessionInFlightSessions;
-}
-
-+ (void)registerInFlightSession:(StrappySession *)session
-{
-  NSNumber *identifier;
-
-  if (![session isKindOfClass:[StrappySession class]]) {
-    return;
-  }
-
-  identifier = [session sessionIdentifier];
-  if (identifier == nil) {
-    return;
-  }
-
-  @synchronized(self) {
-    [[self inFlightSessions] setObject:session forKey:identifier];
-  }
-}
-
-+ (void)unregisterInFlightSession:(StrappySession *)session
-{
-  NSNumber *identifier;
-
-  if (![session isKindOfClass:[StrappySession class]]) {
-    return;
-  }
-
-  identifier = [session sessionIdentifier];
-  if (identifier == nil) {
-    return;
-  }
-
-  @synchronized(self) {
-    if ([[self inFlightSessions] objectForKey:identifier] == session) {
-      [[self inFlightSessions] removeObjectForKey:identifier];
-    }
-  }
-}
-
-+ (StrappySession *)inFlightSessionForIdentifier:(NSNumber *)identifier
-{
-  StrappySession *session;
-
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    return nil;
-  }
-
-  @synchronized(self) {
-    session = [[[self inFlightSessions] objectForKey:identifier] retain];
-  }
-  return [session autorelease];
-}
-
 + (NSUInteger)inFlightSessionCount
 {
   return (NSUInteger)strappy_run_active_count([[self sessionsDatabasePath] fileSystemRepresentation]);
@@ -845,15 +816,9 @@ static void StrappyStoreChanged(void)
 
 + (StrappySession *)sessionWithIdentifier:(NSNumber *)sessionIdentifier
 {
-  StrappySession *session;
 
   if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
     return nil;
-  }
-
-  session = [self inFlightSessionForIdentifier:sessionIdentifier];
-  if (session != nil) {
-    return session;
   }
 
   return [[[self alloc] initWithSessionIdentifier:sessionIdentifier
@@ -863,7 +828,6 @@ static void StrappyStoreChanged(void)
 + (StrappySession *)sessionWithSummary:(NSDictionary *)summary
 {
   NSNumber *identifier;
-  StrappySession *session;
 
   if (![summary isKindOfClass:[NSDictionary class]]) {
     return nil;
@@ -872,12 +836,6 @@ static void StrappyStoreChanged(void)
   identifier = [summary objectForKey:@"id"];
   if (![identifier isKindOfClass:[NSNumber class]]) {
     return nil;
-  }
-
-  session = [self inFlightSessionForIdentifier:identifier];
-  if (session != nil) {
-    [session updateCachedSummary:summary];
-    return session;
   }
 
   return [[[self alloc] initWithSessionIdentifier:identifier
@@ -914,7 +872,6 @@ static void StrappyStoreChanged(void)
 - (void)dealloc
 {
   [[NSNotificationCenter defaultCenter] removeObserver:self];
-  [StrappySession unregisterInFlightSession:self];
   [sessionIdentifier_ release];
   [cachedSummary_ release];
   [options_ release];
@@ -1006,7 +963,7 @@ static void StrappyStoreChanged(void)
   NSString *terminalError = nil;
   BOOL terminalChanged;
   (void)ignored;
-  @synchronized(self) { if (promptSubmissionPending_) return; }
+  @synchronized(self) { optionsLoaded_ = NO; if (promptSubmissionPending_) return; }
   if (!strappy_run_latest([[StrappySession sessionsDatabasePath] fileSystemRepresentation],
       [sessionIdentifier_ longLongValue], &run)) return;
   active = run.state == STRAPPY_RUN_ACCEPTED || run.state == STRAPPY_RUN_RUNNING;
@@ -1033,7 +990,17 @@ static void StrappyStoreChanged(void)
   strappy_run_destroy(&run);
   @synchronized(self) { previous = promptInFlight_; promptInFlight_ = active; }
   summary = [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier_ error:nil];
-  if (summary != nil) [self updateCachedSummary:summary];
+  if (summary != nil) {
+    StrappySessionOptions *storedOptions;
+    [self updateCachedSummary:summary];
+    storedOptions = [self optionsWithError:nil];
+    if (storedOptions != nil) [[NSNotificationCenter defaultCenter]
+      postNotificationName:StrappySessionDidUpdateNotification object:self
+      userInfo:[NSDictionary dictionaryWithObjectsAndKeys:summary,@"session",
+        storedOptions,StrappySessionOptionsKey,
+        [NSNumber XP_numberWithUnsignedInteger:StrappySessionOptionAll],StrappySessionChangedOptionsKey,
+        StrappySessionChangeKindOptions,StrappySessionChangeKindKey,nil]];
+  }
   [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionStreamEventNotification
       object:self userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES]
       forKey:@"service_invalidated"]];
@@ -1095,32 +1062,6 @@ static void StrappyStoreChanged(void)
   if (!delivered) [self performSelectorOnMainThread:@selector(promptDidFinish:)
       withObject:[NSDictionary dictionaryWithObject:@"Cancellation could not be confirmed. Reconnect and try again." forKey:@"error"] waitUntilDone:NO];
   [pool release];
-}
-
-- (void)postStreamEventAndRelease:(NSDictionary *)event
-{
-  if ([event isKindOfClass:[NSDictionary class]]) {
-    [[NSNotificationCenter defaultCenter]
-      postNotificationName:StrappySessionStreamEventNotification
-                    object:self
-                  userInfo:event];
-  }
-  [event release];
-}
-
-- (void)postSessionUpdateAndRelease:(NSDictionary *)update
-{
-  NSDictionary *summary;
-
-  summary = [update objectForKey:@"session"];
-  if ([summary isKindOfClass:[NSDictionary class]]) {
-    [self updateCachedSummary:summary];
-    [[NSNotificationCenter defaultCenter]
-      postNotificationName:StrappySessionDidUpdateNotification
-                    object:self
-                  userInfo:update];
-  }
-  [update release];
 }
 
 + (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath
@@ -1815,6 +1756,12 @@ static void StrappyStoreChanged(void)
   return ok;
 }
 
++ (BOOL)deleteChatGPTCredentialsForProviderAccountIdentifier:(NSString *)identifier error:(NSError **)error
+{
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"delete_oauth",@"action",StrappyText(identifier),@"id",nil],error) != nil;
+}
+
 + (BOOL)isChatGPTProviderEnabled
 {
   return strappy_provider_chatgpt_is_enabled() ? YES : NO;
@@ -1835,8 +1782,6 @@ static void StrappyStoreChanged(void)
   strappy_openai_oauth_configuration configuration;
   strappy_openai_oauth_device device;
   strappy_openai_oauth_credentials credentials;
-  StrappyKeychain *keychain;
-  NSObject *credentialLock;
   NSString *verificationURL;
   NSString *userCode;
   NSString *accessToken;
@@ -1889,23 +1834,13 @@ static void StrappyStoreChanged(void)
     accessToken = [NSString stringWithUTF8String:credentials.access_token];
     refreshToken = [NSString stringWithUTF8String:credentials.refresh_token];
     accountIdentifier = [NSString stringWithUTF8String:credentials.account_id];
-    keychain = [StrappyKeychain sharedKeychain];
-    credentialLock = [keychain
-      credentialLockForProviderIdentifier:@"openai_chatgpt"
-      providerAccountIdentifier:providerAccountIdentifier];
-    @synchronized(credentialLock) {
-      if ((accessToken == nil) || (refreshToken == nil) ||
-          (accountIdentifier == nil) ||
-          StrappyChatGPTAuthorizationShouldCancel(&cancellationContext) ||
-          ![keychain saveChatGPTAccessToken:accessToken
-                                refreshToken:refreshToken
-                           accountIdentifier:accountIdentifier
-                        expiresAtMilliseconds:
-                          credentials.expires_at_milliseconds
-                   providerAccountIdentifier:providerAccountIdentifier]) {
-        accountIdentifier = nil;
-      }
-    }
+    if (StrappyChatGPTAuthorizationShouldCancel(&cancellationContext) ||
+        StrappyServiceCommand(STRAPPY_IPC_MUTATE,
+          [NSDictionary dictionaryWithObjectsAndKeys:@"save_oauth",@"action",
+            StrappyText(providerAccountIdentifier),@"id",StrappyText(accessToken),@"access",
+            StrappyText(refreshToken),@"refresh",StrappyText(accountIdentifier),@"identity",
+            StrappyNumber(credentials.expires_at_milliseconds),@"expiry",nil],error) == nil)
+      accountIdentifier = nil;
     if (accountIdentifier == nil) {
       ok = 0;
       strappy_set_error(&strappyError,
@@ -1929,99 +1864,12 @@ static void StrappyStoreChanged(void)
                 context:(id)operationContext
                 error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return nil;
-  }
-
-  StrappyChatGPTAuthorizationCancellationContext cancellationContext;
-  strappy_openai_oauth_configuration configuration;
-  strappy_openai_oauth_credentials credentials;
-  StrappyKeychain *keychain;
-  NSObject *credentialLock;
-  NSString *currentRefreshToken;
-  NSString *currentAccountIdentifier;
-  NSString *accessToken;
-  NSString *nextRefreshToken;
-  NSString *accountIdentifier;
-  char *strappyError;
-  int ok;
-
-  if (([providerAccountIdentifier length] == 0U) ||
-      ([expectedAccountIdentifier length] == 0U) || (observer == nil)) {
-    if (error != nil) {
-      *error = [self errorFromCString:
-        "ChatGPT refresh inputs are incomplete."];
-    }
-    return nil;
-  }
-  cancellationContext.observer = observer;
-  cancellationContext.context = operationContext;
-  strappy_openai_oauth_default_configuration(&configuration);
-  strappy_openai_oauth_credentials_init(&credentials);
-  keychain = [StrappyKeychain sharedKeychain];
-  credentialLock = [keychain
-    credentialLockForProviderIdentifier:@"openai_chatgpt"
-    providerAccountIdentifier:providerAccountIdentifier];
-  currentRefreshToken = nil;
-  currentAccountIdentifier = nil;
-  accountIdentifier = nil;
-  strappyError = NULL;
-  ok = 0;
-  @synchronized(credentialLock) {
-    if (![keychain loadChatGPTAccessToken:NULL
-                                refreshToken:&currentRefreshToken
-                           accountIdentifier:&currentAccountIdentifier
-                        expiresAtMilliseconds:NULL
-                   providerAccountIdentifier:providerAccountIdentifier]) {
-      strappy_set_error(&strappyError,
-                        "Stored ChatGPT credentials are unavailable.");
-    } else if (![currentAccountIdentifier
-                 isEqualToString:expectedAccountIdentifier]) {
-      strappy_set_error(&strappyError,
-                        "The refreshed ChatGPT credential changed accounts.");
-    } else {
-      ok = strappy_openai_oauth_refresh_credentials(
-        &configuration, [currentRefreshToken UTF8String], &credentials,
-        StrappyChatGPTAuthorizationShouldCancel, &cancellationContext,
-        &strappyError);
-      if (ok) {
-        accessToken = [NSString stringWithUTF8String:credentials.access_token];
-        nextRefreshToken = [NSString stringWithUTF8String:
-          credentials.refresh_token];
-        accountIdentifier = [NSString stringWithUTF8String:
-          credentials.account_id];
-        if ((accountIdentifier == nil) ||
-            ![accountIdentifier isEqualToString:expectedAccountIdentifier]) {
-          accountIdentifier = nil;
-          ok = 0;
-          strappy_set_error(&strappyError,
-            "The refreshed ChatGPT credential changed accounts.");
-        } else if ((accessToken == nil) || (nextRefreshToken == nil) ||
-                   StrappyChatGPTAuthorizationShouldCancel(
-                     &cancellationContext) ||
-                   ![keychain saveChatGPTAccessToken:accessToken
-                                          refreshToken:nextRefreshToken
-                                     accountIdentifier:accountIdentifier
-                                  expiresAtMilliseconds:
-                                    credentials.expires_at_milliseconds
-                             providerAccountIdentifier:
-                               providerAccountIdentifier]) {
-          accountIdentifier = nil;
-          ok = 0;
-          strappy_set_error(&strappyError,
-            "The Keychain refused the refreshed ChatGPT credential write.");
-        }
-      }
-    }
-  }
-  if (!ok && (error != nil)) {
-    *error = [self errorFromCString:(strappyError != NULL) ? strappyError :
-      "ChatGPT credential refresh failed."];
-  }
-  strappy_free_string(strappyError);
-  strappy_openai_oauth_credentials_destroy(&credentials);
-  return accountIdentifier;
+  (void)observer; (void)operationContext;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"refresh_oauth",@"action",
+    StrappyText(providerAccountIdentifier),@"id",
+    StrappyText(expectedAccountIdentifier),@"identity",
+    nil],error);
 }
 
 + (BOOL)initializeSessionStoreAndPrepareCredentials:(BOOL)prepareCredentials
@@ -2332,100 +2180,21 @@ static void StrappyStoreChanged(void)
                                                         error:
                     (NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return nil;
-  }
-
-  NSString *databasePath;
-  NSArray *accounts;
-  NSString *displayName;
-  char *accountID;
-  char *strappyError;
-  strappy_provider_account_record record;
+  NSArray *accounts = [self providerAccountCatalogWithError:error];
+  NSString *identifier;
+  NSEnumerator *enumerator;
   NSDictionary *account;
-
-  if (![providerIdentifier isKindOfClass:[NSString class]] ||
-      ([providerIdentifier length] == 0U)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:
-        "Provider identifier is missing."];
-    }
-    return nil;
-  }
-  if (strappy_provider_find([providerIdentifier UTF8String]) == NULL) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:
-        "Provider account type is not registered."];
-    }
-    return nil;
-  }
-  accounts = [StrappySession providerAccountCatalogWithError:error];
-  if (accounts == nil) {
-    return nil;
-  }
-  displayName = [StrappySession
-    defaultProviderAccountNameForProviderIdentifier:providerIdentifier
-                                           accounts:accounts];
-  databasePath = [StrappySession sessionsDatabasePath];
-  accountID = NULL;
-  strappyError = NULL;
-  if (!strappy_db_create_provider_account(
-        [databasePath fileSystemRepresentation],
-        [providerIdentifier UTF8String], [displayName UTF8String], NULL,
-        &accountID, &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return nil;
-  }
-  strappy_provider_account_record_init(&record);
-  account = nil;
-  if (strappy_db_get_provider_account([databasePath fileSystemRepresentation],
-                                      accountID, &record, &strappyError)) {
-    account = [StrappySession dictionaryFromProviderAccountRecord:&record];
-  }
-  if (account != nil) {
-    NSString *accountIdentifier;
-    StrappyKeychain *keychain;
-    NSObject *credentialLock;
-
-    accountIdentifier = [account objectForKey:@"id"];
-    keychain = [StrappyKeychain sharedKeychain];
-    credentialLock = [keychain
-      credentialLockForProviderIdentifier:providerIdentifier
-      providerAccountIdentifier:accountIdentifier];
-    @synchronized(credentialLock) {
-      if (![keychain saveDisplayName:displayName
-               forProviderIdentifier:providerIdentifier
-           providerAccountIdentifier:accountIdentifier]) {
-        (void)strappy_db_archive_provider_account(
-          [databasePath fileSystemRepresentation], accountID, NULL);
-        account = nil;
-        strappy_set_error(&strappyError,
-                          "Could not save the account name in Keychain.");
-      }
-    }
-  }
-  strappy_provider_account_record_destroy(&record);
-  free(accountID);
-  if (account == nil) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return nil;
-  }
-  strappy_free_string(strappyError);
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappyProviderAccountsDidChangeNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  [account objectForKey:@"id"], @"account_id",
-                  @"created", @"action",
-                  nil]];
-  return account;
+  if (!accounts) return nil;
+  identifier = StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"create_account",@"action",
+    StrappyText(providerIdentifier),@"id",
+    [self defaultProviderAccountNameForProviderIdentifier:providerIdentifier accounts:accounts],@"name",
+    nil],error);
+  if (!identifier) return nil;
+  enumerator = [[self providerAccountCatalogWithError:error] objectEnumerator];
+  while ((account = [enumerator nextObject]) != nil)
+    if ([[account objectForKey:@"id"] isEqualToString:identifier]) return account;
+  return nil;
 }
 
 + (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
@@ -2434,94 +2203,13 @@ static void StrappyStoreChanged(void)
                         maxOutputTokens:(long long)maxOutputTokens
                                   error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  NSString *trimmedName;
-  NSString *trimmedEndpoint;
-  strappy_provider_account_record existingRecord;
-  NSString *providerIdentifier;
-  NSString *previousName;
-  StrappyKeychain *keychain;
-  NSObject *credentialLock;
-  char *strappyError;
-
-  trimmedName = [displayName stringByTrimmingCharactersInSet:
-    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  trimmedEndpoint = [responsesEndpoint stringByTrimmingCharactersInSet:
-    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if (([providerAccountIdentifier length] == 0U) ||
-      ([trimmedName length] == 0U) || (maxOutputTokens < 0LL)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:
-        "Provider account update is incomplete."];
-    }
-    return NO;
-  }
-  databasePath = [StrappySession sessionsDatabasePath];
-  strappy_provider_account_record_init(&existingRecord);
-  strappyError = NULL;
-  if (!strappy_db_get_provider_account(
-        [databasePath fileSystemRepresentation],
-        [providerAccountIdentifier UTF8String], &existingRecord,
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_provider_account_record_destroy(&existingRecord);
-    strappy_free_string(strappyError);
-    return NO;
-  }
-  providerIdentifier = [NSString stringWithUTF8String:
-    existingRecord.provider_id];
-  previousName = [NSString stringWithUTF8String:existingRecord.display_name];
-  keychain = [StrappyKeychain sharedKeychain];
-  credentialLock = [keychain
-    credentialLockForProviderIdentifier:providerIdentifier
-    providerAccountIdentifier:providerAccountIdentifier];
-  @synchronized(credentialLock) {
-    if (![keychain saveDisplayName:trimmedName
-             forProviderIdentifier:providerIdentifier
-         providerAccountIdentifier:providerAccountIdentifier]) {
-      if (error != nil) {
-        *error = [StrappySession errorFromCString:
-          "Could not save the account name in Keychain."];
-      }
-      strappy_provider_account_record_destroy(&existingRecord);
-      strappy_free_string(strappyError);
-      return NO;
-    }
-  }
-  if (!strappy_db_update_provider_account(
-        [databasePath fileSystemRepresentation],
-        [providerAccountIdentifier UTF8String], [trimmedName UTF8String],
-        StrappySessionOptionalCString(trimmedEndpoint), maxOutputTokens,
-        &strappyError)) {
-    @synchronized(credentialLock) {
-      (void)[keychain saveDisplayName:previousName
-               forProviderIdentifier:providerIdentifier
-           providerAccountIdentifier:providerAccountIdentifier];
-    }
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_provider_account_record_destroy(&existingRecord);
-    strappy_free_string(strappyError);
-    return NO;
-  }
-  strappy_provider_account_record_destroy(&existingRecord);
-  strappy_free_string(strappyError);
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappyProviderAccountsDidChangeNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  providerAccountIdentifier, @"account_id",
-                  @"updated", @"action",
-                  nil]];
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"update_account",@"action",
+    StrappyText(providerAccountIdentifier),@"id",
+    StrappyText(displayName),@"name",
+    StrappyText(responsesEndpoint),@"endpoint",
+    StrappyNumber(maxOutputTokens),@"output",
+    nil],error) != nil;
 }
 
 + (NSString *)bearerTokenForProviderAccountIdentifier:
@@ -2579,177 +2267,23 @@ static void StrappyStoreChanged(void)
                             bearerToken:(NSString *)bearerToken
                                   error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  strappy_provider_account_record record;
-  NSString *providerIdentifier;
-  NSString *trimmedToken;
-  NSString *previousToken;
-  StrappyKeychain *keychain;
-  NSObject *credentialLock;
-  char *strappyError;
-  BOOL credentialSaved;
-  BOOL hadPreviousToken;
-
-  databasePath = [self sessionsDatabasePath];
-  strappy_provider_account_record_init(&record);
-  strappyError = NULL;
-  if (!strappy_db_get_provider_account([databasePath fileSystemRepresentation],
-                                       [providerAccountIdentifier UTF8String],
-                                       &record, &strappyError)) {
-    if (error != nil) {
-      *error = [self errorFromCString:strappyError];
-    }
-    strappy_provider_account_record_destroy(&record);
-    strappy_free_string(strappyError);
-    return NO;
-  }
-  providerIdentifier = [NSString stringWithUTF8String:record.provider_id];
-  strappy_provider_account_record_destroy(&record);
-  strappy_free_string(strappyError);
-  if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
-    return [self updateProviderAccountIdentifier:providerAccountIdentifier
-                                     displayName:displayName
-                               responsesEndpoint:responsesEndpoint
-                                 maxOutputTokens:maxOutputTokens
-                                           error:error];
-  }
-  trimmedToken = [bearerToken stringByTrimmingCharactersInSet:
-    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-  if ([providerIdentifier isEqualToString:@"openrouter"] &&
-      ([trimmedToken length] == 0U)) {
-    if (error != nil) {
-      *error = [self errorFromCString:"OpenRouter API key is required."];
-    }
-    return NO;
-  }
-  keychain = [StrappyKeychain sharedKeychain];
-  credentialLock = [keychain
-    credentialLockForProviderIdentifier:providerIdentifier
-    providerAccountIdentifier:providerAccountIdentifier];
-  previousToken = nil;
-  @synchronized(credentialLock) {
-    hadPreviousToken = [keychain loadBearerToken:&previousToken
-      forProviderIdentifier:providerIdentifier
-      providerAccountIdentifier:providerAccountIdentifier];
-    credentialSaved = ([trimmedToken length] > 0U) ?
-      [keychain saveBearerToken:trimmedToken
-          forProviderIdentifier:providerIdentifier
-          providerAccountIdentifier:providerAccountIdentifier] :
-      [keychain deleteBearerTokenForProviderIdentifier:providerIdentifier
-          providerAccountIdentifier:providerAccountIdentifier];
-  }
-  if (!credentialSaved) {
-    if (error != nil) {
-      *error = [self errorFromCString:
-        "The Keychain refused the provider credential write."];
-    }
-    return NO;
-  }
-  if ([self updateProviderAccountIdentifier:providerAccountIdentifier
-                                displayName:displayName
-                          responsesEndpoint:responsesEndpoint
-                            maxOutputTokens:maxOutputTokens
-                                      error:error]) {
-    return YES;
-  }
-  @synchronized(credentialLock) {
-    if (hadPreviousToken) {
-      (void)[keychain saveBearerToken:previousToken
-        forProviderIdentifier:providerIdentifier
-        providerAccountIdentifier:providerAccountIdentifier];
-    } else {
-      (void)[keychain deleteBearerTokenForProviderIdentifier:
-        providerIdentifier
-        providerAccountIdentifier:providerAccountIdentifier];
-    }
-  }
-  return NO;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"update_account",@"action",
+    StrappyText(providerAccountIdentifier),@"id",
+    StrappyText(displayName),@"name",
+    StrappyText(responsesEndpoint),@"endpoint",
+    StrappyNumber(maxOutputTokens),@"output",
+    StrappyText(bearerToken),@"token",
+    nil],error) != nil;
 }
 
 + (BOOL)archiveProviderAccountIdentifier:(NSString *)providerAccountIdentifier
                                     error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  strappy_provider_account_record record;
-  NSString *providerIdentifier;
-  StrappyKeychain *keychain;
-  NSObject *credentialLock;
-  char *strappyError;
-  BOOL credentialDeleted;
-
-  if ([providerAccountIdentifier length] == 0U) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:
-        "Provider account identifier is missing."];
-    }
-    return NO;
-  }
-  databasePath = [StrappySession sessionsDatabasePath];
-  strappy_provider_account_record_init(&record);
-  strappyError = NULL;
-  if (!strappy_db_get_provider_account([databasePath fileSystemRepresentation],
-                                       [providerAccountIdentifier UTF8String],
-                                       &record, &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_provider_account_record_destroy(&record);
-    strappy_free_string(strappyError);
-    return NO;
-  }
-  providerIdentifier = [NSString stringWithUTF8String:record.provider_id];
-  strappy_provider_account_record_destroy(&record);
-  keychain = [StrappyKeychain sharedKeychain];
-  credentialLock = [keychain
-    credentialLockForProviderIdentifier:providerIdentifier
-    providerAccountIdentifier:providerAccountIdentifier];
-  @synchronized(credentialLock) {
-    if ([providerIdentifier isEqualToString:@"openai_chatgpt"]) {
-      credentialDeleted = [keychain
-        deleteChatGPTCredentialsForProviderAccountIdentifier:
-          providerAccountIdentifier];
-    } else {
-      credentialDeleted = [keychain
-        deleteBearerTokenForProviderIdentifier:providerIdentifier
-        providerAccountIdentifier:providerAccountIdentifier];
-    }
-  }
-  if (!credentialDeleted) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:
-        "The Keychain refused to remove the account credential."];
-    }
-    return NO;
-  }
-  strappyError = NULL;
-  if (!strappy_db_archive_provider_account(
-        [databasePath fileSystemRepresentation],
-        [providerAccountIdentifier UTF8String], &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return NO;
-  }
-  strappy_free_string(strappyError);
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappyProviderAccountsDidChangeNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  providerAccountIdentifier, @"account_id",
-                  @"archived", @"action",
-                  nil]];
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"archive_account",@"action",
+    StrappyText(providerAccountIdentifier),@"id",
+    nil],error) != nil;
 }
 
 + (NSArray *)modelCatalogFromList:(const strappy_model_record_list *)list
@@ -3137,54 +2671,7 @@ static void StrappyStoreChanged(void)
 + (BOOL)setDefaultModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  char *strappyError;
-  int ok;
-
-  if (![modelIdentifier isKindOfClass:[NSString class]] ||
-      ([modelIdentifier length] == 0U)) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Model is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:9
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  ok = strappy_session_set_default_model([databasePath UTF8String],
-                                         [modelIdentifier UTF8String],
-                                         &strappyError);
-  if (!ok) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionModelCatalogDidChangeNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  modelIdentifier, @"default_model_id",
-                  modelIdentifier, @"selected_model_id",
-                  nil]];
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:@"default_model",@"action",StrappyText(modelIdentifier),@"id",nil],error) != nil;
 }
 
 + (NSString *)defaultOpenRouterModelIdentifierWithError:(NSError **)error
@@ -3195,12 +2682,7 @@ static void StrappyStoreChanged(void)
 + (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                       error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  return [StrappySession setDefaultModelIdentifier:modelIdentifier error:error];
+  return [self setDefaultModelIdentifier:modelIdentifier error:error];
 }
 
 + (StrappySessionOptions *)defaultSessionOptionsWithError:(NSError **)error
@@ -3261,167 +2743,19 @@ static void StrappyStoreChanged(void)
                        changedFields:(StrappySessionOptionMask)changedFields
                                error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  NSString *resourcePath;
-  NSString *workingDirectory;
-  NSArray *workingDirectories;
-  StrappySessionOptions *savedOptions;
-  char *strappyError;
-  strappy_session_option_mask actualChangedFields;
-  strappy_session_options input;
-  strappy_session_options saved;
-
-  if (![options isKindOfClass:[StrappySessionOptions class]] ||
-      ((changedFields & ~((StrappySessionOptionMask)StrappySessionOptionAll)) !=
-       0U)) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Default session options are invalid.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return NO;
-  }
-
-  workingDirectories = [StrappySession codingWorkingDirectoryPaths];
-  workingDirectory = ([workingDirectories count] > 0U) ?
-    [workingDirectories objectAtIndex:0U] : @"";
-  if (([workingDirectory length] == 0U) ||
-      (((changedFields & StrappySessionOptionWorkingDirectory) != 0U) &&
-       ![workingDirectories containsObject:[options workingDirectory]])) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:15
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Working directory selection is invalid.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-  resourcePath = nil;
-  if ((changedFields & StrappySessionOptionAssistantSet) != 0U) {
-    resourcePath = [StrappySession guidanceResourceDirectoryWithError:error];
-    if (resourcePath == nil) {
-      return NO;
-    }
-  }
-
-  strappy_session_options_init(&input);
-  if (!StrappySessionRecordFromOptions(options, &input, error)) {
-    return NO;
-  }
-  strappy_session_options_init(&saved);
-  actualChangedFields = 0U;
-  strappyError = NULL;
-  if (!strappy_session_update_default_options(
-        [databasePath UTF8String],
-        [workingDirectory fileSystemRepresentation],
-        StrappySessionOptionalCString(resourcePath),
-        &input,
-        (strappy_session_option_mask)changedFields,
-        &saved,
-        &actualChangedFields,
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    strappy_session_options_destroy(&saved);
-    return NO;
-  }
-
-  savedOptions = StrappySessionOptionsFromRecord(&saved);
-  strappy_session_options_destroy(&saved);
-  if (savedOptions == nil) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Saved default session options could not be loaded.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return NO;
-  }
-  if ((actualChangedFields & StrappySessionOptionModel) != 0U) {
-    NSString *modelIdentifier;
-
-    modelIdentifier = [savedOptions modelIdentifier];
-    [[NSNotificationCenter defaultCenter]
-      postNotificationName:StrappySessionModelCatalogDidChangeNotification
-                    object:self
-                  userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                    modelIdentifier, @"default_model_id",
-                    modelIdentifier, @"selected_model_id",
-                    nil]];
-  }
-  return YES;
+  NSDictionary *command = StrappyOptionsCommand(options,changedFields,nil,error);
+  return command && StrappyServiceCommand(STRAPPY_IPC_MUTATE,command,error) != nil;
 }
 
 + (BOOL)setModelAllowed:(BOOL)allowed
      forModelIdentifier:(NSString *)modelIdentifier
                   error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  char *strappyError;
-  int ok;
-
-  if (![modelIdentifier isKindOfClass:[NSString class]] ||
-      ([modelIdentifier length] == 0U)) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Model is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:9
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  ok = strappy_session_set_model_allowed([databasePath UTF8String],
-                                         [modelIdentifier UTF8String],
-                                         allowed ? 1 : 0,
-                                         &strappyError);
-  if (!ok) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionModelCatalogDidChangeNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  modelIdentifier, @"model_id",
-                  [NSNumber numberWithBool:(allowed ? YES : NO)], @"allowed",
-                  nil]];
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"approve_model",@"action",
+    StrappyText(modelIdentifier),@"id",
+    StrappyNumber(allowed),@"value",
+    nil],error) != nil;
 }
 
 + (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
@@ -3431,77 +2765,6 @@ static void StrappyStoreChanged(void)
   return [StrappySession setModelAllowed:allowed
                       forModelIdentifier:modelIdentifier
                                    error:error];
-}
-
-+ (BOOL)manualModelInput:(strappy_manual_model_input *)input
-             wireModelID:(NSString *)wireModelID
-             displayName:(NSString *)displayName
-      contextWindowTokens:(long long)contextWindowTokens
-          maxOutputTokens:(long long)maxOutputTokens
-        reasoningEnabled:(BOOL)reasoningEnabled
-       imageInputEnabled:(BOOL)imageInputEnabled
-   localFunctionsEnabled:(BOOL)localFunctionsEnabled
-       inputPricePerToken:(NSString *)inputPricePerToken
-      outputPricePerToken:(NSString *)outputPricePerToken
-   cacheReadPricePerToken:(NSString *)cacheReadPricePerToken
-  cacheWritePricePerToken:(NSString *)cacheWritePricePerToken
-                    error:(NSError **)error
-{
-  NSArray *prices;
-  NSUInteger priceIndex;
-
-  if ((input == NULL) ||
-      ![wireModelID isKindOfClass:[NSString class]] ||
-      ((displayName != nil) &&
-       ![displayName isKindOfClass:[NSString class]]) ||
-      ([wireModelID length] == 0U) || ([wireModelID length] > 128U) ||
-      ([displayName length] > 160U) ||
-      (contextWindowTokens < 0LL) || (maxOutputTokens < 0LL)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:
-        "Manual model metadata is invalid."];
-    }
-    return NO;
-  }
-  prices = [NSArray arrayWithObjects:
-    (inputPricePerToken != nil) ? (id)inputPricePerToken : (id)[NSNull null],
-    (outputPricePerToken != nil) ? (id)outputPricePerToken : (id)[NSNull null],
-    (cacheReadPricePerToken != nil) ?
-      (id)cacheReadPricePerToken : (id)[NSNull null],
-    (cacheWritePricePerToken != nil) ?
-      (id)cacheWritePricePerToken : (id)[NSNull null],
-    nil];
-  for (priceIndex = 0U; priceIndex < [prices count]; priceIndex++) {
-    id price;
-
-    price = [prices objectAtIndex:priceIndex];
-    if (![price isKindOfClass:[NSNull class]] &&
-        (![price isKindOfClass:[NSString class]] ||
-         ([(NSString *)price length] > 64U))) {
-      if (error != nil) {
-        *error = [StrappySession errorFromCString:
-          "Manual model pricing is invalid."];
-      }
-      return NO;
-    }
-  }
-  input->wire_model_id = [wireModelID UTF8String];
-  input->display_name = ([displayName length] > 0U) ?
-    [displayName UTF8String] : NULL;
-  input->context_window_tokens = contextWindowTokens;
-  input->max_output_tokens = maxOutputTokens;
-  input->reasoning_enabled = reasoningEnabled ? 1 : 0;
-  input->image_input_enabled = imageInputEnabled ? 1 : 0;
-  input->local_functions_enabled = localFunctionsEnabled ? 1 : 0;
-  input->pricing_prompt = ([inputPricePerToken length] > 0U) ?
-    [inputPricePerToken UTF8String] : NULL;
-  input->pricing_completion = ([outputPricePerToken length] > 0U) ?
-    [outputPricePerToken UTF8String] : NULL;
-  input->pricing_input_cache_read = ([cacheReadPricePerToken length] > 0U) ?
-    [cacheReadPricePerToken UTF8String] : NULL;
-  input->pricing_input_cache_write = ([cacheWritePricePerToken length] > 0U) ?
-    [cacheWritePricePerToken UTF8String] : NULL;
-  return YES;
 }
 
 + (NSString *)createManualModelForProviderIdentifier:
@@ -3531,59 +2794,21 @@ static void StrappyStoreChanged(void)
                                                        error:
                 (NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return nil;
-  }
-
-  NSString *databasePath;
-  NSString *modelIdentifier;
-  strappy_manual_model_input input;
-  char *modelID;
-  char *strappyError;
-
-  if (![providerIdentifier isKindOfClass:[NSString class]] ||
-      ([providerIdentifier length] == 0U) ||
-      ![self manualModelInput:&input
-                  wireModelID:wireModelID
-                  displayName:displayName
-           contextWindowTokens:contextWindowTokens
-               maxOutputTokens:maxOutputTokens
-             reasoningEnabled:reasoningEnabled
-            imageInputEnabled:imageInputEnabled
-        localFunctionsEnabled:localFunctionsEnabled
-            inputPricePerToken:inputPricePerToken
-           outputPricePerToken:outputPricePerToken
-        cacheReadPricePerToken:cacheReadPricePerToken
-       cacheWritePricePerToken:cacheWritePricePerToken
-                         error:error]) {
-    return nil;
-  }
-  databasePath = [self sessionsDatabasePath];
-  if (![self validateSessionStoreForDatabasePath:databasePath error:error]) {
-    return nil;
-  }
-  modelID = NULL;
-  strappyError = NULL;
-  if (!strappy_db_create_manual_model([databasePath fileSystemRepresentation],
-                                      [providerIdentifier UTF8String],
-                                      &input, &modelID, &strappyError)) {
-    if (error != nil) {
-      *error = [self errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return nil;
-  }
-  modelIdentifier = (modelID != NULL) ?
-    [NSString stringWithUTF8String:modelID] : nil;
-  strappy_session_free_string(modelID);
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionModelCatalogDidChangeNotification
-                  object:self
-                userInfo:(modelIdentifier != nil) ?
-      [NSDictionary dictionaryWithObjectsAndKeys:
-        modelIdentifier, @"model_id", @"created", @"action", nil] : nil];
-  return modelIdentifier;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"create_model",@"action",
+    StrappyText(providerIdentifier),@"id",
+    StrappyText(wireModelID),@"wire",
+    StrappyText(displayName),@"name",
+    StrappyNumber(contextWindowTokens),@"context",
+    StrappyNumber(maxOutputTokens),@"output",
+    StrappyNumber(reasoningEnabled),@"reasoning",
+    StrappyNumber(imageInputEnabled),@"image",
+    StrappyNumber(localFunctionsEnabled),@"functions",
+    StrappyText(inputPricePerToken),@"price_input",
+    StrappyText(outputPricePerToken),@"price_output",
+    StrappyText(cacheReadPricePerToken),@"price_read",
+    StrappyText(cacheWritePricePerToken),@"price_write",
+    nil],error);
 }
 
 + (BOOL)updateManualModelForProviderIdentifier:
@@ -3613,52 +2838,21 @@ static void StrappyStoreChanged(void)
                                                    error:
             (NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  strappy_manual_model_input input;
-  char *strappyError;
-
-  if (![providerIdentifier isKindOfClass:[NSString class]] ||
-      ([providerIdentifier length] == 0U) ||
-      ![self manualModelInput:&input
-                  wireModelID:wireModelID
-                  displayName:displayName
-           contextWindowTokens:contextWindowTokens
-               maxOutputTokens:maxOutputTokens
-             reasoningEnabled:reasoningEnabled
-            imageInputEnabled:imageInputEnabled
-        localFunctionsEnabled:localFunctionsEnabled
-            inputPricePerToken:inputPricePerToken
-           outputPricePerToken:outputPricePerToken
-        cacheReadPricePerToken:cacheReadPricePerToken
-       cacheWritePricePerToken:cacheWritePricePerToken
-                         error:error]) {
-    return NO;
-  }
-  databasePath = [self sessionsDatabasePath];
-  if (![self validateSessionStoreForDatabasePath:databasePath error:error]) {
-    return NO;
-  }
-  strappyError = NULL;
-  if (!strappy_db_update_manual_model([databasePath fileSystemRepresentation],
-                                      [providerIdentifier UTF8String],
-                                      &input, &strappyError)) {
-    if (error != nil) {
-      *error = [self errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionModelCatalogDidChangeNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  wireModelID, @"wire_model_id", @"updated", @"action", nil]];
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"update_model",@"action",
+    StrappyText(providerIdentifier),@"id",
+    StrappyText(wireModelID),@"wire",
+    StrappyText(displayName),@"name",
+    StrappyNumber(contextWindowTokens),@"context",
+    StrappyNumber(maxOutputTokens),@"output",
+    StrappyNumber(reasoningEnabled),@"reasoning",
+    StrappyNumber(imageInputEnabled),@"image",
+    StrappyNumber(localFunctionsEnabled),@"functions",
+    StrappyText(inputPricePerToken),@"price_input",
+    StrappyText(outputPricePerToken),@"price_output",
+    StrappyText(cacheReadPricePerToken),@"price_read",
+    StrappyText(cacheWritePricePerToken),@"price_write",
+    nil],error) != nil;
 }
 
 + (BOOL)archiveManualModelForProviderIdentifier:
@@ -3668,226 +2862,31 @@ static void StrappyStoreChanged(void)
                                                     error:
             (NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  char *strappyError;
-
-  if (![providerIdentifier isKindOfClass:[NSString class]] ||
-      ([providerIdentifier length] == 0U) ||
-      ![wireModelID isKindOfClass:[NSString class]] ||
-      ([wireModelID length] == 0U)) {
-    if (error != nil) {
-      *error = [self errorFromCString:"Manual model selection is invalid."];
-    }
-    return NO;
-  }
-  databasePath = [self sessionsDatabasePath];
-  if (![self validateSessionStoreForDatabasePath:databasePath error:error]) {
-    return NO;
-  }
-  strappyError = NULL;
-  if (!strappy_db_archive_manual_model([databasePath fileSystemRepresentation],
-                                       [providerIdentifier UTF8String],
-                                       [wireModelID UTF8String],
-                                       &strappyError)) {
-    if (error != nil) {
-      *error = [self errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionModelCatalogDidChangeNotification
-                  object:self
-                userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
-                  wireModelID, @"wire_model_id", @"archived", @"action", nil]];
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"archive_model",@"action",
+    StrappyText(providerIdentifier),@"id",
+    StrappyText(wireModelID),@"wire",
+    nil],error) != nil;
 }
 
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+  NSEnumerator *accounts = [[self providerAccountCatalogWithError:error] objectEnumerator];
+  NSDictionary *account;
+  NSString *identifier = nil;
+  while ((account = [accounts nextObject]) != nil) {
+    if ([[account objectForKey:@"provider_id"] isEqualToString:@"openrouter"] &&
+        [[account objectForKey:@"available"] boolValue]) { identifier = [account objectForKey:@"id"]; break; }
+  }
+  if (!identifier) {
+    if (error) *error = [self errorFromCString:"Add an OpenRouter account and API key before fetching models."];
     return NO;
   }
-
-  NSArray *accounts;
-  NSString *designatedAccountIdentifier;
-  NSString *providerAccountIdentifier;
-  NSString *databasePath;
-  NSUInteger index;
-  BOOL hasOpenRouterAccount;
-
-  @synchronized(self) {
-    if (StrappySessionModelCatalogRefreshInFlight) {
-      if (error != nil) {
-        NSDictionary *userInfo =
-          [NSDictionary dictionaryWithObject:NSLocalizedString(@"Model refresh is already running.", nil)
-                                      forKey:NSLocalizedDescriptionKey];
-        *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                     code:10
-                                 userInfo:userInfo];
-      }
-      return NO;
-    }
-  }
-
-  accounts = [StrappySession verifiedProviderAccountCatalogWithError:error];
-  if (accounts == nil) {
-    return NO;
-  }
-  designatedAccountIdentifier = [StrappySession
-    designatedProviderAccountIdentifierForProviderIdentifier:@"openrouter"
-    error:nil];
-  providerAccountIdentifier = nil;
-  hasOpenRouterAccount = NO;
-  for (index = 0U; index < [accounts count]; index++) {
-    NSDictionary *account;
-    NSString *accountIdentifier;
-
-    account = [accounts objectAtIndex:index];
-    if (![[account objectForKey:@"provider_id"]
-          isEqualToString:@"openrouter"]) {
-      continue;
-    }
-    hasOpenRouterAccount = YES;
-    if (![[account objectForKey:@"available"] boolValue]) {
-      continue;
-    }
-    accountIdentifier = [account objectForKey:@"id"];
-    if (providerAccountIdentifier == nil) {
-      providerAccountIdentifier = accountIdentifier;
-    }
-    if ([accountIdentifier isEqualToString:designatedAccountIdentifier]) {
-      providerAccountIdentifier = accountIdentifier;
-      break;
-    }
-  }
-  if ([providerAccountIdentifier length] == 0U) {
-    NSString *message;
-
-    message = hasOpenRouterAccount ? NSLocalizedString(
-      @"Enter an API key for an OpenRouter account before fetching models.",
-      nil) : NSLocalizedString(
-      @"Add an OpenRouter account before fetching models.", nil);
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:11
-                               userInfo:[NSDictionary dictionaryWithObject:message
-                                         forKey:NSLocalizedDescriptionKey]];
-    }
-    return NO;
-  }
-
-  @synchronized(self) {
-    if (StrappySessionModelCatalogRefreshInFlight) {
-      if (error != nil) {
-        *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                     code:10
-                                 userInfo:[NSDictionary dictionaryWithObject:
-                                   NSLocalizedString(@"Model refresh is already running.", nil)
-                                   forKey:NSLocalizedDescriptionKey]];
-      }
-      return NO;
-    }
-    StrappySessionModelCatalogRefreshInFlight = YES;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    @synchronized(self) {
-      StrappySessionModelCatalogRefreshInFlight = NO;
-    }
-    return NO;
-  }
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification
-                  object:self];
-  [NSThread detachNewThreadSelector:@selector(refreshOpenRouterModelCatalogInBackground:)
-                           toTarget:self
-                         withObject:providerAccountIdentifier];
+  if (StrappyServiceCommand(STRAPPY_IPC_REFRESH_CATALOG,
+      [NSDictionary dictionaryWithObject:identifier forKey:@"id"],error) == nil) return NO;
+  @synchronized(self) { StrappySessionModelCatalogRefreshInFlight = YES; }
+  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification object:self];
   return YES;
-}
-
-+ (void)refreshOpenRouterModelCatalogInBackground:(id)ignored
-{
-  NSAutoreleasePool *pool;
-  NSString *databasePath;
-  NSString *apiEndpoint;
-  NSString *apiToken;
-  NSString *providerAccountIdentifier;
-  NSMutableDictionary *result;
-  char *strappyError;
-  int ok;
-
-  pool = [[NSAutoreleasePool alloc] init];
-  databasePath = [StrappySession sessionsDatabasePath];
-  providerAccountIdentifier = [ignored isKindOfClass:[NSString class]] ?
-    ignored : nil;
-  apiEndpoint = nil;
-  apiToken = nil;
-  if ([providerAccountIdentifier length] > 0U) {
-    strappy_provider_account_record account;
-
-    strappy_provider_account_record_init(&account);
-    if (strappy_db_get_provider_account([databasePath fileSystemRepresentation],
-                                        [providerAccountIdentifier UTF8String],
-                                        &account,
-                                        NULL)) {
-      apiEndpoint = (account.responses_endpoint != NULL) ?
-        [NSString stringWithUTF8String:account.responses_endpoint] : nil;
-    }
-    strappy_provider_account_record_destroy(&account);
-    @synchronized([[StrappyKeychain sharedKeychain]
-      credentialLockForProviderIdentifier:@"openrouter"
-      providerAccountIdentifier:providerAccountIdentifier]) {
-      [[StrappyKeychain sharedKeychain]
-        loadBearerToken:&apiToken
-        forProviderIdentifier:@"openrouter"
-        providerAccountIdentifier:providerAccountIdentifier];
-    }
-  }
-  if ([apiEndpoint length] == 0U) {
-    apiEndpoint = [[StrappyKeychain sharedKeychain] apiEndpoint];
-  }
-  if ([apiToken length] == 0U) {
-    apiToken = [[StrappyKeychain sharedKeychain] apiToken];
-  }
-  result = [[NSMutableDictionary alloc] init];
-
-  strappyError = NULL;
-  ok = strappy_model_catalog_update_for_account(
-    StrappySessionOptionalCString(providerAccountIdentifier),
-    NULL,
-    StrappySessionOptionalCString(apiEndpoint),
-    StrappySessionOptionalCString(apiToken),
-    NULL,
-    [databasePath UTF8String],
-    &strappyError);
-  if (!ok) {
-    NSError *error;
-    NSString *message;
-
-    error = [StrappySession errorFromCString:strappyError];
-    message = [error localizedDescription];
-    if ([message length] == 0U) {
-      message = NSLocalizedString(@"Model refresh failed.", nil);
-    }
-    [result setObject:message forKey:@"error"];
-  }
-  strappy_session_free_string(strappyError);
-
-  [self performSelectorOnMainThread:@selector(openRouterModelCatalogRefreshDidFinish:)
-                         withObject:result
-                      waitUntilDone:NO];
-  [result release];
-  [pool release];
 }
 
 + (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result
@@ -3919,50 +2918,11 @@ static void StrappyStoreChanged(void)
 
 + (StrappySession *)createSessionWithError:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return nil;
-  }
-
-  NSString *databasePath;
-  NSString *workingDirectory;
-  NSArray *workingDirectories;
-  char *strappyError;
-  long long sessionId;
-  NSNumber *sessionIdentifier;
-  NSDictionary *summary;
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return nil;
-  }
-
-  workingDirectories = [StrappySession codingWorkingDirectoryPaths];
-  workingDirectory = ([workingDirectories count] > 0U) ?
-    [workingDirectories objectAtIndex:0U] : @"";
-  sessionId = 0;
-  strappyError = NULL;
-  if (!strappy_session_create_with_working_directory(
-        [databasePath UTF8String],
-        [workingDirectory fileSystemRepresentation],
-        &sessionId,
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return nil;
-  }
-
-  sessionIdentifier = [NSNumber numberWithLongLong:sessionId];
-  summary = [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier
-                                                        error:error];
-  if (summary == nil) {
-    return nil;
-  }
-  return [[[StrappySession alloc] initWithSessionIdentifier:sessionIdentifier
-                                                    summary:summary] autorelease];
+  NSString *identifier = StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"create_session",@"action",
+    StrappyWorkingDirectory(),@"directory",
+    nil],error);
+  return identifier ? [self sessionWithIdentifier:[NSNumber numberWithLongLong:[identifier longLongValue]]] : nil;
 }
 
 + (NSDictionary *)dictionaryFromDatabaseStudyStatusRecord:
@@ -4033,266 +2993,32 @@ static void StrappyStoreChanged(void)
     (NSString *)databaseIdentifier
                                                     error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  char *strappyError;
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-  strappyError = NULL;
-  if (!strappy_study_delete_database_values(
-        [databasePath UTF8String],
-        [databaseIdentifier UTF8String],
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-  strappy_session_free_string(strappyError);
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:@"delete_study",@"action",StrappyText(databaseIdentifier),@"id",nil],error) != nil;
 }
 
 + (BOOL)resetDatabaseStudyWithError:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  char *strappyError;
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-  strappyError = NULL;
-  if (!strappy_study_reset([databasePath UTF8String], &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-  strappy_session_free_string(strappyError);
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:@"reset_study",@"action",nil],error) != nil;
 }
 
 + (StrappySession *)beginDatabaseStudyWithError:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return nil;
-  }
-
-  NSString *databasePath;
-  NSString *defaultModel;
-  NSString *studyWorkingDirectory;
-  NSArray *workingDirectories;
-  StrappySession *session;
-  StrappySessionOptions *studyOptions;
-  strappy_study_database_id_list pending;
-  char *strappyError;
-  char *cleanupError;
-  long long sessionId;
-  BOOL studyAlreadyRunning;
-
-  studyAlreadyRunning = NO;
-  @synchronized(self) {
-    NSEnumerator *enumerator;
-    StrappySession *candidate;
-
-    enumerator = [[[self inFlightSessions] allValues] objectEnumerator];
-    while ((candidate = [enumerator nextObject]) != nil) {
-      if ([candidate isDatabaseStudySession]) {
-        studyAlreadyRunning = YES;
-        break;
-      }
-    }
-  }
-  if (studyAlreadyRunning) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:13
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"A Database Study session is already running.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return nil;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return nil;
-  }
-  strappy_study_database_id_list_init(&pending);
-  strappyError = NULL;
-  if (!strappy_study_list_unstudied_database_ids([databasePath UTF8String],
-                                                  &pending,
-                                                  &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return nil;
-  }
-  if (pending.count == 0U) {
-    strappy_study_database_id_list_destroy(&pending);
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:14
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"All currently approved databases are studied.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return nil;
-  }
-  strappy_study_database_id_list_destroy(&pending);
-
-  defaultModel = [StrappySession defaultModelIdentifierWithError:error];
-  if (defaultModel == nil) {
-    return nil;
-  }
-  workingDirectories = [StrappySession codingWorkingDirectoryPaths];
-  studyWorkingDirectory = ([workingDirectories count] > 0U) ?
-    [workingDirectories objectAtIndex:0U] : @"";
-  if ([studyWorkingDirectory length] == 0U) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:15
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Database Study working directory is unavailable.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return nil;
-  }
-  session = [StrappySession createSessionWithError:error];
-  if (session == nil) {
-    return nil;
-  }
-  sessionId = [[session sessionIdentifier] longLongValue];
-  strappyError = NULL;
-  /* Database Study has no session_rename tool; persist its fixed name here. */
-  if (!strappy_db_update_session_name(
-        [databasePath UTF8String],
-        sessionId,
-        STRAPPY_ASSISTANT_SET_DATABASE_STUDY_SESSION_NAME,
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    cleanupError = NULL;
-    strappy_session_delete([databasePath UTF8String], sessionId, &cleanupError);
-    strappy_session_free_string(cleanupError);
-    return nil;
-  }
-  strappy_session_free_string(strappyError);
-  studyOptions = [[session optionsWithError:error] copy];
-  [studyOptions setAssistantSetIdentifier:
-    [NSString stringWithUTF8String:STRAPPY_ASSISTANT_SET_DATABASE_STUDY]];
-  [studyOptions setModelIdentifier:defaultModel];
-  [studyOptions setWebProvider:StrappyWebProviderAuto];
-  [studyOptions setWebSearchEnabled:YES];
-  [studyOptions setBashEnabled:NO];
-  [studyOptions setLimitToOneTool:NO];
-  [studyOptions setRoundLimit:StrappySessionDefaultRoundLimit];
-  [studyOptions setWorkingDirectory:studyWorkingDirectory];
-  if ((studyOptions == nil) ||
-      ![session updateOptions:studyOptions
-                changedFields:StrappySessionOptionAll
-                        error:error]) {
-    [studyOptions release];
-    cleanupError = NULL;
-    strappy_session_delete([databasePath UTF8String], sessionId, &cleanupError);
-    strappy_session_free_string(cleanupError);
-    return nil;
-  }
-  [studyOptions release];
-
-  @synchronized(session) {
-    [session->processingStatusJSON_ release];
-    session->processingStatusJSON_ = nil;
-    session->promptInFlight_ = YES;
-    session->promptCancellationRequested_ = NO;
-  }
-  [StrappySession registerInFlightSession:session];
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionPromptDidStartNotification
-                  object:session];
-  [NSThread detachNewThreadSelector:@selector(runDatabaseStudyInBackground:)
-                           toTarget:session
-                         withObject:nil];
-  return session;
+  char key[65];
+  NSString *identifier;
+  if (!strappy_store_client_request_key(key)) return nil;
+  identifier = StrappyServiceCommand(STRAPPY_IPC_START_STUDY,
+    [NSDictionary dictionaryWithObjectsAndKeys:StrappyWorkingDirectory(),@"directory",
+      [NSString stringWithUTF8String:key],@"key",nil],error);
+  return identifier ? [self sessionWithIdentifier:[NSNumber numberWithLongLong:[identifier longLongValue]]] : nil;
 }
 
 + (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier
                                error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  char *strappyError;
-  long long sessionId;
-
-  sessionId = [sessionIdentifier isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier longLongValue] : 0LL;
-  if (sessionId <= 0) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session is not selected.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  if ([StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier]) {
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Prompt request is already running.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:8
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  if (!strappy_session_delete([databasePath UTF8String],
-                              sessionId,
-                              &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"delete_session",@"action",
+    StrappyNumber([sessionIdentifier longLongValue]),@"session",
+    nil],error) != nil;
 }
 
 + (StrappySessionRows *)sidebarRowsWithError:(NSError **)error
@@ -4879,42 +3605,12 @@ static void StrappyStoreChanged(void)
                 includedInContext:(BOOL)includedInContext
                             error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  char *strappyError;
-  long long modelRequestId;
-  long long sessionId;
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  modelRequestId =
-    [modelRequestIdentifier isKindOfClass:[NSNumber class]] ?
-      [modelRequestIdentifier longLongValue] : 0LL;
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  if (!strappy_session_update_model_request_include_in_context(
-        [databasePath fileSystemRepresentation],
-        sessionId,
-        modelRequestId,
-        includedInContext ? 1 : 0,
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-  strappy_session_free_string(strappyError);
-  return YES;
+  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+    @"include_context",@"action",
+    StrappyNumber([sessionIdentifier_ longLongValue]),@"session",
+    StrappyNumber([modelRequestIdentifier longLongValue]),@"id",
+    StrappyNumber(includedInContext),@"value",
+    nil],error) != nil;
 }
 
 - (NSString *)webViewJavaScriptForModelRequestIdentifier:
@@ -5005,147 +3701,13 @@ static void StrappyStoreChanged(void)
         changedFields:(StrappySessionOptionMask)changedFields
                 error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  NSString *resourcePath;
-  NSDictionary *summary;
-  StrappySessionOptions *savedOptions;
-  char *strappyError;
-  long long sessionId;
-  strappy_session_option_mask actualChangedFields;
-  strappy_session_options input;
-  strappy_session_options saved;
-
-  if (![options isKindOfClass:[StrappySessionOptions class]] ||
-      ((changedFields & ~((StrappySessionOptionMask)StrappySessionOptionAll)) !=
-       0U)) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Session options are invalid.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return NO;
-  }
-  if (((changedFields & StrappySessionOptionWorkingDirectory) != 0U) &&
-      ![[StrappySession codingWorkingDirectoryPaths]
-        containsObject:[options workingDirectory]]) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:15
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Working directory selection is invalid.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return NO;
-  }
-
-  sessionId = [sessionIdentifier_ isKindOfClass:[NSNumber class]] ?
-    [sessionIdentifier_ longLongValue] : 0LL;
-  if (sessionId <= 0LL) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Session is not selected.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return NO;
-  }
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-  resourcePath = nil;
-  if ((changedFields & StrappySessionOptionAssistantSet) != 0U) {
-    resourcePath = [StrappySession guidanceResourceDirectoryWithError:error];
-    if (resourcePath == nil) {
-      return NO;
-    }
-  }
-
-  strappy_session_options_init(&input);
-  if (!StrappySessionRecordFromOptions(options, &input, error)) {
-    return NO;
-  }
-  strappy_session_options_init(&saved);
-  actualChangedFields = 0U;
-  strappyError = NULL;
-  if (!strappy_session_update_options(
-        [databasePath UTF8String],
-        sessionId,
-        StrappySessionOptionalCString(resourcePath),
-        &input,
-        (strappy_session_option_mask)changedFields,
-        &saved,
-        &actualChangedFields,
-        &strappyError)) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    strappy_session_options_destroy(&saved);
-    return NO;
-  }
-
-  savedOptions = StrappySessionOptionsFromRecord(&saved);
-  strappy_session_options_destroy(&saved);
-  if (savedOptions == nil) {
-    if (error != nil) {
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:6
-                               userInfo:[NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Saved session options could not be loaded.", nil)
-                                                            forKey:NSLocalizedDescriptionKey]];
-    }
-    return NO;
-  }
-  @synchronized(self) {
-    [options_ release];
-    options_ = [savedOptions copy];
-    optionsLoaded_ = YES;
-  }
-
-  summary =
-    [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier_
-                                                  error:nil];
-  if (summary != nil) {
-    [self updateCachedSummary:summary];
-  } else {
-    summary = [self cachedSummary];
-  }
-  if (actualChangedFields != 0U) {
-    NSMutableDictionary *userInfo;
-
-    userInfo = [NSMutableDictionary dictionaryWithObjectsAndKeys:
-      savedOptions, StrappySessionOptionsKey,
-      [NSNumber XP_numberWithUnsignedInteger:
-        (NSUInteger)actualChangedFields], StrappySessionChangedOptionsKey,
-      StrappySessionChangeKindOptions, StrappySessionChangeKindKey,
-      nil];
-    if ([summary isKindOfClass:[NSDictionary class]]) {
-      [userInfo setObject:summary forKey:@"session"];
-    }
-    [[NSNotificationCenter defaultCenter]
-      postNotificationName:StrappySessionDidUpdateNotification
-                    object:self
-                  userInfo:userInfo];
-  }
+  NSDictionary *command = StrappyOptionsCommand(options,changedFields,sessionIdentifier_,error);
+  if (!command || StrappyServiceCommand(STRAPPY_IPC_MUTATE,command,error) == nil) return NO;
+  @synchronized(self) { optionsLoaded_ = NO; }
+  [self serviceRunChanged:nil];
   return YES;
 }
-- (NSDictionary *)submitPrompt:(NSString *)prompt context:(NSDictionary *)context
-                      isolated:(BOOL)isolated error:(NSError **)error
-{
-  (void)prompt; (void)context; (void)isolated;
-  if (error) *error = [StrappySession errorFromCString:"Database Study execution is unavailable until its daemon worker is implemented."];
-  return nil;
-}
+
 
 - (BOOL)beginResponsesPrompt:(NSString *)prompt context:(NSDictionary *)context error:(NSError **)error
 {
@@ -5219,139 +3781,6 @@ static void StrappyStoreChanged(void)
   [pool release];
 }
 
-- (void)runDatabaseStudyInBackground:(id)ignored
-{
-  NSAutoreleasePool *pool;
-  NSString *databasePath;
-  NSDictionary *eventContext;
-  NSDictionary *lastSession;
-  NSMutableDictionary *result;
-  NSError *requestError;
-  NSString *errorMessage;
-  unsigned int consecutiveNoProgress;
-
-  (void)ignored;
-  pool = [[NSAutoreleasePool alloc] init];
-  databasePath = [StrappySession sessionsDatabasePath];
-  eventContext = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES]
-                                             forKey:@"database_study"];
-  lastSession = nil;
-  result = [[NSMutableDictionary alloc] initWithObjectsAndKeys:
-    [NSNumber numberWithBool:YES], @"database_study", nil];
-  errorMessage = nil;
-  consecutiveNoProgress = 0U;
-
-  while (![self promptCancellationRequested]) {
-    strappy_study_batch batch;
-    strappy_study_database_id_list after;
-    char *strappyError;
-    NSString *prompt;
-    size_t index;
-    int batchProgressed;
-
-    strappy_study_batch_init(&batch);
-    strappyError = NULL;
-    if (!strappy_study_next_batch([databasePath UTF8String],
-                                  &batch,
-                                  &strappyError)) {
-      requestError = [StrappySession errorFromCString:strappyError];
-      errorMessage = [requestError localizedDescription];
-      strappy_session_free_string(strappyError);
-      strappy_study_batch_destroy(&batch);
-      break;
-    }
-    if (batch.pending_database_ids.count == 0U) {
-      strappy_study_batch_destroy(&batch);
-      break;
-    }
-
-    prompt = (batch.prompt != NULL) ?
-      [NSString stringWithUTF8String:batch.prompt] : nil;
-    if (prompt == nil) {
-      errorMessage = NSLocalizedString(@"Database Study prompt is not valid text.", nil);
-      strappy_study_batch_destroy(&batch);
-      break;
-    }
-
-    requestError = nil;
-    lastSession = [self submitPrompt:prompt
-                             context:eventContext
-                            isolated:YES
-                               error:&requestError];
-    if (lastSession == nil) {
-      errorMessage = [requestError localizedDescription];
-      if ([errorMessage length] == 0U) {
-        errorMessage = NSLocalizedString(@"Database Study request failed.", nil);
-      }
-      strappy_study_batch_destroy(&batch);
-      break;
-    }
-    if ([self promptCancellationRequested]) {
-      strappy_study_batch_destroy(&batch);
-      break;
-    }
-
-    strappy_study_database_id_list_init(&after);
-    strappyError = NULL;
-    if (!strappy_study_list_unstudied_database_ids([databasePath UTF8String],
-                                                    &after,
-                                                    &strappyError)) {
-      requestError = [StrappySession errorFromCString:strappyError];
-      errorMessage = [requestError localizedDescription];
-      strappy_session_free_string(strappyError);
-      strappy_study_batch_destroy(&batch);
-      break;
-    }
-    batchProgressed = 0;
-    for (index = 0U;
-         index < batch.pending_database_ids.count;
-         index++) {
-      size_t afterIndex;
-      int stillPending;
-
-      stillPending = 0;
-      for (afterIndex = 0U; afterIndex < after.count; afterIndex++) {
-        if (strcmp(batch.pending_database_ids.database_ids[index],
-                   after.database_ids[afterIndex]) == 0) {
-          stillPending = 1;
-          break;
-        }
-      }
-      if (!stillPending) {
-        batchProgressed = 1;
-      }
-    }
-    strappy_study_database_id_list_destroy(&after);
-    strappy_study_batch_destroy(&batch);
-
-    if (batchProgressed) {
-      consecutiveNoProgress = 0U;
-    } else {
-      consecutiveNoProgress++;
-      if (consecutiveNoProgress >= 3U) {
-        errorMessage = NSLocalizedString(
-          @"Database Study could not complete every database after three attempts.",
-          nil);
-        break;
-      }
-    }
-  }
-
-  if ([self promptCancellationRequested] && ([errorMessage length] == 0U)) {
-    errorMessage = NSLocalizedString(@"Database Study was cancelled.", nil);
-  }
-  if ([errorMessage length] > 0U) {
-    [result setObject:errorMessage forKey:@"error"];
-  } else if (lastSession != nil) {
-    [result setObject:lastSession forKey:@"session"];
-  }
-  [self performSelectorOnMainThread:@selector(promptDidFinish:)
-                         withObject:result
-                      waitUntilDone:NO];
-  [result release];
-  [pool release];
-}
-
 - (void)promptDidFinish:(NSDictionary *)result
 {
   NSMutableDictionary *userInfo;
@@ -5375,7 +3804,6 @@ static void StrappyStoreChanged(void)
     [processingStatusJSON_ release];
     processingStatusJSON_ = nil;
   }
-  [StrappySession unregisterInFlightSession:self];
 
   if (summary != nil) {
     [userInfo setObject:StrappySessionChangeKindActivity

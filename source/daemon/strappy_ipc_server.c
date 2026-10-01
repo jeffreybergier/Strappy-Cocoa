@@ -144,10 +144,9 @@ static void strappy_ipc_request(strappy_ipc_server *s, struct strappy_ipc_peer *
                 strappy_ipc_snapshot(s, &reply);
             }
         } else if (request.operation >= STRAPPY_IPC_SUBMIT_PROMPT &&
-                   request.operation <= STRAPPY_IPC_START_STUDY)
+                   request.operation <= STRAPPY_IPC_REFRESH_CATALOG)
         {
-            if (s->handler && (request.operation == STRAPPY_IPC_SUBMIT_PROMPT ||
-                               request.operation == STRAPPY_IPC_CANCEL_RUN)) {
+            if (s->handler) {
                 memcpy(request.payload, p->input + STRAPPY_IPC_HEADER, request.length);
                 p->command = request; p->response = reply;
                 p->handler = s->handler; p->context = s->context; p->mutex = &s->mutex;

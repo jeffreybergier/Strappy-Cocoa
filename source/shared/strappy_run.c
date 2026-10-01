@@ -38,6 +38,11 @@ int strappy_run_latest(const char *path, long long session, strappy_run_record *
 unsigned int strappy_run_accept(const char *path, long long session,
     const char *key, const char *prompt, strappy_run_record *r)
 {
+    return strappy_run_accept_if_idle(path,session,key,prompt,r,1);
+}
+unsigned int strappy_run_accept_if_idle(const char *path, long long session,
+    const char *key, const char *prompt, strappy_run_record *r, int accept_new)
+{
     sqlite3 *db = NULL; sqlite3_stmt *q = NULL;
     unsigned int status = STRAPPY_IPC_STORAGE_ERROR;
     int rc;
@@ -52,6 +57,7 @@ unsigned int strappy_run_accept(const char *path, long long session,
         goto finish;
     }
     if (rc != SQLITE_DONE) goto finish;
+    if (!accept_new) { status = STRAPPY_IPC_BUSY; goto finish; }
     sqlite3_finalize(q); q = NULL;
     if (!strappy_db_session_exists(db, session, NULL)) { status = STRAPPY_IPC_INVALID; goto finish; }
     rc = sqlite3_prepare_v2(db, "SELECT 1 FROM prompt_runs WHERE state IN (1,2) LIMIT 1", -1, &q, NULL);

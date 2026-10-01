@@ -1,11 +1,10 @@
 # Strappy daemon migration plan
 
-Status: step 0 is complete for iOS 8/15 and Mac heartbeat integration. The heartbeat
-daemon was validated on `koolphone5` (rootful iOS 8.4.1) and `pinkphone-rsa`
-(rootless iOS 15.0/Dopamine), plus `x4-vm` (Mac OS X 10.4.11/PowerPC),
-with the coverage limits recorded below. Harness
-migration has not started; step 1 is next. iOS 6 device testing is future
-compatibility validation, not a blocker for starting migration.
+Status: steps 0–4 are implemented. The daemon owns prompt execution, scanning,
+Database Study, catalog refresh, shared settings, and account mutations. Step 4
+has offline coverage and isolated native command/storage validation on Tiger/PPC,
+iOS 8/armv7, and iOS 15/arm64. Full graphical lifecycle and remaining recovery
+validation are step 5; iOS 6 device compatibility remains unverified.
 
 See `source/daemon/README.md` for operation and `source/daemon/VALIDATION.md`
 for device evidence. This plan supersedes the earlier iOS 5 acceptance gate
@@ -278,12 +277,12 @@ See `source/daemon/VALIDATION.md` for exact coverage and remaining work.
 
 ## Step 4: transfer remaining workers and mutations
 
-- [ ] Move filesystem scanning and database study behind daemon commands.
-- [ ] Move model catalog refresh and provider account changes behind commands.
-- [ ] Move model/database approvals, session changes, and shared defaults behind
+- [x] Move filesystem scanning and database study behind daemon commands.
+- [x] Move model catalog refresh and provider account changes behind commands.
+- [x] Move model/database approvals, session changes, and shared defaults behind
   commands.
-- [ ] Audit both Objective-C bridges for remaining workers and database writes.
-- [ ] Verify there is no competing in-process harness fallback.
+- [x] Audit both Objective-C bridges for remaining workers and database writes.
+- [x] Verify there is no competing in-process harness fallback.
 
 Move filesystem scanning, database study, model catalog refresh, provider
 account changes, model/database approvals, session changes, and shared defaults
@@ -293,6 +292,13 @@ Audit `StrappySession.m` and `FileScanner.m` for every write and background
 worker. Convert runtime events into UI refreshes through their existing public
 interfaces. Ensure the completed migration has one execution owner and no
 remaining UI database writes or competing in-process harness fallback.
+
+Implementation and command semantics are documented in
+`source/daemon/MUTATIONS.md` and `source/daemon/PROTOCOL.md`. IPC v4 retains reader
+ABI 2 and SQLite `user_version` 1. One daemon runtime owner serializes prompts,
+study, scans, catalog refresh and account changes; conflicting mutations return
+busy. UI-only presentation, drafts and authentication presentation remain local.
+See `source/daemon/VALIDATION.md` for verified outcomes and explicit limitations.
 
 ## Step 5: recovery and platform lifecycle
 

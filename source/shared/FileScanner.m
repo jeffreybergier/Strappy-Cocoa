@@ -4,7 +4,9 @@
 #import "XPFoundation.h"
 #import "strappy_core.h"
 #import "strappy_db.h"
-#import "strappy_file_scanner.h"
+#import "strappy_store_client.h"
+#import "strappy_ipc.h"
+#import "strappy_run.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -16,7 +18,7 @@ NSString * const FileScannerDatabaseCatalogDidChangeNotification =
   @"FileScannerDatabaseCatalogDidChangeNotification";
 
 NSString * const FileScannerCatalogReadFailedNotification = @"FileScannerCatalogReadFailedNotification";
-static BOOL FileScannerCatalogUpdatePending = NO;
+
 
 @interface FileScannerCatalogRows ()
 - (id)initWithPath:(NSString *)path search:(NSString *)search showHidden:(BOOL)showHidden
@@ -24,61 +26,22 @@ static BOOL FileScannerCatalogUpdatePending = NO;
 @end
 
 static BOOL FileScannerDatabaseCatalogScanInFlight = NO;
-static const size_t StrappyFileScannerCatalogBatchSize = 100U;
-
-static strappy_file_scanner_platform_profile
-StrappyFileScannerPlatformProfile(void)
-{
-  XPPlatformFamily family;
-
-  family = [[NSProcessInfo processInfo] XP_platformFamily];
-  if (family == XPPlatformFamilyIOS) {
-    return STRAPPY_FILE_SCANNER_PLATFORM_IOS;
-  }
-  if (family == XPPlatformFamilyMacOS) {
-    return STRAPPY_FILE_SCANNER_PLATFORM_MACOS;
-  }
-  return STRAPPY_FILE_SCANNER_PLATFORM_GENERIC;
-}
-
-typedef struct StrappyFileScannerCatalogBatchContext {
-  NSString *databasePath;
-  const char *scanRoot;
-} StrappyFileScannerCatalogBatchContext;
-
 @interface FileScanner ()
-
 + (NSError *)errorFromCString:(char *)message;
-+ (void)databaseCatalogDidChange:(NSDictionary *)result;
-+ (void)databaseCatalogScanInBackground:(NSDictionary *)request;
 + (NSDictionary *)dictionaryFromDiscoveredDatabaseRecord:(const strappy_discovered_database_record *)record;
-+ (void)queueCatalogUpdate;
-+ (void)deliverCatalogUpdate;
-
++ (void)databaseCatalogDidChange:(NSDictionary *)result;
 @end
 
-static int StrappyFileScannerSaveCatalogBatch(
-  strappy_file_scanner_record_list *list,
-  void *userData,
-  char **error_out)
+static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError **error)
 {
-  StrappyFileScannerCatalogBatchContext *context;
-  context = (StrappyFileScannerCatalogBatchContext *)userData;
-  if (context == NULL) {
-    strappy_set_error(error_out, "Database scan batch context is missing.");
-    return 0;
-  }
-
-  if (!strappy_file_scanner_save_discovered_database_batch(
-        [context->databasePath UTF8String],
-        list,
-        context->scanRoot,
-        error_out)) {
-    return 0;
-  }
-
-  [FileScanner queueCatalogUpdate];
-  return 1;
+  unsigned int status;
+  char *reply = strappy_store_client_mutation(operation,command,&status);
+  BOOL ok = reply != NULL;
+  free(reply); cJSON_Delete(command);
+  if (!ok && error) *error = [FileScanner errorFromCString:status == STRAPPY_IPC_BUSY ?
+    "The service is busy. Try again after the current work finishes." :
+    "The service could not acknowledge the catalog change. Reload stored state before retrying."];
+  return ok;
 }
 
 @implementation FileScanner
@@ -109,115 +72,25 @@ static int StrappyFileScannerSaveCatalogBatch(
 + (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
                                  error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  return [self beginDatabaseCatalogScanAtPath:path
-                                     scanMode:FileScannerDatabaseScanModeFull
-                                        error:error];
+  return [self beginDatabaseCatalogScanAtPath:path scanMode:FileScannerDatabaseScanModeFull error:error];
 }
 
 + (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
                               scanMode:(FileScannerDatabaseScanMode)scanMode
                                  error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
+  cJSON *command;
+  if (![path length] || ![path isAbsolutePath]) {
+    if (error) *error = [self errorFromCString:"Scan path must be absolute."];
     return NO;
   }
-
-  NSDictionary *scanRequest;
-  NSDictionary *userInfo;
-
-  if (![path isKindOfClass:[NSString class]] || ([path length] == 0U)) {
-    if (error != NULL) {
-      userInfo = [NSDictionary dictionaryWithObject:
-        NSLocalizedString(@"Scan path is empty.", nil)
-                                             forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
-                                   code:2
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  @synchronized(self) {
-    if (FileScannerDatabaseCatalogScanInFlight) {
-      if (error != NULL) {
-        userInfo = [NSDictionary dictionaryWithObject:
-          NSLocalizedString(@"Database scan is already running.", nil)
-                                               forKey:NSLocalizedDescriptionKey];
-        *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
-                                     code:3
-                                 userInfo:userInfo];
-      }
-      return NO;
-    }
-    FileScannerDatabaseCatalogScanInFlight = YES;
-  }
-
-  scanMode = (scanMode == FileScannerDatabaseScanModeQuick) ?
-    FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
-  scanRequest = [[NSDictionary alloc] initWithObjectsAndKeys:
-    path, @"path",
-    [NSNumber XP_numberWithInteger:(XPInteger)scanMode], @"scan_mode",
-    nil];
-
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:FileScannerDatabaseCatalogScanDidStartNotification
-                  object:self
-                userInfo:scanRequest];
-
-  [NSThread detachNewThreadSelector:@selector(databaseCatalogScanInBackground:)
-                           toTarget:self
-                         withObject:scanRequest];
-  [scanRequest release];
+  command = cJSON_CreateObject();
+  cJSON_AddStringToObject(command,"path",[path fileSystemRepresentation]);
+  cJSON_AddStringToObject(command,"quick",scanMode == FileScannerDatabaseScanModeQuick ? "1" : "0");
+  if (!FileScannerCommand(STRAPPY_IPC_START_SCAN,command,error)) return NO;
+  @synchronized(self) { FileScannerDatabaseCatalogScanInFlight = YES; }
+  [[NSNotificationCenter defaultCenter] postNotificationName:FileScannerDatabaseCatalogScanDidStartNotification object:self];
   return YES;
-}
-
-+ (void)databaseCatalogScanInBackground:(NSDictionary *)request
-{
-  NSAutoreleasePool *pool;
-  NSError *error;
-  BOOL success;
-  NSMutableDictionary *result;
-  NSString *message;
-  NSString *path;
-  NSNumber *scanModeNumber;
-  FileScannerDatabaseScanMode scanMode;
-
-  pool = [[NSAutoreleasePool alloc] init];
-  path = [request objectForKey:@"path"];
-  scanModeNumber = [request objectForKey:@"scan_mode"];
-  scanMode = ([scanModeNumber isKindOfClass:[NSNumber class]] &&
-              ([scanModeNumber XP_integerValue] ==
-               FileScannerDatabaseScanModeQuick)) ?
-    FileScannerDatabaseScanModeQuick : FileScannerDatabaseScanModeFull;
-  error = nil;
-  success = [[FileScanner sharedScanner] scanAndSaveDatabasesAtPath:path
-    scanMode:scanMode error:&error];
-
-  result = [[NSMutableDictionary alloc] init];
-  if ([path isKindOfClass:[NSString class]]) {
-    [result setObject:path forKey:@"path"];
-  }
-  [result setObject:[NSNumber XP_numberWithInteger:(XPInteger)scanMode]
-             forKey:@"scan_mode"];
-  if (!success) {
-    message = [error localizedDescription];
-    if ([message length] == 0U) {
-      message = NSLocalizedString(@"Database scan failed.", nil);
-    }
-    [result setObject:message forKey:@"error"];
-  }
-
-  [self performSelectorOnMainThread:@selector(databaseCatalogScanDidFinish:)
-                         withObject:result
-                      waitUntilDone:NO];
-  [result release];
-  [pool release];
 }
 
 + (void)databaseCatalogScanDidFinish:(NSDictionary *)result
@@ -233,8 +106,6 @@ static int StrappyFileScannerSaveCatalogBatch(
     FileScannerDatabaseCatalogScanInFlight = NO;
   }
 
-  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(deliverCatalogUpdate) object:nil];
-  @synchronized(self) { FileScannerCatalogUpdatePending = NO; }
   /* Publish committed batches even when a later part of the scan failed. */
   [self databaseCatalogDidChange:userInfo];
 
@@ -243,28 +114,6 @@ static int StrappyFileScannerSaveCatalogBatch(
                   object:self
                 userInfo:userInfo];
   [userInfo release];
-}
-
-+ (void)queueCatalogUpdate
-{
-  @synchronized(self) {
-    if (FileScannerCatalogUpdatePending) return;
-    FileScannerCatalogUpdatePending = YES;
-  }
-  [self performSelectorOnMainThread:@selector(scheduleCatalogUpdate)
-    withObject:nil waitUntilDone:NO];
-}
-
-+ (void)scheduleCatalogUpdate
-{
-  @synchronized(self) { if (!FileScannerCatalogUpdatePending) return; }
-  [self performSelector:@selector(deliverCatalogUpdate) withObject:nil afterDelay:0.25];
-}
-
-+ (void)deliverCatalogUpdate
-{
-  @synchronized(self) { FileScannerCatalogUpdatePending = NO; }
-  [self databaseCatalogDidChange:nil];
 }
 
 + (void)databaseCatalogDidChange:(NSDictionary *)result
@@ -277,6 +126,19 @@ static int StrappyFileScannerSaveCatalogBatch(
     postNotificationName:FileScannerDatabaseCatalogDidChangeNotification
                   object:self
                 userInfo:userInfo];
+}
+
++ (void)serviceWorkDidChange
+{
+  unsigned int active, last, result;
+  strappy_store_client_work_status(&active,&last,&result);
+  if ([self isDatabaseCatalogScanInFlight] && active != STRAPPY_IPC_START_SCAN) {
+    [self databaseCatalogScanDidFinish:(last == STRAPPY_IPC_START_SCAN && result == STRAPPY_RUN_COMPLETED) ?
+      [NSDictionary dictionary] : [NSDictionary dictionaryWithObject:@"Scan failed or the service restarted." forKey:@"error"]];
+  } else if (![self isDatabaseCatalogScanInFlight] && active == STRAPPY_IPC_START_SCAN) {
+    @synchronized(self) { FileScannerDatabaseCatalogScanInFlight = YES; }
+    [[NSNotificationCenter defaultCenter] postNotificationName:FileScannerDatabaseCatalogScanDidStartNotification object:self];
+  }
 }
 
 + (NSError *)errorFromCString:(char *)message
@@ -467,64 +329,8 @@ static int StrappyFileScannerSaveCatalogBatch(
 - (BOOL)scanAndSaveDatabasesAtPath:(NSString *)path
   scanMode:(FileScannerDatabaseScanMode)scanMode error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  StrappyFileScannerCatalogBatchContext batchContext;
-  strappy_file_scanner_options options;
-  strappy_file_scanner_record_list list;
-  char *strappyError;
-
-  if (![path isKindOfClass:[NSString class]] || ([path length] == 0U)) {
-    if (error != NULL) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Scan path is empty.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
-                                   code:2
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  if (![StrappySession initializeSessionStoreWithError:error]) {
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  batchContext.databasePath = databasePath;
-  batchContext.scanRoot = [path fileSystemRepresentation];
-
-  strappy_file_scanner_options_init(&options);
-  options.root_path = batchContext.scanRoot;
-  options.platform_profile = StrappyFileScannerPlatformProfile();
-  options.validate_candidates = 1;
-  options.use_filename_filter =
-    (scanMode == FileScannerDatabaseScanModeQuick) ? 1 : 0;
-  options.record_batch_size = StrappyFileScannerCatalogBatchSize;
-  options.record_batch_callback = StrappyFileScannerSaveCatalogBatch;
-  options.record_batch_user_data = &batchContext;
-
-  strappy_file_scanner_record_list_init(&list);
-  strappyError = NULL;
-  if (!strappy_file_scanner_scan_and_save_discovered_databases(
-        [databasePath UTF8String],
-        &options,
-        &list,
-        &strappyError)) {
-    if (error != NULL) {
-      *error = [FileScanner errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    strappy_file_scanner_record_list_destroy(&list);
-    return NO;
-  }
-
-  strappy_file_scanner_record_list_destroy(&list);
-  return YES;
+  /* Legacy entry point now acknowledges service acceptance. Results arrive through catalog notifications. */
+  return [FileScanner beginDatabaseCatalogScanAtPath:path scanMode:scanMode error:error];
 }
 
 - (NSArray *)catalogedSQLiteDatabasesWithError:(NSError **)error
@@ -578,98 +384,22 @@ static int StrappyFileScannerSaveCatalogBatch(
                forCatalogIdentifier:(NSNumber *)catalogIdentifier
                               error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  const char *decision;
-  char *strappyError;
-  int ok;
-
-  if (![catalogIdentifier isKindOfClass:[NSNumber class]] ||
-      ([catalogIdentifier longLongValue] <= 0LL)) {
-    if (error != NULL) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Database catalog id is missing.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  if (![StrappySession initializeSessionStoreWithError:error]) {
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  decision = (allowed ? "allowed" : "unknown");
-  strappyError = NULL;
-  ok = strappy_db_update_discovered_database_decision(
-    [databasePath UTF8String],
-    [catalogIdentifier longLongValue],
-    decision,
-    &strappyError);
-  if (!ok) {
-    if (error != NULL) {
-      *error = [FileScanner errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return NO;
-  }
-
-  return YES;
+  cJSON *command = cJSON_CreateObject();
+  cJSON_AddStringToObject(command,"action","approve_database");
+  cJSON_AddStringToObject(command,"id",[[catalogIdentifier stringValue] UTF8String]);
+  cJSON_AddStringToObject(command,"value",allowed ? "1" : "0");
+  return FileScannerCommand(STRAPPY_IPC_MUTATE,command,error);
 }
 
 - (BOOL)setCatalogedDatabaseHidden:(BOOL)hidden
                forCatalogIdentifier:(NSNumber *)catalogIdentifier
                               error:(NSError **)error
 {
-  if (!strappy_db_writer_available(NULL)) {
-    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
-    return NO;
-  }
-
-  NSString *databasePath;
-  char *strappyError;
-  int ok;
-
-  if (![catalogIdentifier isKindOfClass:[NSNumber class]] ||
-      ([catalogIdentifier longLongValue] <= 0LL)) {
-    if (error != NULL) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Database catalog id is missing.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"FileScannerErrorDomain"
-                                   code:6
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  if (![StrappySession initializeSessionStoreWithError:error]) {
-    return NO;
-  }
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  strappyError = NULL;
-  ok = strappy_db_update_discovered_database_hidden(
-    [databasePath UTF8String],
-    [catalogIdentifier longLongValue],
-    hidden ? 1 : 0,
-    &strappyError);
-  if (!ok) {
-    if (error != NULL) {
-      *error = [FileScanner errorFromCString:strappyError];
-    }
-    strappy_free_string(strappyError);
-    return NO;
-  }
-
-  return YES;
+  cJSON *command = cJSON_CreateObject();
+  cJSON_AddStringToObject(command,"action","hide_database");
+  cJSON_AddStringToObject(command,"id",[[catalogIdentifier stringValue] UTF8String]);
+  cJSON_AddStringToObject(command,"value",hidden ? "1" : "0");
+  return FileScannerCommand(STRAPPY_IPC_MUTATE,command,error);
 }
 
 @end

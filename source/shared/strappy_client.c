@@ -448,12 +448,30 @@ static char *strappy_client_extract_api_error(cJSON *root)
   return NULL;
 }
 
-int strappy_client_fetch_openrouter_user_models_json(
-  const strappy_config *config,
-  char **json_out,
-  long *http_status_out,
-  char **error_out)
+typedef struct strappy_catalog_cancel {
+  int (*callback)(void *);
+  void *context;
+} strappy_catalog_cancel;
+#if LIBCURL_VERSION_NUM >= 0x072000
+static int strappy_catalog_progress(void *context, curl_off_t total, curl_off_t now, curl_off_t upload_total, curl_off_t upload_now)
+#else
+static int strappy_catalog_progress(void *context, double total, double now, double upload_total, double upload_now)
+#endif
 {
+  strappy_catalog_cancel *cancel = context;
+  (void)total; (void)now; (void)upload_total; (void)upload_now;
+  return cancel->callback && cancel->callback(cancel->context);
+}
+int strappy_client_fetch_openrouter_user_models_json(
+  const strappy_config *config, char **json_out, long *http_status_out, char **error_out)
+{
+  return strappy_client_fetch_openrouter_user_models_json_with_cancel(config,json_out,http_status_out,NULL,NULL,error_out);
+}
+int strappy_client_fetch_openrouter_user_models_json_with_cancel(
+  const strappy_config *config, char **json_out, long *http_status_out,
+  int (*should_cancel)(void *), void *context, char **error_out)
+{
+  strappy_catalog_cancel cancel = {should_cancel, context};
   CURL *curl;
   CURLcode code;
   struct curl_slist *headers;
@@ -550,6 +568,16 @@ int strappy_client_fetch_openrouter_user_models_json(
     curl_easy_setopt(curl, CURLOPT_CAINFO, strappy_cainfo_path);
   }
 
+  if (should_cancel) {
+    curl_easy_setopt(curl,CURLOPT_NOPROGRESS,0L);
+#if LIBCURL_VERSION_NUM >= 0x072000
+    curl_easy_setopt(curl,CURLOPT_XFERINFOFUNCTION,strappy_catalog_progress);
+    curl_easy_setopt(curl,CURLOPT_XFERINFODATA,&cancel);
+#else
+    curl_easy_setopt(curl,CURLOPT_PROGRESSFUNCTION,strappy_catalog_progress);
+    curl_easy_setopt(curl,CURLOPT_PROGRESSDATA,&cancel);
+#endif
+  }
   code = curl_easy_perform(curl);
   if (code == CURLE_OK) {
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);

@@ -62,18 +62,18 @@ def exact(sock, n):
     return data
 
 def send(sock, op, ident, payload=b''):
-    sock.sendall(header.pack(b'STPY', 3, 1, op, ident, len(payload), 0)+payload)
+    sock.sendall(header.pack(b'STPY', 4, 1, op, ident, len(payload), 0)+payload)
 
 def receive(sock):
     magic, version, kind, op, ident, size, status = header.unpack(exact(sock, 24))
-    assert (magic, version, kind) == (b'STPY', 3, 2)
+    assert (magic, version, kind) == (b'STPY', 4, 2)
     return status, exact(sock, size)
 
 def connect(directory):
     sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(12)
     sock.connect(str(directory/'service.sock'))
-    send(sock, 1, 1, struct.pack('!II', 3, 3))
+    send(sock, 1, 1, struct.pack('!II', 4, 4))
     status, snapshot = receive(sock)
     assert status == 0 and struct.unpack('!I', snapshot[24:28])[0] == 7
     return sock

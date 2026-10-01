@@ -475,3 +475,9 @@ $(BUILD_DIR)/run_reader_harness: run_reader_harness.c $(STRAPPY_STORE_SOURCES) .
 	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) $< $(STRAPPY_STORE_SOURCES) ../shared/strappy_run.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
 
 execution-test: $(BUILD_DIR)/run_reader_harness
+
+.PHONY: mutation-test
+mutation-test: $(BUILD_DIR)/strappyd
+	python3 mutation_harness.py $(BUILD_DIR)/strappyd
+
+test: mutation-test

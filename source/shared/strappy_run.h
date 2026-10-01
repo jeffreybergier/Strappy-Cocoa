@@ -20,6 +20,9 @@ int strappy_run_latest(const char *path, long long session, strappy_run_record *
 /* Writer-only calls. accept returns an IPC status; retries return the same ID. */
 unsigned int strappy_run_accept(const char *path, long long session,
     const char *key, const char *prompt, strappy_run_record *run);
+/* A busy non-prompt worker may look up durable retries but cannot accept new work. */
+unsigned int strappy_run_accept_if_idle(const char *path, long long session,
+    const char *key, const char *prompt, strappy_run_record *run, int accept_new);
 int strappy_run_update(const char *path, long long id, int state, int cancel,
     const char *kind, const char *reason, long long started, long long retry);
 int strappy_run_progress(const char *path, long long id, const strappy_responses_event *event);
