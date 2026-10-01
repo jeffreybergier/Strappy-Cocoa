@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "SessionListViewController.h"
 
 #import "AIFontAwesome.h"
@@ -289,30 +290,28 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
 - (void)addSession:(id)sender
 {
-  NSError *error;
-  StrappySession *session;
-  NSNumber *identifier;
 
   (void)sender;
-  if (self.creatingSession) {
+  if ([self creatingSession]) {
     return;
   }
 
-  self.creatingSession = YES;
+  [self setCreatingSession:YES];
   [self setControlsEnabled:NO];
 
-  error = nil;
-  session = [StrappySession createSessionWithError:&error];
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Create conversation",nil) receiver:self completion:@selector(sessionCreated:) context:nil] createSessionWithError:NULL];
+}
 
-  self.creatingSession = NO;
+- (void)sessionCreated:(StrappyAsyncResult *)result
+{
+  StrappySession *session = [result value];
+  NSNumber *identifier;
+
+  [self setCreatingSession:NO];
   [self setControlsEnabled:YES];
 
   identifier = [session sessionIdentifier];
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    [self showError:error
-              title:NSLocalizedString(@"Could not create conversation", nil)];
-    return;
-  }
+  if (![result succeeded] || ![identifier isKindOfClass:[NSNumber class]]) return;
 
   [self reloadSessionIdentifier:identifier select:YES];
 }
@@ -449,19 +448,19 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
 - (void)deleteSessionIdentifier:(NSNumber *)sessionIdentifier
 {
-  NSError *error;
-  BOOL wasSelectedSession;
 
   if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
     return;
   }
 
-  error = nil;
-  if (![StrappySession deleteSessionWithIdentifier:sessionIdentifier
-                                             error:&error]) {
-    [self showDeleteError:error];
-    return;
-  }
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete conversation",nil) receiver:self completion:@selector(sessionDeleted:) context:sessionIdentifier] deleteSessionWithIdentifier:sessionIdentifier error:NULL];
+}
+
+- (void)sessionDeleted:(StrappyAsyncResult *)result
+{
+  NSNumber *sessionIdentifier = [result context];
+  BOOL wasSelectedSession;
+  if (![result succeeded]) return;
 
   wasSelectedSession =
     ([[self selectedSessionId] isEqualToNumber:sessionIdentifier] ? YES : NO);

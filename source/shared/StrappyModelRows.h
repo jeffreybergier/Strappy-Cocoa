@@ -3,7 +3,8 @@
 extern NSString * const StrappyModelListReadFailedNotification;
 
 /* StrappySession supplies the SQLite bridge; views and the bounded array do
- * not depend on C storage headers. All methods run on the owning UI thread. */
+ * not depend on C storage headers. Use from one owner thread at a time. A query worker may build and warm a
+ * private snapshot, then transfer exclusive ownership to the UI. */
 @protocol StrappyModelListSource <NSObject>
 - (NSUInteger)count;
 - (BOOL)hasConfiguredAccounts;

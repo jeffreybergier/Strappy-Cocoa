@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "MessageListViewController.h"
 #import "StrappySession.h"
 #import "XPAppKit.h"
@@ -491,11 +492,7 @@ static BOOL StrappyContextRoundActionValues(
 - (void)handleActionURL:(NSURL *)url
 {
   NSNumber *identifier;
-  NSError *error;
-  NSString *errorMessage;
-  NSString *javaScript;
   BOOL includedInContext;
-  BOOL saved;
 
   if (!StrappyContextRoundActionValues(url,
                                        &identifier,
@@ -507,34 +504,8 @@ static BOOL StrappyContextRoundActionValues(
     return;
   }
 
-  error = nil;
-  saved = [session_
-    setModelRequestIdentifier:identifier
-            includedInContext:includedInContext
-                        error:&error];
-  if (saved) {
-    [statusText_ release];
-    statusText_ = nil;
-    javaScript = [session_
-      webViewJavaScriptForModelRequestIdentifier:identifier
-                               includedInContext:includedInContext
-                                         animated:YES];
-    if ([javaScript length] > 0U) {
-      [self flushPendingStreamEvents];
-      [self pushJavaScript:javaScript];
-      return;
-    }
-  } else {
-    errorMessage = [error localizedDescription];
-    if ([errorMessage length] == 0U) {
-      errorMessage =
-        NSLocalizedString(@"Your changes could not be saved.", nil);
-    }
-    [statusText_ release];
-    statusText_ = [errorMessage retain];
-    NSBeep();
-  }
-  [self reloadContent];
+  [[StrappyAsync commandTarget:session_ title:NSLocalizedString(@"Change context inclusion",nil) receiver:nil completion:NULL context:nil] setModelRequestIdentifier:identifier
+    includedInContext:includedInContext error:NULL];
 }
 
 - (NSURL *)contentURL

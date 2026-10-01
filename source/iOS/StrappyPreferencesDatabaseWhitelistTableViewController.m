@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "StrappyPreferencesDatabaseWhitelistTableViewController.h"
 
 #import "AIFontAwesome.h"
@@ -282,24 +283,27 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
 
 - (void)loadCatalogUsingSnapshot:(BOOL)reuse
 {
+  (void)reuse;
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyRows) object:nil];
-  NSError *error = nil;
   NSArray *descriptors = [NSArray arrayWithObjects:
     [[NSSortDescriptor alloc] initWithKey:@"application" ascending:YES],
     [[NSSortDescriptor alloc] initWithKey:@"group_key" ascending:YES],
     [[NSSortDescriptor alloc] initWithKey:@"database_priority" ascending:NO],
     [[NSSortDescriptor alloc] initWithKey:@"size" ascending:NO],
     [[NSSortDescriptor alloc] initWithKey:@"name" ascending:YES],nil];
-  FileScannerCatalogRows *rows = nil;
-  if (reuse && [[self rows] isKindOfClass:[FileScannerCatalogRows class]]) {
-    rows = (FileScannerCatalogRows *)[self rows];
-    if (![rows filterWithSearch:[self currentSearchText] showHidden:[self hiddenMode]
-        sortDescriptors:descriptors error:&error]) rows = nil;
-  } else {
-    rows = [[FileScanner sharedScanner] catalogRowsMatchingSearch:[self currentSearchText]
-      showHidden:[self hiddenMode] sortDescriptors:descriptors error:&error];
-  }
-  NSArray *sections = rows != nil ? [rows applicationSectionsWithError:&error] : nil;
+  [self setStatusMessage:NSLocalizedString(@"Loading…",nil)];
+  [self refreshStatusToolbar];
+  [[StrappyAsync queryTarget:[FileScanner sharedScanner] receiver:self completion:@selector(catalogRowsLoaded:) context:[self currentSearchText] ? [self currentSearchText] : @""]
+    catalogSnapshotMatchingSearch:[self currentSearchText] showHidden:[self hiddenMode] sortDescriptors:descriptors error:NULL];
+}
+
+- (void)catalogRowsLoaded:(StrappyAsyncResult *)result
+{
+  NSString *search = [self currentSearchText] ? [self currentSearchText] : @"";
+  if (![search isEqual:[result context]]) return;
+  NSError *error = [result error];
+  FileScannerCatalogRows *rows = [[result value] objectForKey:@"rows"];
+  NSArray *sections = [[result value] objectForKey:@"sections"];
   if (sections == nil) {
     [self setRows:[NSArray array]];
     [self setDatabaseSections:[NSArray array]];
@@ -585,7 +589,6 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 
 - (void)beginDatabaseScanWithMode:(FileScannerDatabaseScanMode)scanMode
 {
-  NSError *error;
   NSString *rootPath;
 
   if ([self scanning]) {
@@ -594,15 +597,10 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 
   rootPath = NSHomeDirectory();
   [self setStatusMessage:nil];
-  error = nil;
-  if (![FileScanner beginDatabaseCatalogScanAtPath:rootPath
+
+  [[StrappyAsync commandTarget:[FileScanner class] title:NSLocalizedString(@"Scan databases",nil) receiver:nil completion:NULL context:nil] beginDatabaseCatalogScanAtPath:rootPath
                                           scanMode:scanMode
-                                             error:&error]) {
-    [self showError:error
-              title:NSLocalizedString(@"Could not scan databases", nil)];
-    return;
-  }
-  [self setScanning:YES];
+                                             error:NULL];
 }
 
 - (void)databaseCatalogScanDidStart:(NSNotification *)notification
@@ -631,7 +629,6 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
   NSNumber *catalogId;
   BOOL shouldAllow;
   BOOL shouldHide;
-  NSError *error;
   NSString *validationError;
 
   (void)indexPath;
@@ -639,14 +636,10 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 
   if ([self hiddenMode]) {
     shouldHide = StrappyDatabaseRowHiddenValue(row) ? NO : YES;
-    error = nil;
-    if (![[FileScanner sharedScanner] setCatalogedDatabaseHidden:shouldHide
+
+    [[StrappyAsync commandTarget:[FileScanner sharedScanner] title:NSLocalizedString(@"Update database visibility",nil) receiver:nil completion:NULL context:nil] setCatalogedDatabaseHidden:shouldHide
                                             forCatalogIdentifier:catalogId
-                                                           error:&error]) {
-      [self showError:error
-                title:NSLocalizedString(@"Failed to Save Changes", nil)];
-      return;
-    }
+                                                           error:NULL];
     [self reloadRows];
     return;
   }
@@ -664,14 +657,10 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
   }
 
   shouldAllow = [self allowedValueForDatabaseRow:row] ? NO : YES;
-  error = nil;
-  if (![[FileScanner sharedScanner] setCatalogedDatabaseAllowed:shouldAllow
+
+  [[StrappyAsync commandTarget:[FileScanner sharedScanner] title:NSLocalizedString(@"Update database approval",nil) receiver:nil completion:NULL context:nil] setCatalogedDatabaseAllowed:shouldAllow
                                            forCatalogIdentifier:catalogId
-                                                          error:&error]) {
-    [self showError:error
-              title:NSLocalizedString(@"Failed to Save Changes", nil)];
-    return;
-  }
+                                                          error:NULL];
   [self reloadRows];
 }
 

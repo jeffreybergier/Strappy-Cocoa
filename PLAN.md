@@ -300,6 +300,12 @@ study, scans, catalog refresh and account changes; conflicting mutations return
 busy. UI-only presentation, drafts and authentication presentation remain local.
 See `source/daemon/VALIDATION.md` for verified outcomes and explicit limitations.
 
+The Cocoa performance follow-up is implemented: metadata commands run on a
+serial background queue, catalog searches use an independent query worker, and
+unhandled command failures reach an app-wide error channel. Active-session
+options remain local drafts until Send. See `source/daemon/ASYNC_UI.md` for
+operation policy and `source/daemon/VALIDATION.md` for test limits.
+
 ## Step 5: recovery and platform lifecycle
 
 - [x] On restart, reconcile persisted accepted/running work and publish truthful

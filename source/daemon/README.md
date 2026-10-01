@@ -6,6 +6,8 @@ existing stores read-only after IPC v4 readiness. The service also owns scans,
 study, catalog refresh, account changes and shared mutations. See [STORAGE.md](STORAGE.md) for
 ownership, snapshot lifetimes, startup/upgrade behavior, and runtime validation;
 [PROTOCOL.md](PROTOCOL.md) describes the wire contract.
+[ASYNC_UI.md](ASYNC_UI.md) describes background Cocoa commands, search snapshots,
+and asynchronous error delivery.
 
 The normal iOS `.deb` includes a signed armv7/arm64 executable (deployment
 minimums iOS 5/7). Foundation, Security, CoreFoundation and SystemConfiguration are system dependencies.

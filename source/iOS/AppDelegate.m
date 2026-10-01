@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "AppDelegate.h"
 #import "AIFontAwesome.h"
 #import "FileScanner.h"
@@ -68,13 +69,14 @@ static NSString *StrappyPromptCompletionNotificationBody(
   return NSLocalizedString(@"Prompt completed.", nil);
 }
 
-@interface AppDelegate ()
+@interface AppDelegate () <UIAlertViewDelegate>
 @property (nonatomic, strong) StrappyRootCoordinator *coordinator;
 @property (nonatomic, assign) UIBackgroundTaskIdentifier longRunningWorkBackgroundTaskIdentifier;
 @property (nonatomic, assign, getter=isLongRunningWorkIdleTimerAssertionEnabled)
   BOOL longRunningWorkIdleTimerAssertionEnabled;
 @property (nonatomic, assign, getter=isLongRunningWorkNetworkActivityIndicatorEnabled)
   BOOL longRunningWorkNetworkActivityIndicatorEnabled;
+- (void)showNextAsyncError;
 - (void)observeLongRunningWorkLifecycle;
 - (void)longRunningWorkLifecycleDidChange:(NSNotification *)notification;
 - (void)configurePromptCompletionNotifications;
@@ -89,7 +91,39 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)longRunningWorkBackgroundTaskDidExpire;
 @end
 
+static NSMutableArray *StrappyAsyncErrors;
+static BOOL StrappyAsyncErrorVisible;
+
 @implementation AppDelegate
+
+- (void)asyncCommandFailed:(NSNotification *)notification
+{
+  if (!StrappyAsyncErrors) StrappyAsyncErrors = [[NSMutableArray alloc] init];
+  [StrappyAsyncErrors addObject:[notification userInfo]];
+  [self showNextAsyncError];
+}
+
+- (void)showNextAsyncError
+{
+  NSDictionary *info;
+  UIAlertView *alert;
+  if (StrappyAsyncErrorVisible || ![StrappyAsyncErrors count] ||
+      [[UIApplication sharedApplication] applicationState] != UIApplicationStateActive) return;
+  info = [StrappyAsyncErrors objectAtIndex:0];
+  StrappyAsyncErrorVisible = YES;
+  alert = [[UIAlertView alloc] initWithTitle:[info objectForKey:@"title"]
+    message:[[info objectForKey:@"error"] localizedDescription] delegate:self
+    cancelButtonTitle:NSLocalizedString(@"OK",nil) otherButtonTitles:nil];
+  [alert show];
+}
+
+- (void)alertView:(UIAlertView *)alertView didDismissWithButtonIndex:(NSInteger)buttonIndex
+{
+  (void)alertView; (void)buttonIndex;
+  if ([StrappyAsyncErrors count]) [StrappyAsyncErrors removeObjectAtIndex:0];
+  StrappyAsyncErrorVisible = NO;
+  [self showNextAsyncError];
+}
 
 - (instancetype)init
 {
@@ -105,6 +139,10 @@ static NSString *StrappyPromptCompletionNotificationBody(
   StrappyLogApplicationLifecycle(@"didFinishLaunching begin", application);
   NSLog(@"StrappyLifecycle AppDelegate launchOptions=%@", launchOptions);
 
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(asyncCommandFailed:)
+    name:StrappyAsyncCommandFailedNotification object:nil];
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(longRunningWorkLifecycleDidChange:)
+    name:StrappyAsyncActivityChangedNotification object:nil];
   [StrappyAppearance configureAppearance];
   self.window = [[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]];
   [StrappyAppearance applyApplicationTintToWindow:[self window]];
@@ -150,6 +188,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)applicationDidBecomeActive:(UIApplication *)application
 {
   StrappyLogApplicationLifecycle(@"applicationDidBecomeActive", application);
+  [self showNextAsyncError];
   [[StrappyAuthentication sharedAuthentication]
     refreshChatGPTCredentialsIfNeeded];
   [self updateLongRunningWorkAssertions];
@@ -254,6 +293,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
 
 - (BOOL)longRunningWorkIsActive
 {
+  if ([StrappyAsync pendingCommandCount] > 0) return YES;
   return ([StrappySession hasInFlightSessions] ||
           [StrappySession isModelCatalogRefreshInFlight] ||
           [FileScanner isDatabaseCatalogScanInFlight]) ? YES : NO;

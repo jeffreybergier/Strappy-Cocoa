@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 
 #import "StrappyAppearance.h"
@@ -134,24 +135,27 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 
 - (void)loadModelRowsUsingSnapshot:(BOOL)reuse
 {
-  NSError *error = nil;
-  StrappyModelRows *rows = nil;
-  NSArray *sections;
+  (void)reuse;
+  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyRows) object:nil];
   NSArray *sort = [NSArray arrayWithObjects:
     [[NSSortDescriptor alloc] initWithKey:@"model_provider" ascending:YES],
     [[NSSortDescriptor alloc] initWithKey:@"model_allowed" ascending:NO],
     [[NSSortDescriptor alloc] initWithKey:@"model_id" ascending:YES],
     [[NSSortDescriptor alloc] initWithKey:@"model_completion_price" ascending:YES],
     [[NSSortDescriptor alloc] initWithKey:@"model_prompt_price" ascending:YES],nil];
-  [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyRows) object:nil];
-  if (reuse && [[self rows] isKindOfClass:[StrappyModelRows class]]) {
-    rows = (StrappyModelRows *)[self rows];
-    if (![rows filterWithSearch:[self currentSearchText] sortDescriptors:sort error:&error]) rows = nil;
-  } else {
-    rows = [StrappySession modelPreferenceRowsMatchingSearch:[self currentSearchText]
-      sortDescriptors:sort error:&error];
-  }
-  sections = rows != nil ? [rows providerSectionsWithError:&error] : nil;
+  [self setStatusMessage:NSLocalizedString(@"Loading…",nil)];
+  [self refreshStatusToolbar];
+  [[StrappyAsync queryTarget:[StrappySession class] receiver:self completion:@selector(modelRowsLoaded:) context:[self currentSearchText] ? [self currentSearchText] : @""]
+    modelPreferenceSnapshotMatchingSearch:[self currentSearchText] sortDescriptors:sort error:NULL];
+}
+
+- (void)modelRowsLoaded:(StrappyAsyncResult *)result
+{
+  NSString *search = [self currentSearchText] ? [self currentSearchText] : @"";
+  if (![search isEqual:[result context]]) return;
+  NSError *error = [result error];
+  StrappyModelRows *rows = [[result value] objectForKey:@"rows"];
+  NSArray *sections = [[result value] objectForKey:@"sections"];
   if (sections == nil) {
     [self setRows:[NSArray array]];
     [self setModelSections:[NSArray array]];
@@ -308,7 +312,6 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 - (void)useRow:(NSDictionary *)row atIndexPath:(NSIndexPath *)indexPath
 {
   NSString *modelIdentifier;
-  NSError *error;
   BOOL allow;
 
   (void)indexPath;
@@ -317,15 +320,10 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
     return;
   }
 
-  error = nil;
   allow = [self allowedValueForModelRow:row] ? NO : YES;
-  if (![StrappySession setModelAllowed:allow
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Update model approval",nil) receiver:nil completion:NULL context:nil] setModelAllowed:allow
                     forModelIdentifier:modelIdentifier
-                                 error:&error]) {
-    [self showError:error
-              title:NSLocalizedString(@"Failed to Save Changes", nil)];
-    return;
-  }
+                                 error:NULL];
   [self reloadRows];
 }
 

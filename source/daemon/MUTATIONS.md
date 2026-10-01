@@ -97,9 +97,10 @@ The client preserves topic bits and combines queued callbacks on the main loop.
 Session-only invalidation does not regenerate conversation HTML or reload the
 WebView. Reconnect refreshes all committed state while preserving local drafts.
 
-Other metadata mutation APIs, including future-session defaults, retain their
-existing synchronous contracts. Authentication refresh uses its background
-thread. The active-session draft path does not change those API contracts.
+Other metadata mutation APIs execute through the asynchronous Cocoa command
+queue. Future-session defaults show pending control state and reload on
+completion. Authentication refresh retains its background thread. See
+[ASYNC_UI.md](ASYNC_UI.md) for ordering, failure handling, and query ownership.
 
 ## Verification
 

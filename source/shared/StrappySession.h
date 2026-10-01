@@ -217,6 +217,10 @@ enum {
 + (NSArray *)modelCatalogMatchingSearchText:(NSString *)searchText
                                        error:(NSError **)error;
 + (NSArray *)modelCatalogWithError:(NSError **)error;
+/* Worker creates a private reader and warms the first page; ownership transfers
+ * exclusively to the UI on completion. No snapshot is shared between queries. */
++ (NSDictionary *)modelPreferenceSnapshotMatchingSearch:(NSString *)search
+  sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
 + (StrappyModelRows *)modelPreferenceRowsMatchingSearch:(NSString *)search
   sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
 + (NSArray *)configuredProviderModelCatalogWithError:(NSError **)error;
@@ -246,6 +250,7 @@ enum {
 + (BOOL)setOpenRouterModelAllowed:(BOOL)allowed
                 forModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error;
++ (BOOL)setModelsAllowed:(BOOL)allowed identifiers:(NSArray *)identifiers error:(NSError **)error;
 + (BOOL)setModelAllowed:(BOOL)allowed
      forModelIdentifier:(NSString *)modelIdentifier
                   error:(NSError **)error;

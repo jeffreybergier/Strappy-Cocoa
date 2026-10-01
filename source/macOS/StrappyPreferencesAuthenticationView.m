@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "StrappyPreferencesAuthenticationView.h"
 
 #import "AIFontAwesome.h"
@@ -472,31 +473,24 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   if ((tableView == providerTableView_) && (row >= 0) &&
       (row < (NSInteger)[providers_ count]) && !creatingAccount_) {
     NSDictionary *provider;
-    NSDictionary *account;
-    NSError *error;
 
-    [tableView retain];
     provider = [providers_ objectAtIndex:(NSUInteger)row];
     creatingAccount_ = YES;
-    error = nil;
-    account = [StrappySession
-      createProviderAccountForProviderIdentifier:[provider objectForKey:@"id"]
-                                           error:&error];
-    creatingAccount_ = NO;
-    suppressSelectionNotification_ = YES;
-    [providerTableView_ deselectAll:self];
-    suppressSelectionNotification_ = NO;
-    if (account == nil) {
-      [self showError:error
-                title:NSLocalizedString(@"Could Not Add Account", nil)];
-      [tableView release];
-      return;
-    }
-    [self reloadAccountsPreservingSelection];
-    [self selectAccountIdentifier:[account objectForKey:@"id"]];
-    [tableView release];
+    [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Add account",nil) receiver:self completion:@selector(accountCreated:) context:nil] createProviderAccountForProviderIdentifier:[provider objectForKey:@"id"] error:NULL];
   }
 }
+
+- (void)accountCreated:(StrappyAsyncResult *)result
+{
+  creatingAccount_ = NO;
+  suppressSelectionNotification_ = YES;
+  [providerTableView_ deselectAll:self];
+  suppressSelectionNotification_ = NO;
+  if (![result succeeded]) return;
+  [self reloadAccountsPreservingSelection];
+  [self selectAccountIdentifier:[[result value] objectForKey:@"id"]];
+}
+
 
 - (NSInteger)rowForAccountIdentifier:(NSString *)identifier
 {
@@ -1070,9 +1064,9 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   NSString *token;
   NSString *maxOutputText;
   long long maxOutputTokens;
-  NSError *error;
 
   (void)sender;
+  if (![saveButton_ isEnabled]) return;
   account = [self selectedAccount];
   provider = [account objectForKey:@"provider_id"];
   name = [[accountNameField_ stringValue]
@@ -1113,19 +1107,27 @@ static NSButton *StrappyAccountsButton(NSRect frame,
               title:NSLocalizedString(@"Responses Endpoint Is Required", nil)];
     return;
   }
-  error = nil;
-  if (![StrappySession
-        updateProviderAccountIdentifier:selectedAccountIdentifier_
-                            displayName:name
-                      responsesEndpoint:endpoint
-                        maxOutputTokens:maxOutputTokens
-                            bearerToken:token
-                                  error:&error]) {
-    [self showError:error
-              title:NSLocalizedString(@"Could Not Save Account", nil)];
-    return;
-  }
-  [self reloadAccountsPreservingSelection];
+
+  [accountNameField_ setEditable:NO];
+  [endpointField_ setEditable:NO];
+  [tokenField_ setEditable:NO];
+  [maxOutputTokensField_ setEditable:NO];
+  [maxOutputTokensButton_ setEnabled:NO];
+  [saveButton_ setEnabled:NO];
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save account",nil) receiver:self completion:@selector(accountSaved:) context:selectedAccountIdentifier_] updateProviderAccountIdentifier:selectedAccountIdentifier_
+    displayName:name responsesEndpoint:endpoint maxOutputTokens:maxOutputTokens bearerToken:token error:NULL];
+}
+
+- (void)accountSaved:(StrappyAsyncResult *)result
+{
+  if (![[result context] isEqualToString:selectedAccountIdentifier_]) return;
+  [accountNameField_ setEditable:YES];
+  [endpointField_ setEditable:YES];
+  [tokenField_ setEditable:YES];
+  [maxOutputTokensField_ setEditable:YES];
+  [maxOutputTokensButton_ setEnabled:YES];
+  [saveButton_ setEnabled:![result succeeded]];
+  if ([result succeeded]) [self reloadAccountsPreservingSelection];
 }
 
 - (void)deleteAccount:(id)sender
@@ -1169,7 +1171,6 @@ static NSButton *StrappyAccountsButton(NSRect frame,
                      contextInfo:(void *)contextInfo
 {
   NSString *accountIdentifier;
-  NSError *error;
 
   (void)alert;
   accountIdentifier = (NSString *)contextInfo;
@@ -1177,20 +1178,22 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     [accountIdentifier release];
     return;
   }
-  error = nil;
-  if (![StrappySession
-        archiveProviderAccountIdentifier:accountIdentifier
-                                    error:&error]) {
-    [self showError:error
-              title:NSLocalizedString(@"Could Not Delete Account", nil)];
-    [accountIdentifier release];
-    return;
-  }
+
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete account",nil) receiver:self completion:@selector(accountDeleted:) context:accountIdentifier] archiveProviderAccountIdentifier:accountIdentifier error:NULL];
+  [accountIdentifier release];
+}
+
+- (void)accountDeleted:(StrappyAsyncResult *)result
+{
+  NSString *accountIdentifier = [[result context] retain];
+  if (![result succeeded]) { [accountIdentifier release]; return; }
   [StrappyAuthentication
     forgetAuthenticationForProviderAccountIdentifier:accountIdentifier];
+  if ([selectedAccountIdentifier_ isEqualToString:accountIdentifier]) {
+    [selectedAccountIdentifier_ release];
+    selectedAccountIdentifier_ = nil;
+  }
   [accountIdentifier release];
-  [selectedAccountIdentifier_ release];
-  selectedAccountIdentifier_ = nil;
   [self reloadAccountsPreservingSelection];
 }
 

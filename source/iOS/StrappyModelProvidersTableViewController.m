@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "StrappyModelProvidersTableViewController.h"
 
 #import "StrappyActivityAccessoryView.h"
@@ -133,7 +134,7 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
   if ([identifier isEqualToString:@"openrouter"]) {
     NSError *error;
     error = nil;
-    if (![StrappySession beginOpenRouterModelCatalogRefreshWithError:&error]) {
+    if (![[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Fetch models",nil) receiver:nil completion:NULL context:nil] beginOpenRouterModelCatalogRefreshWithError:&error]) {
       UIAlertView *alert;
       alert = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Could Not Fetch Models", nil)
         message:[error localizedDescription] delegate:nil
@@ -406,8 +407,6 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
   NSString *readPrice;
   NSString *writePrice;
   BOOL valid;
-  NSError *error;
-  BOOL success;
   (void)sender;
   wireID = [[[[self fields] objectAtIndex:0U] text]
     stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -420,26 +419,32 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
   readPrice = valid ? [self priceForFieldAtIndex:6U valid:&valid] : nil;
   writePrice = valid ? [self priceForFieldAtIndex:7U valid:&valid] : nil;
   if (!valid) { [self showMessage:NSLocalizedString(@"Prices must be numbers greater than or equal to zero.", nil) title:NSLocalizedString(@"Invalid Price", nil)]; return; }
-  error = nil;
+  [[[self navigationItem] rightBarButtonItem] setEnabled:NO];
+  [[self view] setUserInteractionEnabled:NO];
   if ([self model] == nil) {
-    success = [StrappySession createManualModelForProviderIdentifier:[self providerIdentifier]
+    [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save model",nil) receiver:self completion:@selector(modelSaved:) context:nil] createManualModelForProviderIdentifier:[self providerIdentifier]
       wireModelID:wireID displayName:name
       contextWindowTokens:[[[[self fields] objectAtIndex:2U] text] longLongValue]
       maxOutputTokens:[[[[self fields] objectAtIndex:3U] text] longLongValue]
       reasoningEnabled:[[self reasoningSwitch] isOn] imageInputEnabled:[[self imagesSwitch] isOn]
       localFunctionsEnabled:YES inputPricePerToken:inputPrice outputPricePerToken:outputPrice
-      cacheReadPricePerToken:readPrice cacheWritePricePerToken:writePrice error:&error] != nil;
+      cacheReadPricePerToken:readPrice cacheWritePricePerToken:writePrice error:NULL];
   } else {
-    success = [StrappySession updateManualModelForProviderIdentifier:[self providerIdentifier]
+    [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save model",nil) receiver:self completion:@selector(modelSaved:) context:nil] updateManualModelForProviderIdentifier:[self providerIdentifier]
       wireModelID:wireID displayName:name
       contextWindowTokens:[[[[self fields] objectAtIndex:2U] text] longLongValue]
       maxOutputTokens:[[[[self fields] objectAtIndex:3U] text] longLongValue]
       reasoningEnabled:[[self reasoningSwitch] isOn] imageInputEnabled:[[self imagesSwitch] isOn]
       localFunctionsEnabled:YES inputPricePerToken:inputPrice outputPricePerToken:outputPrice
-      cacheReadPricePerToken:readPrice cacheWritePricePerToken:writePrice error:&error];
+      cacheReadPricePerToken:readPrice cacheWritePricePerToken:writePrice error:NULL];
   }
-  if (!success) { [self showMessage:[error localizedDescription] title:NSLocalizedString(@"Could Not Save Model", nil)]; return; }
-  [self XP_dismissViewControllerAnimated:YES];
+}
+
+- (void)modelSaved:(StrappyAsyncResult *)result
+{
+  [[[self navigationItem] rightBarButtonItem] setEnabled:YES];
+  [[self view] setUserInteractionEnabled:YES];
+  if ([result succeeded] && [[self view] window] != nil) [self XP_dismissViewControllerAnimated:YES];
 }
 
 - (void)showMessage:(NSString *)message title:(NSString *)title
@@ -505,16 +510,16 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
 {
-  NSError *error;
   (void)alertView;
   if (buttonIndex == 0) return;
-  error = nil;
-  if (![StrappySession archiveManualModelForProviderIdentifier:[self providerIdentifier]
-      wireModelID:StrappyProviderModelString([self model], @"wire_model_id") error:&error]) {
-    [self showMessage:[error localizedDescription] title:NSLocalizedString(@"Could Not Delete Model", nil)];
-  } else {
-    [self XP_dismissViewControllerAnimated:YES];
-  }
+
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete model",nil) receiver:self completion:@selector(modelArchived:) context:nil] archiveManualModelForProviderIdentifier:[self providerIdentifier]
+      wireModelID:StrappyProviderModelString([self model], @"wire_model_id") error:NULL];
+}
+
+- (void)modelArchived:(StrappyAsyncResult *)result
+{
+  if ([result succeeded] && [[self view] window] != nil) [self XP_dismissViewControllerAnimated:YES];
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField

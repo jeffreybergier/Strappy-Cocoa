@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "MessageListViewController.h"
 
 #import "PromptSendViewController.h"
@@ -1406,11 +1407,7 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
 - (void)handleActionURL:(NSURL *)url
 {
   NSNumber *identifier;
-  NSError *error;
-  NSString *javaScript;
-  NSString *message;
   BOOL includedInContext;
-  BOOL saved;
 
   if (!StrappyContextRoundActionValues(url,
                                        &identifier,
@@ -1422,32 +1419,8 @@ shouldStartLoadWithRequest:(NSURLRequest *)request
     return;
   }
 
-  error = nil;
-  saved = [[self session]
-    setModelRequestIdentifier:identifier
-            includedInContext:includedInContext
-                        error:&error];
-  if (saved) {
-    javaScript = [[self session]
-      webViewJavaScriptForModelRequestIdentifier:identifier
-                               includedInContext:includedInContext
-                                         animated:YES];
-    if ([javaScript length] > 0U) {
-      [self flushPendingStreamEvents];
-      [[self webView] evaluateJavaScript:javaScript];
-      return;
-    }
-    [self reloadContent];
-    return;
-  }
-
-  [self reloadContent];
-  message = [error localizedDescription];
-  if ([message length] == 0U) {
-    message = NSLocalizedString(@"Your changes could not be saved.", nil);
-  }
-  [self showMessage:message
-              title:NSLocalizedString(@"Failed to Save Changes", nil)];
+  [[StrappyAsync commandTarget:[self session] title:NSLocalizedString(@"Change context inclusion",nil) receiver:nil completion:NULL context:nil] setModelRequestIdentifier:identifier
+    includedInContext:includedInContext error:NULL];
 }
 
 - (void)xpWebViewDidFinishLoad:(XPWebView *)webView

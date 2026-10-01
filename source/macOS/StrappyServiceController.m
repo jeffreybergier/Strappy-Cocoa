@@ -175,6 +175,15 @@ done:
 }
 
 @implementation StrappyServiceController
++ (BOOL)prepareForApplicationWithError:(NSError **)error
+{
+  NSString *message = nil;
+  BOOL success = [self installWithError:&message];
+  if (!success && error) *error = [NSError errorWithDomain:@"StrappyServiceErrorDomain" code:1
+    userInfo:[NSDictionary dictionaryWithObject:message ? message : @"The background service could not be started."
+      forKey:NSLocalizedDescriptionKey]];
+  return success;
+}
 + (BOOL)installWithError:(NSString **)error
 {
   return StrappyServiceChange(YES, error);

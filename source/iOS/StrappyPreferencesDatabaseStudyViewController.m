@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "StrappyPreferencesDatabaseStudyViewController.h"
 
 #import "AIFontAwesome.h"
@@ -750,7 +751,6 @@ forRowAtIndexPath:(NSIndexPath *)indexPath
 {
   NSString *databaseIdentifier;
   NSDictionary *row;
-  NSError *error;
 
   if (editingStyle != UITableViewCellEditingStyleDelete) {
     return;
@@ -762,15 +762,10 @@ forRowAtIndexPath:(NSIndexPath *)indexPath
     return;
   }
   databaseIdentifier = StrappyStudyStringForRow(row, @"database_id");
-  error = nil;
-  if (![StrappySession deleteDatabaseStudyValuesForDatabaseIdentifier:
+
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete database study",nil) receiver:nil completion:NULL context:nil] deleteDatabaseStudyValuesForDatabaseIdentifier:
         databaseIdentifier
-                                                               error:&error]) {
-    [tableView setEditing:NO animated:YES];
-    [self showError:error
-              title:NSLocalizedString(@"Could Not Delete Study", nil)];
-    return;
-  }
+                                                               error:NULL];
   [self reloadStudyRows];
 }
 
@@ -877,7 +872,7 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
   }
   error = nil;
   if ([alertView tag] == kStrappyDatabaseStudyResetAlertTag) {
-    if (![StrappySession resetDatabaseStudyWithError:&error]) {
+    if (![[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Reset database study",nil) receiver:nil completion:NULL context:nil] resetDatabaseStudyWithError:&error]) {
       [self showError:error title:NSLocalizedString(@"Could Not Reset Study", nil)];
       return;
     }
@@ -888,18 +883,18 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 - (void)actionSheet:(UIActionSheet *)actionSheet
 clickedButtonAtIndex:(NSInteger)buttonIndex
 {
-  NSError *error;
 
   if (([actionSheet tag] != kStrappyDatabaseStudyRunActionSheetTag) ||
       (buttonIndex == [actionSheet cancelButtonIndex])) {
     return;
   }
-  error = nil;
-  if ([StrappySession beginDatabaseStudyWithError:&error] == nil) {
-    [self showError:error title:NSLocalizedString(@"Could Not Start Study", nil)];
-    return;
-  }
-  [self XP_dismissViewControllerAnimated:YES];
+
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Start database study",nil) receiver:self completion:@selector(studyStarted:) context:nil] beginDatabaseStudyWithError:NULL];
+}
+
+- (void)studyStarted:(StrappyAsyncResult *)result
+{
+  if ([result succeeded] && [[self view] window] != nil) [self XP_dismissViewControllerAnimated:YES];
 }
 
 - (void)showError:(NSError *)error title:(NSString *)title

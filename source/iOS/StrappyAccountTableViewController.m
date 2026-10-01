@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "StrappyAccountTableViewController.h"
 
 #import "StrappyAppearance.h"
@@ -234,7 +235,6 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   NSString *token;
   NSString *maximumText;
   long long maximum;
-  NSError *error;
 
   (void)sender;
   identifier = [self providerAccountIdentifier];
@@ -271,13 +271,18 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
       @"Responses Endpoint Is Required", nil)];
     return;
   }
-  error = nil;
-  if (![StrappySession updateProviderAccountIdentifier:identifier
-    displayName:name responsesEndpoint:endpoint maxOutputTokens:maximum
-    bearerToken:token error:&error]) {
-    [self showError:error title:NSLocalizedString(@"Could Not Save Account", nil)];
-    return;
-  }
+
+  [[[self navigationItem] rightBarButtonItem] setEnabled:NO];
+  [[self view] setUserInteractionEnabled:NO];
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save account",nil) receiver:self completion:@selector(accountSaved:) context:nil] updateProviderAccountIdentifier:identifier
+    displayName:name responsesEndpoint:endpoint maxOutputTokens:maximum bearerToken:token error:NULL];
+}
+
+- (void)accountSaved:(StrappyAsyncResult *)result
+{
+  [[[self navigationItem] rightBarButtonItem] setEnabled:YES];
+  [[self view] setUserInteractionEnabled:YES];
+  if (![result succeeded] || [[self view] window] == nil) return;
   if ([self presentedModally]) {
     [self XP_dismissViewControllerAnimated:YES];
   } else {
@@ -523,22 +528,25 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 
 - (void)alertView:(UIAlertView *)alertView clickedButtonAtIndex:(NSInteger)buttonIndex
 {
-  NSError *error;
 
   (void)alertView;
   if (buttonIndex == 0) return;
-  error = nil;
-  if (![StrappySession archiveProviderAccountIdentifier:
-      [self providerAccountIdentifier] error:&error]) {
-    [self showError:error title:NSLocalizedString(@"Could Not Delete Account", nil)];
-  } else if ([self presentedModally]) {
+
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete account",nil) receiver:self completion:@selector(accountDeleted:) context:nil] archiveProviderAccountIdentifier:[self providerAccountIdentifier] error:NULL];
+}
+
+- (void)accountDeleted:(StrappyAsyncResult *)result
+{
+  if (![result succeeded]) return;
+  if ([self presentedModally]) {
     [StrappyAuthentication forgetAuthenticationForProviderAccountIdentifier:
       [self providerAccountIdentifier]];
-    [self XP_dismissViewControllerAnimated:YES];
+    if ([[self view] window] != nil) [self XP_dismissViewControllerAnimated:YES];
   } else {
     [StrappyAuthentication forgetAuthenticationForProviderAccountIdentifier:
       [self providerAccountIdentifier]];
-    [[self navigationController] popViewControllerAnimated:YES];
+    if ([[self navigationController] topViewController] == self)
+      [[self navigationController] popViewControllerAnimated:YES];
   }
 }
 
@@ -608,23 +616,19 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 - (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   NSDictionary *provider;
-  NSDictionary *account;
-  NSError *error;
-  StrappyAccountTableViewController *controller;
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
   provider = [[StrappySession providerCatalog] objectAtIndex:(NSUInteger)[indexPath row]];
-  error = nil;
-  account = [StrappySession createProviderAccountForProviderIdentifier:
-    StrappyAccountString(provider, @"id") error:&error];
-  if (account == nil) {
-    UIAlertView *alert;
-    alert = [[UIAlertView alloc] initWithTitle:NSLocalizedString(@"Could Not Add Account", nil)
-      message:[error localizedDescription] delegate:nil
-      cancelButtonTitle:NSLocalizedString(@"OK", nil) otherButtonTitles:nil];
-    [alert show];
-    return;
-  }
+  [[self view] setUserInteractionEnabled:NO];
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Add account",nil) receiver:self completion:@selector(accountCreated:) context:nil] createProviderAccountForProviderIdentifier:StrappyAccountString(provider,@"id") error:NULL];
+}
+
+- (void)accountCreated:(StrappyAsyncResult *)result
+{
+  NSDictionary *account = [result value];
+  StrappyAccountTableViewController *controller;
+  [[self view] setUserInteractionEnabled:YES];
+  if (![result succeeded] || [[self navigationController] topViewController] != self) return;
   controller = [[StrappyAccountTableViewController alloc]
     initWithProviderAccountIdentifier:StrappyAccountString(account, @"id")];
   [[self navigationController] pushViewController:controller animated:YES];

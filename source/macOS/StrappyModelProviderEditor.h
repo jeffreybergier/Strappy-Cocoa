@@ -13,6 +13,7 @@
   NSArray              *bundledChatGPTModels_;
   NSArray              *otherModels_;
   NSMutableDictionary  *draftOtherModel_;
+  BOOL savingModel_;
   NSString             *selectedProviderIdentifier_;
   NSTableView          *otherTableView_;
   NSButton             *fetchButton_;

@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "FileScanner.h"
 
 #import "StrappySession.h"
@@ -34,6 +35,12 @@ static BOOL FileScannerDatabaseCatalogScanInFlight = NO;
 
 static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError **error)
 {
+  if ([NSThread XP_isMainThread]) {
+    cJSON_Delete(command);
+    if (error) *error = [FileScanner errorFromCString:"The action could not be started."];
+    return NO;
+  }
+
   unsigned int status;
   char *reply = strappy_store_client_mutation(operation,command,&status);
   BOOL ok = reply != NULL;
@@ -88,8 +95,7 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
   cJSON_AddStringToObject(command,"path",[path fileSystemRepresentation]);
   cJSON_AddStringToObject(command,"quick",scanMode == FileScannerDatabaseScanModeQuick ? "1" : "0");
   if (!FileScannerCommand(STRAPPY_IPC_START_SCAN,command,error)) return NO;
-  @synchronized(self) { FileScannerDatabaseCatalogScanInFlight = YES; }
-  [[NSNotificationCenter defaultCenter] postNotificationName:FileScannerDatabaseCatalogScanDidStartNotification object:self];
+  /* The monitor owns activity state. A fast job can finish before this reply. */
   return YES;
 }
 
@@ -109,10 +115,14 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
   /* Publish committed batches even when a later part of the scan failed. */
   [self databaseCatalogDidChange:userInfo];
 
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:FileScannerDatabaseCatalogScanDidFinishNotification
+  [StrappyAsync postNotificationName:FileScannerDatabaseCatalogScanDidFinishNotification
                   object:self
                 userInfo:userInfo];
+  NSString *message = [userInfo objectForKey:@"error"];
+  if ([message isKindOfClass:[NSString class]]) [StrappyAsync reportError:
+    [NSError errorWithDomain:@"StrappyServiceErrorDomain" code:1 userInfo:
+      [NSDictionary dictionaryWithObject:message forKey:NSLocalizedDescriptionKey]]
+    title:NSLocalizedString(@"Scan databases",nil)];
   [userInfo release];
 }
 
@@ -122,8 +132,7 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
 
   userInfo = [result isKindOfClass:[NSDictionary class]] ?
     result : [NSDictionary dictionary];
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:FileScannerDatabaseCatalogDidChangeNotification
+  [StrappyAsync postNotificationName:FileScannerDatabaseCatalogDidChangeNotification
                   object:self
                 userInfo:userInfo];
 }
@@ -137,7 +146,7 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
       [NSDictionary dictionary] : [NSDictionary dictionaryWithObject:@"Scan failed or the service restarted." forKey:@"error"]];
   } else if (![self isDatabaseCatalogScanInFlight] && active == STRAPPY_IPC_START_SCAN) {
     @synchronized(self) { FileScannerDatabaseCatalogScanInFlight = YES; }
-    [[NSNotificationCenter defaultCenter] postNotificationName:FileScannerDatabaseCatalogScanDidStartNotification object:self];
+    [StrappyAsync postNotificationName:FileScannerDatabaseCatalogScanDidStartNotification object:self];
   }
 }
 
@@ -372,12 +381,32 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
   return rows;
 }
 
+- (NSDictionary *)catalogSnapshotMatchingSearch:(NSString *)search
+  showHidden:(BOOL)showHidden sortDescriptors:(NSArray *)descriptors error:(NSError **)error
+{
+  FileScannerCatalogRows *rows = [self catalogRowsMatchingSearch:search showHidden:showHidden sortDescriptors:descriptors error:error];
+  NSArray *sections = rows ? [rows applicationSectionsWithError:error] : nil;
+  if (!sections) return nil;
+  if ([rows count]) (void)[rows objectAtIndex:0];
+  if ([rows readError]) { if (error) *error = [rows readError]; return nil; }
+  return [NSDictionary dictionaryWithObjectsAndKeys:rows,@"rows",sections,@"sections",nil];
+}
+
 - (FileScannerCatalogRows *)catalogRowsMatchingSearch:(NSString *)search
   showHidden:(BOOL)showHidden sortDescriptors:(NSArray *)descriptors error:(NSError **)error
 {
   if (![StrappySession initializeSessionStoreWithError:error]) return nil;
   return [[[FileScannerCatalogRows alloc] initWithPath:[StrappySession sessionsDatabasePath]
     search:search showHidden:showHidden descriptors:descriptors error:error] autorelease];
+}
+
+- (BOOL)setCatalogedDatabasesAllowed:(BOOL)allowed identifiers:(NSArray *)identifiers error:(NSError **)error
+{
+  NSEnumerator *enumerator = [identifiers objectEnumerator];
+  NSNumber *identifier;
+  while ((identifier = [enumerator nextObject]) != nil)
+    if (![self setCatalogedDatabaseAllowed:allowed forCatalogIdentifier:identifier error:error]) return NO;
+  return YES;
 }
 
 - (BOOL)setCatalogedDatabaseAllowed:(BOOL)allowed

@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "PreferencesTableViewController.h"
 
 #import "AIFontAwesome.h"
@@ -290,21 +291,24 @@ enum {
 - (BOOL)updateSessionOptions:(StrappySessionOptions *)options
                changedFields:(StrappySessionOptionMask)changedFields
 {
-  NSError *error;
+  UIViewController *editor = [[self navigationController] topViewController];
+  [self setDefaultSessionOptions:options];
+  [self setDefaultSessionOptionsLoaded:YES];
+  [[editor view] setUserInteractionEnabled:NO];
+  [[editor navigationItem] setPrompt:NSLocalizedString(@"Saving…",nil)];
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save session defaults",nil) receiver:self completion:@selector(defaultsSaved:) context:editor] updateDefaultSessionOptions:options changedFields:changedFields error:NULL];
+  return YES;
+}
 
-  error = nil;
-  if (![StrappySession updateDefaultSessionOptions:options
-                                      changedFields:changedFields
-                                              error:&error]) {
-    [self showError:error
-              title:NSLocalizedString(@"Failed to Save Changes", nil)];
-    return NO;
-  }
-
+- (void)defaultsSaved:(StrappyAsyncResult *)result
+{
+  UIViewController *editor = [result context];
+  [[editor view] setUserInteractionEnabled:YES];
+  [[editor navigationItem] setPrompt:nil];
   [self setDefaultSessionOptions:nil];
   [self setDefaultSessionOptionsLoaded:NO];
-  (void)[self sessionOptions];
-  return YES;
+  if ([editor respondsToSelector:@selector(reloadOptionsFromDelegate)])
+    [editor performSelector:@selector(reloadOptionsFromDelegate)];
 }
 
 - (void)dismissOptionsControllerAnimated:(BOOL)animated
@@ -455,7 +459,6 @@ didDismissWithButtonIndex:(NSInteger)buttonIndex
   NSArray *providers;
   NSUInteger providerIndex;
   BOOL providerAvailable;
-  NSError *error;
 
   if (([actionSheet tag] != kStrappyAddAccountActionSheetTag) ||
       (buttonIndex == [actionSheet cancelButtonIndex])) {
@@ -491,11 +494,7 @@ didDismissWithButtonIndex:(NSInteger)buttonIndex
     return;
   }
 
-  error = nil;
-  if ([StrappySession createProviderAccountForProviderIdentifier:
-        providerIdentifier error:&error] == nil) {
-    [self showError:error title:NSLocalizedString(@"Could Not Add Account", nil)];
-  }
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Add account",nil) receiver:nil completion:NULL context:nil] createProviderAccountForProviderIdentifier:providerIdentifier error:NULL];
 }
 
 - (void)tableView:(UITableView *)tableView

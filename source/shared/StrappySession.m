@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #include "strappy_run.h"
 #import "strappy_store_client.h"
 #import "FileScanner.h"
@@ -676,6 +677,12 @@ static BOOL StrappySessionRecordFromOptions(
 
 static NSString *StrappyServiceCommand(unsigned int operation, NSDictionary *values, NSError **error)
 {
+  if ([NSThread XP_isMainThread]) {
+    if (error) *error = [NSError errorWithDomain:@"StrappyServiceErrorDomain" code:1001
+      userInfo:[NSDictionary dictionaryWithObject:@"The action could not be started." forKey:NSLocalizedDescriptionKey]];
+    return nil;
+  }
+
   cJSON *command = cJSON_CreateObject();
   NSEnumerator *keys = [values keyEnumerator];
   NSString *key;
@@ -780,19 +787,19 @@ static void StrappyStoreChanged(unsigned int topics)
         [NSDictionary dictionary] : [NSDictionary dictionaryWithObject:@"Model refresh failed or the service restarted." forKey:@"error"]];
     } else if (![self isModelCatalogRefreshInFlight] && active == STRAPPY_IPC_REFRESH_CATALOG) {
       @synchronized(self) { StrappySessionModelCatalogRefreshInFlight = YES; }
-      [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification object:self];
+      [StrappyAsync postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification object:self];
     }
     [FileScanner serviceWorkDidChange];
   }
   if (topics & (STRAPPY_STORE_SESSION | STRAPPY_STORE_LEDGER | STRAPPY_STORE_RUN)) {
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"StrappyServiceChanged" object:nil
+    [StrappyAsync postNotificationName:@"StrappyServiceChanged" object:nil
       userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithUnsignedInt:topics] forKey:@"topics"]];
-    [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionDidUpdateNotification object:nil];
+    [StrappyAsync postNotificationName:StrappySessionDidUpdateNotification object:nil];
   }
   if (topics & STRAPPY_STORE_CATALOG) {
-    [[NSNotificationCenter defaultCenter] postNotificationName:StrappyProviderAccountsDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogDidChangeNotification object:nil];
-    [[NSNotificationCenter defaultCenter] postNotificationName:FileScannerDatabaseCatalogDidChangeNotification object:nil];
+    [StrappyAsync postNotificationName:StrappyProviderAccountsDidChangeNotification object:nil];
+    [StrappyAsync postNotificationName:StrappySessionModelCatalogDidChangeNotification object:nil];
+    [StrappyAsync postNotificationName:FileScannerDatabaseCatalogDidChangeNotification object:nil];
   }
 }
 
@@ -1041,18 +1048,16 @@ static void StrappyStoreChanged(unsigned int topics)
     StrappySessionOptions *storedOptions;
     [self updateCachedSummary:summary];
     storedOptions = [self optionsWithError:nil];
-    if (storedOptions != nil) [[NSNotificationCenter defaultCenter]
-      postNotificationName:StrappySessionDidUpdateNotification object:self
+    if (storedOptions != nil) [StrappyAsync postNotificationName:StrappySessionDidUpdateNotification object:self
       userInfo:[NSDictionary dictionaryWithObjectsAndKeys:summary,@"session",
         storedOptions,StrappySessionOptionsKey,
         [NSNumber XP_numberWithUnsignedInteger:StrappySessionOptionAll],StrappySessionChangedOptionsKey,
         StrappySessionChangeKindOptions,StrappySessionChangeKindKey,nil]];
   }
-  if (topics & STRAPPY_STORE_LEDGER) [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionStreamEventNotification
+  if (topics & STRAPPY_STORE_LEDGER) [StrappyAsync postNotificationName:StrappySessionStreamEventNotification
       object:self userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES]
       forKey:@"service_invalidated"]];
-  if (active && !previous) [[NSNotificationCenter defaultCenter]
-      postNotificationName:StrappySessionPromptDidStartNotification object:self];
+  if (active && !previous) [StrappyAsync postNotificationName:StrappySessionPromptDidStartNotification object:self];
   if (!active && (previous || (terminalChanged && terminalError))) {
     NSMutableDictionary *result = [NSMutableDictionary dictionary];
     if (summary) [result setObject:summary forKey:@"session"];
@@ -1794,8 +1799,7 @@ static void StrappyStoreChanged(unsigned int topics)
     }
   }
   if (didPrepare) {
-    [[NSNotificationCenter defaultCenter]
-      postNotificationName:StrappyProviderAccountsDidChangeNotification
+    [StrappyAsync postNotificationName:StrappyProviderAccountsDidChangeNotification
                     object:self
                   userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
                     @"prepared", @"action", nil]];
@@ -2394,6 +2398,17 @@ static void StrappyStoreChanged(unsigned int topics)
   return [StrappySession modelCatalogMatchingSearchText:nil error:error];
 }
 
++ (NSDictionary *)modelPreferenceSnapshotMatchingSearch:(NSString *)search
+  sortDescriptors:(NSArray *)descriptors error:(NSError **)error
+{
+  StrappyModelRows *rows = [self modelPreferenceRowsMatchingSearch:search sortDescriptors:descriptors error:error];
+  NSArray *sections = rows ? [rows providerSectionsWithError:error] : nil;
+  if (!sections) return nil;
+  if ([rows count]) (void)[rows objectAtIndex:0];
+  if ([rows readError]) { if (error) *error = [rows readError]; return nil; }
+  return [NSDictionary dictionaryWithObjectsAndKeys:rows,@"rows",sections,@"sections",nil];
+}
+
 + (StrappyModelRows *)modelPreferenceRowsMatchingSearch:(NSString *)search
   sortDescriptors:(NSArray *)descriptors error:(NSError **)error
 {
@@ -2794,6 +2809,15 @@ static void StrappyStoreChanged(unsigned int topics)
   return command && StrappyServiceCommand(STRAPPY_IPC_MUTATE,command,error) != nil;
 }
 
++ (BOOL)setModelsAllowed:(BOOL)allowed identifiers:(NSArray *)identifiers error:(NSError **)error
+{
+  NSEnumerator *enumerator = [identifiers objectEnumerator];
+  NSString *identifier;
+  while ((identifier = [enumerator nextObject]) != nil)
+    if (![self setModelAllowed:allowed forModelIdentifier:identifier error:error]) return NO;
+  return YES;
+}
+
 + (BOOL)setModelAllowed:(BOOL)allowed
      forModelIdentifier:(NSString *)modelIdentifier
                   error:(NSError **)error
@@ -2931,8 +2955,7 @@ static void StrappyStoreChanged(unsigned int topics)
   }
   if (StrappyServiceCommand(STRAPPY_IPC_REFRESH_CATALOG,
       [NSDictionary dictionaryWithObject:identifier forKey:@"id"],error) == nil) return NO;
-  @synchronized(self) { StrappySessionModelCatalogRefreshInFlight = YES; }
-  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification object:self];
+  /* The monitor owns activity state. A fast job can finish before this reply. */
   return YES;
 }
 
@@ -2950,16 +2973,19 @@ static void StrappyStoreChanged(unsigned int topics)
   }
 
   if ([userInfo objectForKey:@"error"] == nil) {
-    [[NSNotificationCenter defaultCenter]
-      postNotificationName:StrappySessionModelCatalogDidChangeNotification
+    [StrappyAsync postNotificationName:StrappySessionModelCatalogDidChangeNotification
                     object:self
                   userInfo:userInfo];
   }
 
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionModelCatalogRefreshDidFinishNotification
+  [StrappyAsync postNotificationName:StrappySessionModelCatalogRefreshDidFinishNotification
                   object:self
                 userInfo:userInfo];
+  NSString *message = [userInfo objectForKey:@"error"];
+  if ([message isKindOfClass:[NSString class]]) [StrappyAsync reportError:
+    [NSError errorWithDomain:@"StrappyServiceErrorDomain" code:1 userInfo:
+      [NSDictionary dictionaryWithObject:message forKey:NSLocalizedDescriptionKey]]
+    title:NSLocalizedString(@"Fetch models",nil)];
   [userInfo release];
 }
 
@@ -3825,7 +3851,7 @@ static void StrappyStoreChanged(unsigned int topics)
     [StrappyPendingSubmissions addObject:sessionIdentifier_];
   }
   @synchronized(self) { promptSubmissionPending_ = YES; promptInFlight_ = YES; }
-  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionPromptDidStartNotification object:self];
+  [StrappyAsync postNotificationName:StrappySessionPromptDidStartNotification object:self];
   [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:) toTarget:self withObject:request];
   return YES;
 }
@@ -3936,14 +3962,12 @@ static void StrappyStoreChanged(unsigned int topics)
   if (summary != nil) {
     [userInfo setObject:StrappySessionChangeKindActivity
                  forKey:StrappySessionChangeKindKey];
-    [[NSNotificationCenter defaultCenter]
-      postNotificationName:StrappySessionDidUpdateNotification
+    [StrappyAsync postNotificationName:StrappySessionDidUpdateNotification
                     object:self
                   userInfo:userInfo];
   }
 
-  [[NSNotificationCenter defaultCenter]
-    postNotificationName:StrappySessionPromptDidFinishNotification
+  [StrappyAsync postNotificationName:StrappySessionPromptDidFinishNotification
                   object:self
                 userInfo:userInfo];
   [userInfo release];

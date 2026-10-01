@@ -780,7 +780,8 @@ shared draft and saves it on the prompt worker before submission. The iOS option
 panel reuses its loaded catalogs on edits. Session-only daemon notifications no
 longer invalidate conversation HTML or unrelated catalogs, and queued topic bits
 are combined before main-loop delivery. Future-session default and other metadata
-mutation APIs retain their existing synchronous contracts.
+mutation APIs retained their synchronous contracts at that revision; the
+following change removes those waits from UI handlers.
 
 `session_options_device_probe.m`, built with
 `make -C source/iOS -f ../linux/session_options_device_probe.mk session-options-probe`,
@@ -813,3 +814,46 @@ full build output contained no warnings. `make -C source/linux clean test` passe
 including new subscribed-client assertions that option mutations emit only the
 session topic and model approvals emit only the catalog topic. Generated build
 and test logs were retained locally outside the checkout and are not committed.
+
+
+## Asynchronous Cocoa commands and searches (2026-10-01)
+
+`StrappyAsync` provides serial background commands, an independent query worker,
+main-thread completions, and a common command-error notification consumed by both
+app delegates. The production mutation gateways reject main-thread calls.
+[ASYNC_UI.md](ASYNC_UI.md) records the operation policy and remaining local reads.
+
+The provider-free `async_ui_device_probe.m` fixture ran successfully on
+`x4-vm` (Tiger 10.4.11 / PPC), linked against the production dispatcher and Cocoa
+bridges. It verified FIFO commands while the first command deliberately blocked,
+an independent search completing during that block, copied mutable arguments,
+64-bit integer and BOOL arguments, suppression of stale running and queued
+searches, main-thread callbacks, exactly-once errors, explicit local handling,
+errors without an originating view, and asynchronous queue overflow. Both
+production mutation gateways rejected main-thread calls before transport.
+The cold first enqueue measured 146.038 ms on the emulated PPC machine; this is
+not a phone latency measurement. No database mutation or provider call occurred.
+
+After initially refusing SSH, `koolphone5` became available again. Both native
+fixtures passed as `mobile` on iOS 8.4.1 / armv7:
+
+- The dispatcher returned from its cold first enqueue in **6.616 ms**, with the
+  command worker deliberately blocked. Independent queries and the main loop
+  continued; all the FIFO, stale-result, argument, error, overflow, and IPC-guard
+  assertions passed.
+- The existing session-options regression fixture completed 1,000 local edits in
+  **531.259 ms** (**0.531 ms/edit**) with zero IPC. Send returned in **3.999 ms**
+  while its settings transport delayed 300 ms. All draft, save-failure, and
+  durable-retry assertions passed.
+
+These are native bridge tests, not graphical tap-to-display measurements. No
+updated app package was installed. Graphical navigation, backgrounding, and
+error presentation still need on-device acceptance testing.
+
+Final clean app builds passed for iOS armv7/arm64 and macOS
+PPC/i386/x86_64/arm64, with zero warnings in the captured logs. The complete
+`make -C source/linux clean test` offline suite passed. Both phone fixtures and
+the PPC dispatcher fixture also cross-built without warnings. Build/test logs
+remain outside the repository. The macOS launchctl installation/verification
+path now executes on the same background command queue; CLI maintenance
+commands retain their synchronous behavior.

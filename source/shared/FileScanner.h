@@ -50,10 +50,14 @@ extern NSString * const FileScannerCatalogReadFailedNotification;
 - (NSArray *)catalogedSQLiteDatabasesWithError:(NSError **)error;
 /* Sort descriptors use application, group_key, name, location, size, allowed,
  * hidden, or database_priority. All filtering/order belongs to this snapshot. */
+/* Create and warm a private snapshot on a query worker before UI handoff. */
+- (NSDictionary *)catalogSnapshotMatchingSearch:(NSString *)search
+  showHidden:(BOOL)showHidden sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
 - (FileScannerCatalogRows *)catalogRowsMatchingSearch:(NSString *)search
   showHidden:(BOOL)showHidden sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
 - (BOOL)scanAndSaveDatabasesAtPath:(NSString *)path
   scanMode:(FileScannerDatabaseScanMode)scanMode error:(NSError **)error;
+- (BOOL)setCatalogedDatabasesAllowed:(BOOL)allowed identifiers:(NSArray *)identifiers error:(NSError **)error;
 - (BOOL)setCatalogedDatabaseAllowed:(BOOL)allowed
                 forCatalogIdentifier:(NSNumber *)catalogIdentifier
                                error:(NSError **)error;

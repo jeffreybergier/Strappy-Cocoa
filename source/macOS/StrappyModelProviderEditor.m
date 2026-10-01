@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "StrappyModelProviderEditor.h"
 
 #import "StrappySession.h"
@@ -488,13 +489,13 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     NSLocalizedString(@"Add", nil);
   [otherModelActionsSegmented_
     setLabel:primaryTitle forSegment:kStrappyOtherModelPrimarySegment];
-  [otherModelActionsSegmented_ setEnabled:YES
+  [otherModelActionsSegmented_ setEnabled:!savingModel_
                               forSegment:kStrappyOtherModelPrimarySegment];
   row = [otherTableView_ selectedRow];
   canDelete = [self otherRowIsDraft:row] ||
     (([self otherModelAtRow:row] != nil) &&
      ![self otherModelIsBuiltIn:[self otherModelAtRow:row]]);
-  [otherModelActionsSegmented_ setEnabled:canDelete
+  [otherModelActionsSegmented_ setEnabled:canDelete && !savingModel_
                               forSegment:kStrappyOtherModelDeleteSegment];
 }
 
@@ -561,7 +562,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 - (BOOL)tableView:(NSTableView *)tableView
  shouldEditTableColumn:(NSTableColumn *)tableColumn row:(NSInteger)row
 {
-  return (tableView == otherTableView_) &&
+  return !savingModel_ && (tableView == otherTableView_) &&
     ([self otherRowIsDraft:row] ||
      (([self otherModelAtRow:row] != nil) &&
       ![self otherModelIsBuiltIn:[self otherModelAtRow:row]] &&
@@ -594,7 +595,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     return;
   }
   model = [self otherRowIsDraft:row] ? nil : [self otherModelAtRow:row];
-  [cell setEnabled:(model == nil) || ![self otherModelIsBuiltIn:model]];
+  [cell setEnabled:!savingModel_ && ((model == nil) || ![self otherModelIsBuiltIn:model])];
 }
 
 - (void)tableView:(NSTableView *)tableView
@@ -604,14 +605,12 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 {
   NSDictionary *model;
   NSMutableDictionary *updated;
-  NSMutableArray *rows;
   NSString *identifier;
-  NSUInteger modelIndex;
   BOOL draft;
   BOOL priceValid;
   NSError *error;
 
-  if (tableView != otherTableView_) {
+  if (tableView != otherTableView_ || savingModel_) {
     return;
   }
   draft = [self otherRowIsDraft:row];
@@ -661,18 +660,6 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   if (![self saveOtherModel:updated creating:draft error:&error]) {
     [otherTableView_ reloadData];
     [self showError:error title:NSLocalizedString(@"Could Not Save Model", nil)];
-  } else {
-    rows = [NSMutableArray arrayWithArray:otherModels_];
-    [rows replaceObjectAtIndex:(NSUInteger)row withObject:updated];
-    [otherModels_ release];
-    otherModels_ = [rows copy];
-    modelIndex = [models_ indexOfObjectIdenticalTo:model];
-    if (modelIndex != NSNotFound) {
-      rows = [NSMutableArray arrayWithArray:models_];
-      [rows replaceObjectAtIndex:modelIndex withObject:updated];
-      [models_ release];
-      models_ = [rows copy];
-    }
   }
 }
 
@@ -749,8 +736,11 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     }
     return NO;
   }
+  savingModel_ = YES;
+  [self updateOtherModelActions];
+  [otherTableView_ reloadData];
   if (creating) {
-    return [StrappySession
+    [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save model",nil) receiver:self completion:@selector(otherModelSaved:) context:model]
       createManualModelForProviderIdentifier:selectedProviderIdentifier_
       wireModelID:StrappyEditorString(model, @"wire_model_id")
       displayName:StrappyEditorString(model, @"name")
@@ -764,9 +754,10 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
       outputPricePerToken:outputPrice
       cacheReadPricePerToken:cacheReadPrice
       cacheWritePricePerToken:cacheWritePrice
-      error:error] != nil;
+      error:NULL];
+    return YES;
   }
-  return [StrappySession
+  return [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save model",nil) receiver:self completion:@selector(otherModelSaved:) context:nil]
     updateManualModelForProviderIdentifier:selectedProviderIdentifier_
     wireModelID:StrappyEditorString(model, @"wire_model_id")
     displayName:StrappyEditorString(model, @"name")
@@ -780,7 +771,16 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     outputPricePerToken:outputPrice
     cacheReadPricePerToken:cacheReadPrice
     cacheWritePricePerToken:cacheWritePrice
-    error:error];
+    error:NULL];
+}
+
+- (void)otherModelSaved:(StrappyAsyncResult *)result
+{
+  savingModel_ = NO;
+  if ([result succeeded] && [result context] == draftOtherModel_) {
+    [draftOtherModel_ release]; draftOtherModel_ = nil;
+  }
+  [self reloadCatalog];
 }
 
 - (NSDictionary *)otherModelAtRow:(NSInteger)row
@@ -866,6 +866,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   NSError *error;
 
   (void)sender;
+  if (savingModel_) return;
   if (![sheet_ makeFirstResponder:otherTableView_]) {
     NSBeep();
     return;
@@ -882,15 +883,13 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     [self showError:error title:NSLocalizedString(@"Could Not Save Model", nil)];
     return;
   }
-  [draftOtherModel_ release];
-  draftOtherModel_ = nil;
-  [self reloadCatalog];
+  [self updateOtherModelActions];
 }
 
 - (void)deleteOtherModel:(id)sender
 {
   NSDictionary *model;
-  NSError *error;
+  if (savingModel_) return;
 
   (void)sender;
   [otherTableView_ abortEditing];
@@ -906,14 +905,13 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     NSBeep();
     return;
   }
-  error = nil;
-  if (![StrappySession
+
+  savingModel_ = YES;
+  [self updateOtherModelActions];
+  [otherTableView_ reloadData];
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete model",nil) receiver:self completion:@selector(otherModelSaved:) context:nil]
       archiveManualModelForProviderIdentifier:selectedProviderIdentifier_
-      wireModelID:StrappyEditorString(model, @"wire_model_id") error:&error]) {
-    [self showError:error title:NSLocalizedString(@"Could Not Delete Model", nil)];
-  } else {
-    [self reloadCatalog];
-  }
+      wireModelID:StrappyEditorString(model, @"wire_model_id") error:NULL];
 }
 
 - (void)fetchOpenRouterModels:(id)sender
@@ -922,7 +920,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 
   (void)sender;
   error = nil;
-  if (![StrappySession beginOpenRouterModelCatalogRefreshWithError:&error]) {
+  if (![[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Fetch models",nil) receiver:nil completion:NULL context:nil] beginOpenRouterModelCatalogRefreshWithError:&error]) {
     [self showError:error title:NSLocalizedString(@"Could Not Fetch Models", nil)];
   }
 }

@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "AppDelegate.h"
 #import "StrappyServiceController.h"
 #import "PreferencesWindowController.h"
@@ -39,6 +40,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
 }
 
 @interface AppDelegate (Private)
+- (void)showNextAsyncError;
 - (void)setupMenu;
 - (void)showMainWindow;
 - (void)populateModelMenu:(NSMenu *)menu;
@@ -50,7 +52,48 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)terminateIfPendingInFlightSessionsFinished;
 @end
 
+static NSMutableArray *StrappyAsyncErrors;
+static NSAlert *StrappyAsyncErrorAlert;
+
 @implementation AppDelegate
+
+- (void)asyncCommandFailed:(NSNotification *)notification
+{
+  if (!StrappyAsyncErrors) StrappyAsyncErrors = [[NSMutableArray alloc] init];
+  [StrappyAsyncErrors addObject:[notification userInfo]];
+  [self showNextAsyncError];
+}
+
+- (void)showNextAsyncError
+{
+  NSDictionary *info;
+  NSWindow *window;
+  if (StrappyAsyncErrorAlert || ![StrappyAsyncErrors count]) return;
+  window = [_windowController window];
+  if (!window) window = [NSApp mainWindow];
+  if (!window || ![window isVisible]) return;
+  if ([window attachedSheet]) {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(showNextAsyncError) object:nil];
+    [self performSelector:@selector(showNextAsyncError) withObject:nil afterDelay:0.25];
+    return;
+  }
+  info = [StrappyAsyncErrors objectAtIndex:0];
+  StrappyAsyncErrorAlert = [[NSAlert alloc] init];
+  [StrappyAsyncErrorAlert setMessageText:[info objectForKey:@"title"]];
+  [StrappyAsyncErrorAlert setInformativeText:[[info objectForKey:@"error"] localizedDescription]];
+  [StrappyAsyncErrorAlert addButtonWithTitle:NSLocalizedString(@"OK",nil)];
+  [StrappyAsyncErrorAlert XP_beginSheetModalForWindow:window modalDelegate:self
+    didEndSelector:@selector(asyncErrorDidEnd:returnCode:contextInfo:) contextInfo:NULL];
+}
+
+- (void)asyncErrorDidEnd:(NSAlert *)alert returnCode:(NSInteger)code contextInfo:(void *)context
+{
+  (void)code; (void)context;
+  [[alert window] orderOut:self];
+  if ([StrappyAsyncErrors count]) [StrappyAsyncErrors removeObjectAtIndex:0];
+  [StrappyAsyncErrorAlert release]; StrappyAsyncErrorAlert = nil;
+  [self performSelector:@selector(showNextAsyncError) withObject:nil afterDelay:0];
+}
 
 - (void)applicationWillFinishLaunching:(NSNotification *)notification
 {
@@ -60,19 +103,14 @@ static NSString *StrappyPromptCompletionNotificationBody(
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification
 {
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(asyncCommandFailed:)
+    name:StrappyAsyncCommandFailedNotification object:nil];
   (void)notification;
-  {
-    NSString *serviceError = nil;
-    if (![StrappyServiceController installWithError:&serviceError]) {
-      NSLog(@"Strappy background service: %@", serviceError);
-    }
-  }
   {
     NSString *cacert = [AltivecCore certPath];
     NSParameterAssert(cacert);
     [StrappySession bootstrapProcessWithCACertPath:cacert];
   }
-  (void)[StrappySession initializeSessionStoreWithError:NULL];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(strappySessionPromptDidStart:)
@@ -83,6 +121,15 @@ static NSString *StrappyPromptCompletionNotificationBody(
        selector:@selector(strappySessionPromptDidFinish:)
            name:StrappySessionPromptDidFinishNotification
          object:nil];
+  [[StrappyAsync commandTarget:[StrappyServiceController class]
+    title:NSLocalizedString(@"Start background service",nil) receiver:self
+    completion:@selector(backgroundServicePrepared:) context:nil] prepareForApplicationWithError:NULL];
+}
+
+- (void)backgroundServicePrepared:(StrappyAsyncResult *)result
+{
+  (void)result;
+  (void)[StrappySession initializeSessionStoreWithError:NULL];
   [self showMainWindow];
 }
 
@@ -552,12 +599,14 @@ static NSString *StrappyPromptCompletionNotificationBody(
   if (_windowController != nil) {
     [_windowController showWindow:self];
     [[_windowController window] makeKeyAndOrderFront:self];
+    [self showNextAsyncError];
     return;
   }
 
   _windowController = [[SessionWindowController alloc] init];
   [_windowController showWindow:self];
   [[_windowController window] makeKeyAndOrderFront:self];
+  [self showNextAsyncError];
 }
 
 - (void)showMainWindow:(id)sender

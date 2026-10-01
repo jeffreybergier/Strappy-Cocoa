@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "SessionListViewController.h"
 #import "AIFontAwesome.h"
 #import "StrappyBottomToolbarView.h"
@@ -876,7 +877,6 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 - (void)deleteSessionIdentifier:(NSNumber *)sessionIdentifier
 {
-  NSError *error;
 
   if (![sessionIdentifier isKindOfClass:[NSNumber class]]) {
     NSBeep();
@@ -887,12 +887,13 @@ static void StrappyDrawTintedImage(NSImage *image,
     return;
   }
 
-  error = nil;
-  if (![StrappySession deleteSessionWithIdentifier:sessionIdentifier
-                                             error:&error]) {
-    [self showDeleteError:error];
-    return;
-  }
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete conversation",nil) receiver:self completion:@selector(sessionDeleted:) context:sessionIdentifier] deleteSessionWithIdentifier:sessionIdentifier error:NULL];
+}
+
+- (void)sessionDeleted:(StrappyAsyncResult *)result
+{
+  NSNumber *sessionIdentifier = [result context];
+  if (![result succeeded]) return;
 
   if ([selectedSessionId_ isEqualToNumber:sessionIdentifier]) {
     [selectedSessionId_ release];
@@ -940,9 +941,6 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 - (void)addSession:(id)sender
 {
-  NSError *error;
-  StrappySession *session;
-  NSNumber *identifier;
 
   (void)sender;
   if (creatingSession_) {
@@ -952,19 +950,19 @@ static void StrappyDrawTintedImage(NSImage *image,
   creatingSession_ = YES;
   [self updateToolbarSegments];
 
-  error = nil;
-  session = [StrappySession createSessionWithError:&error];
+  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Create conversation",nil) receiver:self completion:@selector(sessionCreated:) context:nil] createSessionWithError:NULL];
+}
+
+- (void)sessionCreated:(StrappyAsyncResult *)result
+{
+  StrappySession *session = [result value];
+  NSNumber *identifier;
 
   creatingSession_ = NO;
   [self updateToolbarSegments];
 
   identifier = [session sessionIdentifier];
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    [self showError:error
-              title:NSLocalizedString(@"Could not create conversation", nil)
-    fallbackMessage:NSLocalizedString(@"An unknown error occurred.", nil)];
-    return;
-  }
+  if (![result succeeded] || ![identifier isKindOfClass:[NSNumber class]]) return;
 
   [self reloadSessionIdentifier:identifier select:YES];
   [self notifySelectedSession];

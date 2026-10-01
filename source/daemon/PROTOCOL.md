@@ -190,9 +190,11 @@ The current store monitor handles control-request correlation, reconnection
 backoff, and UI refresh hints. The `StrappySession` adapter sends prompts and cancels on background threads.
 It renders fresh DB state on service invalidation. `FileScanner` sends commands
 and reads catalog snapshots; it no longer performs scanning in the UI.
-Short metadata/acceptance commands preserve the existing synchronous Cocoa
-interfaces with bounded I/O. OAuth refresh is called by the authentication
-background thread. No metadata command is automatically retried after a lost reply.
+Short metadata/acceptance commands run on the serial Cocoa command worker;
+the UI mutation gateways reject main-thread calls. OAuth refresh is called by
+the authentication background thread. No metadata command is automatically
+retried after a lost reply. See [ASYNC_UI.md](ASYNC_UI.md) for completion and
+app-wide asynchronous error delivery.
 
 ## Validation
 

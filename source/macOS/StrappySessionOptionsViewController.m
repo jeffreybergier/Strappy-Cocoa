@@ -1,3 +1,4 @@
+#import "StrappyAsync.h"
 #import "StrappySessionOptionsViewController.h"
 
 #import "StrappyAuthentication.h"
@@ -334,6 +335,8 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 - (NSString *)selectedProviderIdentifier;
 - (BOOL)saveOptions:(StrappySessionOptions *)options
       changedFields:(StrappySessionOptionMask)changedFields;
+- (void)defaultsSaved:(StrappyAsyncResult *)result;
+
 - (void)modelChanged:(id)sender;
 - (void)accountChanged:(id)sender;
 - (void)assistantChanged:(id)sender;
@@ -891,6 +894,7 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 
 - (BOOL)canEditOptions
 {
+  if (savingOptions_) return NO;
 
   if (editsSessionDefaults_) {
     return (defaultOptions_ != nil) ? YES : NO;
@@ -1353,11 +1357,15 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 
   error = nil;
   savingOptions_ = YES;
-  saved = editsSessionDefaults_ ?
-    [StrappySession updateDefaultSessionOptions:options
-                                  changedFields:changedFields
-                                          error:&error] :
-    [session_ updateOptions:options
+  if (editsSessionDefaults_) {
+    [defaultOptions_ release];
+    defaultOptions_ = [options copy];
+    [statusLabel_ setStringValue:NSLocalizedString(@"Saving…",nil)];
+    [self updateControlEnabledStates];
+    [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save session defaults",nil) receiver:self completion:@selector(defaultsSaved:) context:nil] updateDefaultSessionOptions:options changedFields:changedFields error:NULL];
+    return YES;
+  }
+  saved = [session_ updateOptions:options
               changedFields:changedFields
                       error:&error];
   savingOptions_ = NO;
@@ -1375,6 +1383,13 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 
   [self reloadOptions];
   return YES;
+}
+
+- (void)defaultsSaved:(StrappyAsyncResult *)result
+{
+  (void)result;
+  savingOptions_ = NO;
+  [self reloadOptions];
 }
 
 - (void)modelChanged:(id)sender
