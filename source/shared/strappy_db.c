@@ -12,6 +12,21 @@
 
 /* Connection lifetime and canonical schema initialization. */
 
+/* Only service and offline fixture targets opt into storage mutation. */
+int strappy_db_writer_available(char **error_out)
+{
+#ifdef STRAPPY_DB_WRITER
+  (void)error_out;
+  return 1;
+#else
+  strappy_set_error(error_out,
+    "This action is unavailable until daemon execution is implemented.");
+  return 0;
+#endif
+}
+
+static int strappy_db_validate_existing_schema(sqlite3 *db, char **error_out);
+
 static int strappy_db_enable_write_ahead_log(sqlite3 *db, char **error_out)
 {
   sqlite3_stmt *stmt;
@@ -147,6 +162,7 @@ int strappy_db_open(const char *db_path,
     return 0;
   }
   *db_out = NULL;
+  if (!strappy_db_writer_available(error_out)) return 0;
 
   if ((db_path == NULL) || (db_path[0] == '\0')) {
     strappy_set_error(error_out, "Session database path is not configured.");
@@ -191,7 +207,8 @@ int strappy_db_open(const char *db_path,
   }
 
   sqlite3_busy_timeout(db, 5000);
-  if (!strappy_db_enable_write_ahead_log(db, error_out)) {
+  if (!strappy_db_validate_existing_schema(db, error_out) ||
+      !strappy_db_enable_write_ahead_log(db, error_out)) {
     sqlite3_close(db);
     pthread_mutex_unlock(&strappy_db_connection_mutex);
     return 0;
@@ -313,6 +330,15 @@ static int strappy_db_validate_existing_schema(sqlite3 *db, char **error_out)
   int rc;
 
   stmt = NULL;
+  rc = sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &stmt, NULL);
+  if (rc == SQLITE_OK) rc = sqlite3_step(stmt);
+  if (rc != SQLITE_ROW || (sqlite3_column_int(stmt, 0) != 0 && sqlite3_column_int(stmt, 0) != 1)) {
+    sqlite3_finalize(stmt);
+    strappy_set_error(error_out, "The store schema is incompatible with this service.");
+    return 0;
+  }
+  sqlite3_finalize(stmt);
+  stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc == SQLITE_OK) {
     rc = sqlite3_step(stmt);
@@ -328,13 +354,90 @@ static int strappy_db_validate_existing_schema(sqlite3 *db, char **error_out)
   has_user_tables = sqlite3_column_int(stmt, 1) ? 1 : 0;
   sqlite3_finalize(stmt);
   if (has_metadata) {
-    return strappy_db_validate_schema_identity(db, error_out);
+    return strappy_db_validate_reader(db, error_out);
   }
   if (has_user_tables) {
     strappy_db_set_reset_required_error(error_out);
     return 0;
   }
   return 1;
+}
+
+int strappy_db_validate_reader(sqlite3 *db, char **error_out)
+{
+  sqlite3_stmt *stmt = NULL;
+  int ok;
+  if (!strappy_db_validate_schema_identity(db, error_out)) return 0;
+  ok = sqlite3_prepare_v2(db, "PRAGMA main.user_version", -1, &stmt, NULL) == SQLITE_OK &&
+       sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 1;
+  sqlite3_finalize(stmt);
+  if (!ok) strappy_set_error(error_out, "The store schema is incompatible with this app.");
+  return ok;
+}
+
+static pthread_mutex_t strappy_db_readiness_mutex = PTHREAD_MUTEX_INITIALIZER;
+static char *strappy_db_ready_path;
+
+void strappy_db_set_service_ready(const char *path, int ready)
+{
+  pthread_mutex_lock(&strappy_db_readiness_mutex);
+  free(strappy_db_ready_path);
+  strappy_db_ready_path = ready ? strappy_string_duplicate(path) : NULL;
+  pthread_mutex_unlock(&strappy_db_readiness_mutex);
+}
+
+int strappy_db_open_reader(const char *path, sqlite3 **out, char **error_out)
+{
+  sqlite3 *db = NULL;
+  if (out == NULL) { strappy_set_error(error_out, "Missing reader output."); return 0; }
+  *out = NULL;
+#ifdef STRAPPY_DB_UI
+  {
+    int ready;
+    pthread_mutex_lock(&strappy_db_readiness_mutex);
+    ready = path != NULL && strappy_db_ready_path != NULL && strcmp(path, strappy_db_ready_path) == 0;
+    pthread_mutex_unlock(&strappy_db_readiness_mutex);
+    if (!ready) { strappy_set_error(error_out, "The background service is unavailable or incompatible. Reopen Strappy after the service is ready."); return 0; }
+  }
+#endif
+  if (path == NULL || path[0] == '\0' ||
+      sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL) != SQLITE_OK) {
+    strappy_set_error(error_out, "The existing store is unavailable. Wait for the service to become ready.");
+    if (db != NULL) sqlite3_close(db);
+    return 0;
+  }
+  sqlite3_busy_timeout(db, 1000);
+  if (!strappy_db_validate_reader(db, error_out)) { sqlite3_close(db); return 0; }
+  *out = db;
+  return 1;
+}
+
+int strappy_db_check_reader(const char *path, char **error_out)
+{
+  sqlite3 *db;
+  if (!strappy_db_open_reader(path, &db, error_out)) return 0;
+  strappy_db_release(db);
+  return 1;
+}
+
+/* Snapshot only the tables used by a paginated view into private temp storage.
+ * Subsequent queries resolve to these shadow tables, never a pinned main WAL.
+ * No history/ledger tables are copied. Even a suspended UI holds no read lock.
+ * Callers rebuild the reader on invalidation to see newly committed state. */
+int strappy_db_reader_snapshot(sqlite3 *db, const char *const *tables,
+                                char **error_out)
+{
+  size_t i;
+  int ok = strappy_db_exec(db, "PRAGMA temp_store=FILE; BEGIN", "Could not begin reader snapshot", error_out);
+  for (i = 0; ok && tables[i] != NULL; ++i) {
+    char *sql = sqlite3_mprintf("CREATE TEMP TABLE \"%w\" AS SELECT * FROM main.\"%w\"", tables[i], tables[i]);
+    if (sql == NULL) { strappy_set_error(error_out, "Could not allocate snapshot SQL."); ok = 0; }
+    else ok = strappy_db_exec(db, sql, "Could not capture reader snapshot", error_out);
+    sqlite3_free(sql);
+  }
+  if (ok) ok = strappy_db_exec(db, "COMMIT", "Could not release reader snapshot", error_out);
+  if (!ok) sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+  return ok;
 }
 
 void strappy_db_sql_buffer_destroy(strappy_db_sql_buffer *buffer)
@@ -1241,7 +1344,18 @@ int strappy_db_initialize(const char *db_path, char **error_out)
     return 0;
   }
 
-  ok = strappy_db_ensure_schema(db, error_out);
+  if (!strappy_db_validate_existing_schema(db, error_out)) {
+    strappy_db_release(db);
+    return 0;
+  }
+  ok = strappy_db_exec(db, "PRAGMA foreign_keys=ON; BEGIN IMMEDIATE;",
+    "Could not begin store initialization", error_out);
+  if (ok) ok = strappy_db_ensure_schema(db, error_out);
+  if (ok) ok = strappy_db_exec(db, "COMMIT", "Could not commit store initialization", error_out);
+  if (!ok) {
+    sqlite3_exec(db, "ROLLBACK", NULL, NULL, NULL);
+    strappy_db_connection_schema_ready = 0;
+  }
   strappy_db_release(db);
   return ok;
 }

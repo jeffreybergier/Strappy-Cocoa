@@ -525,6 +525,12 @@ void strappy_openrouter_model_record_destroy(strappy_openrouter_model_record *re
 void strappy_openrouter_model_record_list_init(strappy_openrouter_model_record_list *list);
 void strappy_openrouter_model_record_list_destroy(strappy_openrouter_model_record_list *list);
 
+/* Writer capability is compiled only into daemon and offline test targets. */
+int strappy_db_writer_available(char **error_out);
+/* Validate an existing store without creating or repairing anything. */
+/* Service monitor only: readiness never grants write capability. */
+void strappy_db_set_service_ready(const char *path, int ready);
+int strappy_db_check_reader(const char *db_path, char **error_out);
 int strappy_db_initialize(const char *db_path, char **error_out);
 int strappy_db_create_provider_account(const char *db_path,
                                        const char *provider_id,

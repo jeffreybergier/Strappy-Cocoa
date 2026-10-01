@@ -2317,7 +2317,7 @@ int strappy_db_get_response_call_identity(
     return 0;
   }
   memset(identity_out, 0, sizeof(*identity_out));
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
   stmt = NULL;
@@ -4171,10 +4171,10 @@ static int strappy_db_semantic_list_canonical_response_items(
     strappy_set_error(error_out, "Session id is not valid.");
     return 0;
   }
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -5523,10 +5523,10 @@ static int strappy_db_semantic_list_response_timeline(
       *next_cursor_out = cursor;
     }
   }
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -5801,10 +5801,10 @@ int strappy_db_load_response_timeline_cursor(
     strappy_set_error(error_out, "Session id is not valid.");
     return 0;
   }
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }

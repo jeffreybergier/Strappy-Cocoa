@@ -1,6 +1,7 @@
 #include "strappy_study.h"
 
 #include "strappy_core.h"
+#include "strappy_db_internal.h"
 
 #include <cJSON.h>
 #include <stdio.h>
@@ -495,7 +496,7 @@ char *strappy_study_status_json(const char *db_path, char **error_out)
                                              error_out)) {
     return NULL;
   }
-  if (!strappy_study_open_database(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     strappy_discovered_database_record_list_destroy(&discovered);
     return NULL;
   }
@@ -796,7 +797,7 @@ static int strappy_study_collect_progress(
   if (!strappy_db_list_discovered_databases(db_path, &discovered, error_out)) {
     return 0;
   }
-  if (!strappy_study_open_database(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     strappy_discovered_database_record_list_destroy(&discovered);
     return 0;
   }

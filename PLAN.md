@@ -196,24 +196,24 @@ contract, coverage, and remaining device limitations.
 
 ## Step 2: separate database readers from writers
 
-- [ ] Establish daemon-only writes and a dedicated UI read-only layer.
+- [x] Establish daemon-only writes and a dedicated UI read-only layer.
 
 The current `strappy_db_open` opens read/write with creation enabled and sets
 WAL mode. Many query paths ensure the schema. Even the read-only sidebar reader
 calls `strappy_db_initialize` first. These paths must be separated explicitly.
 
-- [ ] Only the daemon creates the store, initializes the schema, seeds catalogs,
+- [x] Only the daemon creates the store, initializes the schema, seeds catalogs,
   performs maintenance, or writes shared state.
-- [ ] UI readers open an existing compatible database read-only after service
+- [x] UI readers open an existing compatible database read-only after service
   readiness. Audit history, options, models, catalogs, and renderer queries for
   hidden writes and fallback/default mutations.
-- [ ] Keep SQLite WAL and verify the SQLite library actually shipped by Altivec,
+- [x] Keep SQLite WAL and verify the SQLite library actually shipped by Altivec,
   including cross-process access and permissions for the database, WAL, and
   shared-memory files. Never open the live store as `immutable`.
-- [ ] Bound snapshot lifetimes. Refresh/release sidebar and catalog read
+- [x] Bound snapshot lifetimes. Refresh/release sidebar and catalog read
   transactions on invalidation and before iOS background suspension so they
   cannot indefinitely prevent checkpoint progress.
-- [ ] Define behavior for startup races, a missing store, incompatible app/service
+- [x] Define behavior for startup races, a missing store, incompatible app/service
   versions, upgrades, and service unavailability.
 
 This deliberately couples the UI reader to the schema of the daemon shipped
@@ -223,6 +223,13 @@ between unsandboxed processes sharing a user identity.
 Preserve normalized semantic storage and existing DB-first UI rules. The
 repository pins `PRAGMA user_version` at 1 and requires explicit permission for
 migration steps or a version increase; this plan does not authorize either.
+
+Step 2 validation and the temporary GUI restrictions are documented in
+`source/daemon/STORAGE.md` and `source/daemon/VALIDATION.md`. Readiness uses IPC
+v2 and a separate reader ABI; SQLite `user_version` remains 1. Paginated readers
+copy only their view tables to private SQLite temp storage, releasing the live
+WAL snapshot before returning to Cocoa. Runtime WAL tests passed on Tiger/PPC
+and iOS 15/arm64; iOS 8 SSH was unavailable and remains deferred.
 
 ## Step 3: move one prompt through the daemon
 

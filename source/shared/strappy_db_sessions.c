@@ -547,10 +547,10 @@ int strappy_db_get_session_working_directory(
                       "Session working-directory request is incomplete.");
     return 0;
   }
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -576,13 +576,7 @@ int strappy_db_get_session_working_directory(
     strappy_db_release(db);
     return 0;
   }
-  if (!strappy_db_save_session_working_directory(db,
-                                                 session_id,
-                                                 home_directory,
-                                                 error_out)) {
-    strappy_db_release(db);
-    return 0;
-  }
+  /* Resolve a missing value without persisting a fallback from a reader. */
   *working_directory_out = strappy_string_duplicate(home_directory);
   if (*working_directory_out == NULL) {
     strappy_set_error(error_out,
@@ -856,10 +850,10 @@ int strappy_db_get_session_assistant_set(const char *db_path,
   if (assistant_set_id_out != NULL) {
     *assistant_set_id_out = NULL;
   }
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -888,10 +882,10 @@ int strappy_db_get_session_bash_enabled(const char *db_path,
     return 0;
   }
   *bash_enabled_out = 0;
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -993,11 +987,11 @@ int strappy_db_list_sessions(const char *db_path,
   }
   strappy_session_record_list_init(list);
 
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
 
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -1117,11 +1111,11 @@ int strappy_db_load_session(const char *db_path,
     return 0;
   }
 
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
 
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -1213,10 +1207,10 @@ int strappy_db_load_session_list_record(const char *db_path,
     return 0;
   }
 
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -1448,11 +1442,7 @@ static int strappy_db_copy_session_options(sqlite3 *db,
   }
   if (!found_working_directory) {
     home_directory = getenv("HOME");
-    if (!strappy_db_validate_working_directory(home_directory, error_out) ||
-        !strappy_db_save_session_working_directory(db,
-                                                   session_id,
-                                                   home_directory,
-                                                   error_out)) {
+    if (!strappy_db_validate_working_directory(home_directory, error_out)) {
       strappy_session_options_destroy(&loaded);
       return 0;
     }
@@ -1952,10 +1942,10 @@ int strappy_db_load_session_options(
     strappy_set_error(error_out, "Session options output is missing.");
     return 0;
   }
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -1977,10 +1967,10 @@ int strappy_db_load_default_session_options(
     strappy_set_error(error_out, "Default session options output is missing.");
     return 0;
   }
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }

@@ -7,6 +7,8 @@
     <array>
         <string>@PREFIX@/usr/libexec/strappyd</string>
         <string>@PREFIX@/var/log/strappy/heartbeat.log</string>
+        <string>/var/mobile/Library/Application Support/Strappy/strappy.sqlite</string>
+        <string>@PREFIX@/Applications/Strappy.app</string>
     </array>
     <key>UserName</key><string>mobile</string>
     <key>GroupName</key><string>mobile</string>

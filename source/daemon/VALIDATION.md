@@ -406,3 +406,78 @@ These checks establish transport behavior, not UI service-adapter integration,
 provider execution, durable submission deduplication, real store snapshots,
 launchd package upgrade behavior for this new transport, or continuous execution
 during phone sleep. Those later milestones retain their existing checklist.
+
+## Step 2: daemon-owned writes and read-only UI — 2026-10-01
+
+Step 2 intentionally disables GUI mutations and in-process workers until
+steps 3–4, as authorized by the user. The service initializes the store and
+bundled catalog; readers wait for IPC v2 store readiness. No database version
+increase or new migration was added. [STORAGE.md](STORAGE.md) records the
+ownership, compatibility, and reader-lifetime contract.
+
+### Offline and build validation
+
+- Clean iOS armv7/arm64 and Mac PPC/i386/x86_64/arm64 release builds passed;
+  full logs contain no compiler/linker warnings.
+- Full `make -C source/linux clean test`, including existing history, renderer,
+  options/defaults, provider/catalog, and Responses tests. The 20,000-session,
+  20,000-database, and 21,000-model paging tests retain their ordering and
+  indexed-page bounds. Catalog/model tests now checkpoint with old readers open.
+- New `store_harness` and separately compiled `store_reader_harness` cover
+  missing-store non-creation, GUI write rejection, read-only options/history,
+  missing working-directory fallback without persistence, incompatible version
+  rejection, readiness revocation, stable sidebar snapshots, and a child-process
+  writer completing `wal_checkpoint(TRUNCATE)` while parent readers remain open.
+- New `store_monitor_harness` exercises the actual asynchronous client with a
+  missing service, service startup, disconnect, restart, and incompatible schema
+  refusal. Existing wire/malformed/slow-reader tests were updated to IPC v2.
+- Clang static analysis of daemon, IPC server, store monitor, connection/schema
+  code, sidebar, and catalog; no findings. A read-path call-graph audit found and
+  removed both missing-working-directory backfill writes.
+- Parsed staged rootful/rootless plists: absolute database/resource paths,
+  mobile identity, and bundled catalog presence. Mach-O inspection confirms
+  the required daemon slices, only libSystem on iOS, and libSystem plus legacy
+  libgcc on PPC/i386 Mac. SQLite/cJSON are statically linked, so the stable Mac
+  service requires no copied framework.
+
+Full generated logs remain local under `/tmp/strappy-step2-*`; none are committed.
+
+### Native storage checks
+
+Tests used isolated, disposable stores and the same Altivec SQLite libraries
+used to build the packaged service. Existing launchd jobs and application data
+were left unchanged. No provider calls, credential access, reboot, or respring
+was performed.
+
+| Host | Result |
+| --- | --- |
+| `x4-vm`, Tiger 10.4.11 / PPC, UID 501 (`me`) | Writer and GUI-capability reader probes pass with SQLite **3.43.2**, including a separate process writing/checkpointing while a retained sidebar snapshot remains stable; a fresh snapshot sees the committed name. |
+| `pinkphone-rsa`, iOS 15.0 / arm64, UID 501 (`mobile`) | The same writer/reader checks pass with SQLite **3.43.2**, including read-only options/history, fallback non-persistence, readiness gating, cross-process WAL/checkpoint behavior, and 0600 database/WAL/SHM files. |
+| `koolphone5`, configured iOS 8 / armv7 host | SSH first refused the connection, then timed out on retry. Runtime step 2 validation remains outstanding; armv7 builds pass. |
+
+Both reachable devices also ran the packaged `strappyd` binary against a fresh
+isolated store and explicit resource directory. `--ipc-probe` reported:
+
+```text
+IPC v2: same-user hello, snapshot, subscribe, unsubscribe passed; store ready; execution not ready
+```
+
+An independent GUI-capability reader then passed against the daemon-created
+store. While the service was alive, DB/WAL/SHM modes were all 0600 and ownership
+matched its user. SIGTERM stopped these test services cleanly.
+
+Probe sources are `source/linux/store_harness.c` and
+`source/linux/store_reader_harness.c`. Compile the writer with
+`STRAPPY_DB_WRITER=1`, the reader with `STRAPPY_DB_UI=1` and no writer capability,
+and link `source/daemon/store.mk`'s portable sources plus the target Altivec
+SQLite/cJSON libraries. Run the writer on a nonexistent fixture path, then the
+reader on that same path. On rootless iOS, copy signed probes to fresh filenames
+under `/var/jb/var/strappy-step2-20261001`; copies under `/var/tmp` were killed
+before creating a store, matching the earlier step 1 execution-path limitation.
+
+These checks establish storage and readiness behavior, not end-to-end GUI
+interaction, launchd upgrade/reinstallation with the new store arguments, or
+provider/scanner execution. Existing step 5 limitations (including iOS 6,
+remaining iOS 8 runtime checks, newer Mac runtime, and phone sleep/first unlock)
+remain open. No persistent main-store read transaction survives a completed
+paginated-reader open, so suspension cannot leave those row objects pinning WAL.

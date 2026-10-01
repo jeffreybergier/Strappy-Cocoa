@@ -42,6 +42,10 @@ typedef struct strappy_db_sql_buffer {
 int strappy_db_open(const char *db_path,
                     sqlite3 **db_out,
                     char **error_out);
+/* Readers never initialize, seed, checkpoint, or repair the store. */
+int strappy_db_open_reader(const char *path, sqlite3 **out, char **error_out);
+int strappy_db_validate_reader(sqlite3 *db, char **error_out);
+int strappy_db_reader_snapshot(sqlite3 *db, const char *const *tables, char **error_out);
 void strappy_db_release(sqlite3 *db);
 int strappy_db_exec(sqlite3 *db,
                     const char *sql,

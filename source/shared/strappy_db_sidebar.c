@@ -103,6 +103,7 @@ struct strappy_session_reader {
 
 static int strappy_sidebar_error(strappy_session_reader *reader, char **error_out)
 {
+  if (error_out != NULL && *error_out != NULL) return 0;
   strappy_set_formatted_error(error_out, "Could not read session sidebar: %s",
                               sqlite3_errmsg(reader->db));
   return 0;
@@ -138,22 +139,27 @@ int strappy_db_sidebar_open(const char *path, strappy_session_reader **out,
   sqlite3_stmt *count_stmt = NULL;
   sqlite3_int64 count = 0;
   int rc;
+  static const char *const tables[] = { "session_activity", "sessions", "models", "app_preferences", NULL };
   if (out == NULL) {
     strappy_set_error(error_out, "Missing session sidebar output.");
     return 0;
   }
   *out = NULL;
-  if (!strappy_db_initialize(path, error_out)) return 0;
   reader = (strappy_session_reader *)calloc(1U, sizeof(*reader));
   if (reader == NULL) {
     strappy_set_error(error_out, "Could not allocate session sidebar.");
     return 0;
   }
   reader->next_offset = (size_t)-1;
-  rc = sqlite3_open_v2(path, &reader->db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL);
+  rc = strappy_db_open_reader(path, &reader->db, error_out) ? SQLITE_OK : SQLITE_ERROR;
   if (rc == SQLITE_OK) {
     sqlite3_busy_timeout(reader->db, 5000);
-    rc = sqlite3_exec(reader->db, "BEGIN;", NULL, NULL, NULL);
+    rc = strappy_db_reader_snapshot(reader->db, tables, error_out) ? SQLITE_OK : SQLITE_ERROR;
+    if (rc == SQLITE_OK) rc = sqlite3_exec(reader->db,
+      "CREATE UNIQUE INDEX temp.activity_id ON session_activity(session_id);"
+      "CREATE INDEX temp.activity_order ON session_activity(last_activity_at_ms DESC,session_id DESC);"
+      "CREATE UNIQUE INDEX temp.session_id ON sessions(id);"
+      "CREATE UNIQUE INDEX temp.model_id ON models(id);", NULL, NULL, NULL);
   }
   if (rc == SQLITE_OK)
     rc = sqlite3_prepare_v2(reader->db, "SELECT count(*) FROM session_activity;", -1, &count_stmt, NULL);

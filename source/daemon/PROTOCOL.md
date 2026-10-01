@@ -1,12 +1,13 @@
-# Strappy local service protocol v1
+# Strappy local service protocol v2
 
-Step 1 implements transport readiness, not application readiness. The UI keeps
-its current execution path until steps 2–4 transfer ownership. No provider,
-credential, database, or scanner code is linked into `strappyd` yet.
+Step 2 adds daemon-owned storage readiness. The service initializes the schema
+and bundled catalogs before accepting application readers. GUI builds have no
+writer capability; prompts, scanning, account/catalog changes, and other
+mutations remain unavailable until steps 3–4. No provider execution is enabled.
 
 ## Endpoint and trust
 
-The daemon takes its existing absolute heartbeat-log argument and creates
+The daemon takes absolute log, database, and resource-directory arguments and creates
 `service.sock` beside that log. Endpoints are:
 
 - Mac: `~/Library/Logs/Strappy/service.sock` (expand the home directory first).
@@ -35,7 +36,7 @@ A frame is a 24-byte header followed by exactly `length` payload bytes:
 | Offset | Width | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `STPY` |
-| 4 | 2 | Protocol version, currently 1 |
+| 4 | 2 | Protocol version, currently 2 |
 | 6 | 2 | Kind: request 1, reply 2, event 3 |
 | 8 | 4 | Operation |
 | 12 | 4 | Request ID; zero only for unsolicited events |
@@ -52,7 +53,7 @@ must wait for step 3's durable client-request deduplication; transport IDs are
 not durable submission identities.
 
 Malformed magic/kind/oversized frames cause immediate disconnect. Unsupported
-header versions receive a v1 incompatible-version reply then disconnect. Invalid
+header versions receive a v2 incompatible-version reply then disconnect. Invalid
 request kind, nonzero request status, or zero request ID similarly produce an
 invalid-request reply then disconnect. The server handles partial reads/writes
 and multiple frames on one stream. Each client has one bounded input frame and
@@ -72,31 +73,35 @@ work per client; execution never occurs on this thread.
 | 3 | subscribe | Empty | Snapshot, with subscription already active |
 | 4 | unsubscribe | Empty | Snapshot, with subscription disabled |
 
-The version interval must contain 1. `hello` is accepted once per connection.
+The version interval must contain 2. `hello` is accepted once per connection.
 Operations 2–4 are repeatable with new IDs. Every successful control reply is
-exactly 32 bytes:
+exactly 36 bytes:
 
 | Offset | Width | Field |
 | --- | --- | --- |
 | 0 | 16 | Opaque random service-instance identity from `/dev/urandom` |
 | 16 | 8 | Instance-local committed-state revision |
-| 24 | 4 | Readiness flags: bit 0 transport ready; bit 1 application ready |
+| 24 | 4 | Readiness flags: bit 0 transport ready; bit 1 store ready (not execution ready) |
 | 28 | 4 | Maximum frame payload (4096) |
+| 32 | 4 | Store reader ABI, currently 1 |
 
-The current readiness value is 1: the service must not be used to open the
-application store or execute work yet. The current state snapshot represents
-service identity/readiness/revision, not invented session or ledger contents.
-Step 2 will add the compatible store/read-layer contract; step 3 will add active
-run state. Such additions require explicit negotiated protocol evolution.
+The production readiness value is 3, published only after schema initialization
+and bundled model import commit. The synthetic transport fixture remains 1.
+Store ABI 1 requires the existing schema identity
+`semantic-v1-provider-owned-models-no-seeded-accounts` and `user_version = 1`.
+This ABI is distinct from SQLite's pinned version: incompatible future reader
+contracts must change the negotiated ABI/protocol without silently migrating a
+store. Old v1 clients/services are rejected. The snapshot represents service
+identity/readiness/revision; it does not claim execution or active-run state.
 
 ## Mutation command boundary
 
 The following stable operation IDs establish the service boundary. All return
-`execution_not_ready` in step 1, without parsing or executing the supplied body.
+`execution_not_ready` in steps 1–2, without parsing or executing the supplied body.
 No acknowledgement implies durable acceptance. Their required semantic inputs
 below are a contract for the later typed command implementations; body encoding
-and success-result schemas are deliberately not advertised as supported by v1
-transport-only readiness. Negotiate an updated protocol before enabling them.
+and success-result schemas are deliberately not advertised as supported by v2
+store readiness. Negotiate an updated protocol before enabling them.
 
 | ID | Command | Required semantic inputs for execution implementation |
 | --- | --- | --- |
@@ -127,7 +132,7 @@ Logs and errors never include request payloads or credentials.
 ## Events, workers, and reconnect
 
 Event IDs 32–35 mean session, ledger, catalog, and run-state changed, respectively.
-They have request ID/status zero and the same 32-byte identity/revision/readiness
+They have request ID/status zero and the same 36-byte identity/revision/readiness
 payload as a snapshot. They invalidate the entire named topic. No events are
 emitted for rejected commands or heartbeat ticks.
 
@@ -152,14 +157,19 @@ future authoritative read layer. An event can represent coalesced changes; never
 interpret it as an ordered transaction log. Events for different topics may
 share a revision. Only discard events at/below a watermark after refreshing all
 state through that watermark; do not discard a second topic just because the
-first topic carried the same revision. Until a consistent read snapshot is
-available in step 2, clients must only display transport readiness.
+first topic carried the same revision. GUI clients open read-only connections only while their service monitor has
+negotiated store readiness and the matching ABI. Disconnect revokes readiness;
+reconnect and every event cause a full UI refresh. The monitor uses a background
+thread with bounded I/O and one-second retry delay, never socket I/O on the UI
+thread. Retained paginated readers hold private temporary-table snapshots, not
+live WAL read transactions. See [STORAGE.md](STORAGE.md).
 
 Do not cancel accepted future work when a client disconnects. The client API is
 synchronous, has bounded monotonic deadlines, and belongs on a background thread.
 After any I/O/protocol error, close it and resynchronize on a fresh connection.
-Request correlation, reconnection backoff, and UI refresh scheduling remain the
-responsibility of the future `StrappySession`/`FileScanner` service adapter.
+The current store monitor handles control-request correlation, reconnection
+backoff, and UI refresh hints. Typed mutation request/reply handling remains for
+the later `StrappySession`/`FileScanner` execution adapter.
 
 ## Validation
 

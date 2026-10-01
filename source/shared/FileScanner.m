@@ -109,6 +109,11 @@ static int StrappyFileScannerSaveCatalogBatch(
 + (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
                                  error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   return [self beginDatabaseCatalogScanAtPath:path
                                      scanMode:FileScannerDatabaseScanModeFull
                                         error:error];
@@ -118,6 +123,11 @@ static int StrappyFileScannerSaveCatalogBatch(
                               scanMode:(FileScannerDatabaseScanMode)scanMode
                                  error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSDictionary *scanRequest;
   NSDictionary *userInfo;
 
@@ -457,6 +467,11 @@ static int StrappyFileScannerSaveCatalogBatch(
 - (BOOL)scanAndSaveDatabasesAtPath:(NSString *)path
   scanMode:(FileScannerDatabaseScanMode)scanMode error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   StrappyFileScannerCatalogBatchContext batchContext;
   strappy_file_scanner_options options;
@@ -563,6 +578,11 @@ static int StrappyFileScannerSaveCatalogBatch(
                forCatalogIdentifier:(NSNumber *)catalogIdentifier
                               error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   const char *decision;
   char *strappyError;
@@ -608,6 +628,11 @@ static int StrappyFileScannerSaveCatalogBatch(
                forCatalogIdentifier:(NSNumber *)catalogIdentifier
                               error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [FileScanner errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   char *strappyError;
   int ok;

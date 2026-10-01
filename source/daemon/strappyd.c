@@ -1,7 +1,9 @@
-/* Launchd service transport and heartbeat. No app state or provider access.
+/* Launchd storage owner, service transport, and heartbeat. No provider access.
  * Feature-test macros belong to the build: _POSIX_C_SOURCE would force
  * Leopard-only UNIX2003 symbols even when the Apple SDK targets Tiger. */
 #include "../shared/strappy_ipc.h"
+#include "../shared/strappy_db.h"
+#include "../shared/strappy_model_catalog.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -73,13 +75,14 @@ static int strappy_probe(const char *path)
         message.operation = operation; message.request_id = operation;
         if (operation == STRAPPY_IPC_HELLO) {
             message.length = 8;
-            strappy_ipc_put32(message.payload, 1); strappy_ipc_put32(message.payload + 4, 1);
+            strappy_ipc_put32(message.payload, STRAPPY_IPC_VERSION); strappy_ipc_put32(message.payload + 4, STRAPPY_IPC_VERSION);
         }
         if (strappy_ipc_send(fd, &message, 3000) != 0 ||
             strappy_ipc_receive(fd, &message, 3000) != 0 ||
             message.kind != STRAPPY_IPC_REPLY || message.operation != operation ||
             message.request_id != operation || message.status != STRAPPY_IPC_OK ||
-            message.length != 32 || strappy_ipc_get32(message.payload + 24) != 1 ||
+            message.length != 36 || strappy_ipc_get32(message.payload + 24) != 3 ||
+            strappy_ipc_get32(message.payload + 32) != STRAPPY_IPC_STORE_ABI ||
             strappy_ipc_get32(message.payload + 28) != STRAPPY_IPC_MAX_PAYLOAD) {
             (void)close(fd); return EXIT_FAILURE;
         }
@@ -89,8 +92,49 @@ static int strappy_probe(const char *path)
         }
     }
     (void)close(fd);
-    puts("IPC v1: same-user hello, snapshot, subscribe, unsubscribe passed; execution not ready");
+    puts("IPC v2: same-user hello, snapshot, subscribe, unsubscribe passed; store ready; execution not ready");
     return EXIT_SUCCESS;
+}
+
+static int strappy_store_permissions(const char *path)
+{
+    static const char *const suffixes[] = {"", "-wal", "-shm"};
+    char *file = malloc(strlen(path) + 5);
+    size_t i;
+    int ok = 1;
+    if (file == NULL) return 0;
+    for (i = 0; ok && i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
+        struct stat info;
+        sprintf(file, "%s%s", path, suffixes[i]);
+        if (lstat(file, &info) != 0) ok = errno == ENOENT;
+        else ok = S_ISREG(info.st_mode) && info.st_uid == geteuid() && chmod(file, 0600) == 0;
+    }
+    free(file);
+    return ok;
+}
+
+/* Parents are supplied explicitly by the installer. The daemon owns only the
+ * final Strappy directory and database files, with its normal user identity. */
+static int strappy_prepare_store(const char *path, const char *resources)
+{
+    char *parent = malloc(strlen(path) + 1);
+    char *error = NULL;
+    struct stat info;
+    int ok;
+    if (parent == NULL) return 0;
+    strcpy(parent, path);
+    *strrchr(parent, '/') = '\0';
+    ok = mkdir(parent, 0700) == 0 || errno == EEXIST;
+    if (ok) ok = lstat(parent, &info) == 0 && S_ISDIR(info.st_mode) &&
+                 info.st_uid == geteuid() && chmod(parent, 0700) == 0;
+    free(parent);
+    if (!ok || !strappy_store_permissions(path)) return 0;
+    ok = strappy_db_initialize(path, &error) &&
+         strappy_model_catalog_import_bundled_models(resources, path, &error) &&
+         strappy_store_permissions(path);
+    if (!ok) fprintf(stderr, "Store initialization failed: %s\n", error != NULL ? error : "unknown error");
+    free(error);
+    return ok;
 }
 
 int main(int argc, char **argv)
@@ -105,7 +149,7 @@ int main(int argc, char **argv)
     int result = EXIT_FAILURE;
     (void)signal(SIGPIPE, SIG_IGN);
     if (argc == 3 && strcmp(argv[1], "--ipc-probe") == 0) return strappy_probe(argv[2]);
-    if (argc != 2 || argv[1][0] != '/') return EXIT_FAILURE;
+    if (argc != 4 || argv[1][0] != '/' || argv[2][0] != '/' || argv[3][0] != '/') return EXIT_FAILURE;
     length = strlen(argv[1]);
     backup = malloc(length + 3);
     if (backup == NULL) return EXIT_FAILURE;
@@ -124,6 +168,8 @@ int main(int argc, char **argv)
     if (sigaction(SIGTERM, &action, NULL) != 0) goto done;
     server = strappy_ipc_server_open(directory);
     if (server == NULL) goto done;
+    if (!strappy_prepare_store(argv[2], argv[3])) goto done;
+    strappy_ipc_server_store_ready(server);
     if (strappy_log(argv[1], backup, "startup", counter) != 0) goto done;
     heartbeat = time(NULL);
     while (!strappy_stopping) {

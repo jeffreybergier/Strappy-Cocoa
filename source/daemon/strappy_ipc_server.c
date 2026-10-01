@@ -29,6 +29,7 @@ struct strappy_ipc_server {
     pthread_mutex_t mutex;
     uint64_t revision;
     unsigned int pending;
+    int store_ready;
     struct strappy_ipc_peer peers[STRAPPY_IPC_MAX_CLIENTS];
 };
 static int strappy_ipc_nonblocking(int fd)
@@ -65,10 +66,11 @@ static void strappy_ipc_snapshot(strappy_ipc_server *s, strappy_ipc_message *m)
     memcpy(m->payload, s->instance, 16);
     strappy_ipc_put32(m->payload + 16, (uint32_t)(revision >> 32));
     strappy_ipc_put32(m->payload + 20, (uint32_t)revision);
-    /* transport ready, application execution/store not yet ready */
-    strappy_ipc_put32(m->payload + 24, 1);
+    /* bit 0 transport, bit 1 store; execution remains unavailable */
+    strappy_ipc_put32(m->payload + 24, s->store_ready ? 3U : 1U);
     strappy_ipc_put32(m->payload + 28, STRAPPY_IPC_MAX_PAYLOAD);
-    m->length = 32;
+    strappy_ipc_put32(m->payload + 32, STRAPPY_IPC_STORE_ABI);
+    m->length = 36;
 }
 static void strappy_ipc_request(strappy_ipc_server *s, struct strappy_ipc_peer *p)
 {
@@ -278,4 +280,9 @@ void strappy_ipc_server_close(strappy_ipc_server *s)
     if (s->wake[1] >= 0) (void)close(s->wake[1]);
     if (s->lock >= 0) (void)close(s->lock);
     (void)pthread_mutex_destroy(&s->mutex); free(s);
+}
+
+void strappy_ipc_server_store_ready(strappy_ipc_server *server)
+{
+    server->store_ready = 1;
 }

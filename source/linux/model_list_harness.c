@@ -184,6 +184,13 @@ int main(void)
     "UPDATE models SET catalog_active=0 WHERE id='openrouter:model-00002';"
     "UPDATE models SET name='Changed' WHERE id='openrouter:model-00001';");
   require(strappy_db_model_list_query(reader,NULL,sort,5,&error) && strappy_db_model_list_count(reader)==21000U,"old snapshot stable after account/catalog edits");
+  {
+    sqlite3_stmt *checkpoint = NULL;
+    require(sqlite3_prepare_v2(db,"PRAGMA wal_checkpoint(TRUNCATE)",-1,&checkpoint,NULL)==SQLITE_OK &&
+      sqlite3_step(checkpoint)==SQLITE_ROW && sqlite3_column_int(checkpoint,0)==0,
+      "retained snapshot does not pin the WAL");
+    sqlite3_finalize(checkpoint);
+  }
   require(strappy_db_model_list_open(path,"Custom",NULL,sort,5,&text,&fresh,&error) && strappy_db_model_list_count(fresh)==13999U,"new snapshot sees archived accounts and removed model");
   require(strappy_db_model_list_index(fresh,"other:model-00001",&position,&error) && position==(size_t)-1,"archived provider missing from identity lookup");
   require(strappy_db_model_list_index(fresh,"openrouter:model-00001",&position,&error),"updated identity");

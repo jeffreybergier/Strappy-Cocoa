@@ -1,3 +1,4 @@
+include ../daemon/store.mk
 STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
 # Altivec Intelligence - Strappy (Mac)
 APP_NAME = Strappy
@@ -41,10 +42,10 @@ ALTIVECCORE_REQUIRED = 1
 ALTIVECCORE_LINKAGE = dynamic
 ALTIVECCOCOA_REQUIRED = 1
 ALTIVECCOCOA_LINKAGE = static
-SOURCE_DIRS = $(SHARED_DIR)
+SOURCE_DIRS = $(SHARED_DIR) $(SHARED_DIR)/XPFoundation
 vpath %.m $(SHARED_DIR)
-EXTRA_FLAGS = -I$(SHARED_DIR) -I$(ALTIVECCORE_DIR)/include
-EXTRA_SOURCES = StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_config.c strappy_client.c strappy_sse.c strappy_identity.c strappy_openai_oauth.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_debug_capture.c strappy_responses.c strappy_webview.c
+EXTRA_FLAGS = -DSTRAPPY_DB_UI=1 -I$(SHARED_DIR) -I$(ALTIVECCORE_DIR)/include
+EXTRA_SOURCES = strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_config.c strappy_client.c strappy_sse.c strappy_identity.c strappy_openai_oauth.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_bundled_catalog.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_debug_capture.c strappy_responses.c strappy_webview.c
 MAC_ICON = Resources/Strappy.icns
 BUNDLE_FONT_DIRS = $(ALTIVECCOCOA_DIR)/Resources/Fonts
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
@@ -66,7 +67,7 @@ VALIDATE_PATHS = . $(SHARED_DIR)
 
 # The service has only system C dependencies; keep it independent of the UI.
 STRAPPY_DAEMON = $(INT_DIR)/strappyd
-STRAPPY_DAEMON_FLAGS = $(OPT_FLAGS) -std=c99 -Wall -Wextra
+STRAPPY_DAEMON_FLAGS = $(OPT_FLAGS) -std=c99 -Wall -Wextra -DSTRAPPY_DB_WRITER=1 -I../shared -I$(ALTIVECCORE_DIR)/include
 $(BUNDLE): $(STRAPPY_DAEMON)
 # Directory mtimes alone do not track replaced files inside an existing bundle.
 $(ZIP_FILE): $(UNIVERSAL_BIN) $(STRAPPY_DAEMON)
@@ -74,18 +75,18 @@ $(ZIP_FILE): $(UNIVERSAL_BIN) $(STRAPPY_DAEMON)
 $(STRAPPY_DAEMON): $(INT_DIR)/strappyd-ppc $(INT_DIR)/strappyd-x86 $(INT_DIR)/strappyd-x64 $(INT_DIR)/strappyd-arm
 	$(LIPO) -create $^ -output $@
 
-$(INT_DIR)/strappyd-ppc: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
+$(INT_DIR)/strappyd-ppc: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p $(INT_DIR)
-	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_PPC) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch ppc -isysroot $(SDK_MAC_OLD_PATH) $< $(STRAPPY_IPC_SOURCES) -lgcc_s.10.4 -o $@
+	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_PPC) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch ppc -isysroot $(SDK_MAC_OLD_PATH) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(ALTIVECCORE_DIR)/lib/libsqlite3.a $(ALTIVECCORE_DIR)/lib/libcjson.a -lgcc_s.10.4 -o $@
 
-$(INT_DIR)/strappyd-x86: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
+$(INT_DIR)/strappyd-x86: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p $(INT_DIR)
-	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_X86) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch i386 -isysroot $(SDK_MAC_OLD_PATH) $< $(STRAPPY_IPC_SOURCES) -lgcc_s.10.4 -o $@
+	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_X86) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch i386 -isysroot $(SDK_MAC_OLD_PATH) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(ALTIVECCORE_DIR)/lib/libsqlite3.a $(ALTIVECCORE_DIR)/lib/libcjson.a -lgcc_s.10.4 -o $@
 
-$(INT_DIR)/strappyd-x64: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
+$(INT_DIR)/strappyd-x64: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p $(INT_DIR)
-	$(COMPILER_X64) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target x86_64-apple-macos$(MAC_MIN_MID) -isysroot $(SDK_MAC_NEW_PATH) --ld-path=$(LD64_LLD) -Wl,-platform_version,macos,$(MAC_MIN_MID),$(SDK_MAC_NEW) $< $(STRAPPY_IPC_SOURCES) -o $@
+	$(COMPILER_X64) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target x86_64-apple-macos$(MAC_MIN_MID) -isysroot $(SDK_MAC_NEW_PATH) --ld-path=$(LD64_LLD) -Wl,-platform_version,macos,$(MAC_MIN_MID),$(SDK_MAC_NEW) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(ALTIVECCORE_DIR)/lib/libsqlite3.a $(ALTIVECCORE_DIR)/lib/libcjson.a -o $@
 
-$(INT_DIR)/strappyd-arm: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
+$(INT_DIR)/strappyd-arm: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p $(INT_DIR)
-	$(COMPILER_ARM) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target arm64-apple-macos$(MAC_MIN_NEW) -isysroot $(SDK_MAC_NEW_PATH) $< $(STRAPPY_IPC_SOURCES) -o $@
+	$(COMPILER_ARM) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target arm64-apple-macos$(MAC_MIN_NEW) -isysroot $(SDK_MAC_NEW_PATH) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(ALTIVECCORE_DIR)/lib/libsqlite3.a $(ALTIVECCORE_DIR)/lib/libcjson.a -o $@

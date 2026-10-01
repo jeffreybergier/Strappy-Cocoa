@@ -138,6 +138,13 @@ int main(void)
   require(strappy_db_catalog_query(reader,NULL,0,size_sort,1,&error),"old snapshot remains stable after writes");
   require(strappy_db_catalog_page(reader,0,&page,&error) && page.records[0].catalog_id==1 && page.records[0].size==1,"old row values and permissions");
   strappy_discovered_database_record_list_destroy(&page);
+  {
+    sqlite3_stmt *checkpoint = NULL;
+    require(sqlite3_prepare_v2(db,"PRAGMA wal_checkpoint(TRUNCATE)",-1,&checkpoint,NULL)==SQLITE_OK &&
+      sqlite3_step(checkpoint)==SQLITE_ROW && sqlite3_column_int(checkpoint,0)==0,
+      "retained snapshot does not pin the WAL");
+    sqlite3_finalize(checkpoint);
+  }
   require(strappy_db_catalog_open(path,NULL,0,size_sort,1,&text,&other,&error),"new snapshot");
   require(strappy_db_catalog_count(other)==14999U,"new permissions");
   require(strappy_db_catalog_index(other,1,&index,&error) && index==(size_t)-1,"hidden identity disappears");

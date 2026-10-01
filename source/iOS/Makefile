@@ -1,3 +1,4 @@
+include ../daemon/store.mk
 STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
 # Altivec Intelligence - Strappy (iPhone)
 APP_NAME = Strappy
@@ -43,10 +44,10 @@ SHARED_RESOURCES = $(SYSTEM_PROMPT_RESOURCE) \
                    $(FONTAWESOME_ICONS_RESOURCE)
 ALTIVECCORE_REQUIRED = 1
 ALTIVECCOCOA_REQUIRED = 1
-SOURCE_DIRS = $(SHARED_DIR)
+SOURCE_DIRS = $(SHARED_DIR) $(SHARED_DIR)/XPFoundation
 vpath %.m $(SHARED_DIR)
-EXTRA_FLAGS = -I$(SHARED_DIR)
-EXTRA_SOURCES = StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_config.c strappy_client.c strappy_sse.c strappy_identity.c strappy_openai_oauth.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_debug_capture.c strappy_responses.c strappy_webview.c
+EXTRA_FLAGS = -DSTRAPPY_DB_UI=1 -I$(SHARED_DIR)
+EXTRA_SOURCES = strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_config.c strappy_client.c strappy_sse.c strappy_identity.c strappy_openai_oauth.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_bundled_catalog.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_debug_capture.c strappy_responses.c strappy_webview.c
 PHONE_SOURCE_FLAGS = -fobjc-arc
 LIBS_IPHONE = -framework Security -framework QuartzCore -weak_framework WebKit
 PHONE_LDID_SIGN ?= 1
@@ -105,9 +106,9 @@ $(PHONE_DEB_ROOTLESS): DEB_INSTALL_PREFIX = /var/jb
 STRAPPY_DAEMON = $(INT_DIR)/strappyd
 STRAPPY_DAEMON_INPUTS = ../daemon/strappyd.c daemon/com.altivecintelligence.strappyd.plist.in daemon/lifecycle.sh.in
 
-$(STRAPPY_DAEMON): ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
+$(STRAPPY_DAEMON): ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p "$(INT_DIR)"
-	@export PATH=$(BIN_DIR):$(PATH); $(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) $< $(STRAPPY_IPC_SOURCES) -o $@
+	@export PATH=$(BIN_DIR):$(PATH); $(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) -USTRAPPY_DB_UI -DSTRAPPY_DB_WRITER=1 $(ALTIVECCORE_DIR)/lib/libAltivecCore.a -o $@
 	@$(PHONE_LDID) -S $@
 
 $(PHONE_DEBS): $(APP_BUNDLE) $(STRAPPY_DAEMON) $(STRAPPY_DAEMON_INPUTS) Makefile

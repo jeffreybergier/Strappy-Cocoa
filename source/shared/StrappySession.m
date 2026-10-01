@@ -1,3 +1,5 @@
+#import "strappy_store_client.h"
+#import "FileScanner.h"
 #import "StrappySession.h"
 
 #import "StrappyKeychain.h"
@@ -933,7 +935,24 @@ static BOOL StrappySessionRecordFromOptions(
   return YES;
 }
 
+static void StrappyStoreChanged(void)
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  [StrappySession performSelectorOnMainThread:@selector(serviceStoreChanged:)
+                                 withObject:nil waitUntilDone:NO];
+  [pool release];
+}
+
 @implementation StrappySession
+
++ (void)serviceStoreChanged:(id)ignored
+{
+  (void)ignored;
+  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionDidUpdateNotification object:nil];
+  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogDidChangeNotification object:nil];
+  [[NSNotificationCenter defaultCenter] postNotificationName:FileScannerDatabaseCatalogDidChangeNotification object:nil];
+}
+
 
 + (NSString *)webViewBatchedJavaScriptForJavaScript:(NSString *)javaScript
 {
@@ -1501,6 +1520,19 @@ static BOOL StrappySessionRecordFromOptions(
   char *strappyError;
   NSString *fontsPath;
   int ok;
+  NSString *socketDirectory;
+
+  if ([[NSProcessInfo processInfo] XP_platformFamily] == XPPlatformFamilyIOS) {
+    socketDirectory = [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb/Applications/Strappy.app"] ?
+      @"/var/jb/var/log/strappy" : @"/var/log/strappy";
+  } else {
+    socketDirectory = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/Strappy"];
+  }
+  if (!strappy_store_client_start([[socketDirectory stringByAppendingPathComponent:@"service.sock"] fileSystemRepresentation],
+      [[self sessionsDatabasePath] fileSystemRepresentation], StrappyStoreChanged)) {
+    [NSException raise:NSInternalInconsistencyException format:@"Could not start the service monitor."];
+  }
+
 
   if (![caCertPath isKindOfClass:[NSString class]] || ([caCertPath length] == 0U)) {
     [NSException raise:NSInvalidArgumentException
@@ -2092,50 +2124,14 @@ static BOOL StrappySessionRecordFromOptions(
   return result;
 }
 
-+ (BOOL)ensureSessionsDirectoryForDatabasePath:(NSString *)databasePath
++ (BOOL)validateSessionStoreForDatabasePath:(NSString *)databasePath
                                          error:(NSError **)error
 {
-  NSFileManager *fileManager;
-  NSString *directoryPath;
-  BOOL isDirectory;
-
-  fileManager = [NSFileManager defaultManager];
-  directoryPath = [databasePath stringByDeletingLastPathComponent];
-  isDirectory = NO;
-
-  if ([fileManager fileExistsAtPath:directoryPath isDirectory:&isDirectory]) {
-    if (isDirectory) {
-      return YES;
-    }
-
-    if (error != nil) {
-      NSDictionary *userInfo =
-        [NSDictionary dictionaryWithObject:NSLocalizedString(@"Session path is not a directory.", nil)
-                                    forKey:NSLocalizedDescriptionKey];
-      *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                   code:2
-                               userInfo:userInfo];
-    }
-    return NO;
-  }
-
-  if ([fileManager XP_createDirectoryAtPath:directoryPath
-                withIntermediateDirectories:YES
-                                 attributes:nil
-                                      error:error]) {
-    return YES;
-  }
-
-  if ((error != nil) && (*error == nil)) {
-    NSDictionary *userInfo =
-      [NSDictionary dictionaryWithObject:NSLocalizedString(@"Could not create session directory.", nil)
-                                  forKey:NSLocalizedDescriptionKey];
-    *error = [NSError errorWithDomain:@"StrappyAssistantErrorDomain"
-                                 code:3
-                             userInfo:userInfo];
-  }
-
-  return NO;
+  char *message = NULL;
+  int ok = strappy_db_check_reader([databasePath fileSystemRepresentation], &message);
+  if (!ok && error != nil) *error = [self errorFromCString:message];
+  strappy_free_string(message);
+  return ok ? YES : NO;
 }
 
 + (NSString *)sessionsDatabasePath
@@ -2328,6 +2324,11 @@ static BOOL StrappySessionRecordFromOptions(
                 context:(id)operationContext
                 error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return nil;
+  }
+
   StrappyChatGPTAuthorizationCancellationContext cancellationContext;
   strappy_openai_oauth_configuration configuration;
   strappy_openai_oauth_credentials credentials;
@@ -2421,197 +2422,8 @@ static BOOL StrappySessionRecordFromOptions(
 + (BOOL)initializeSessionStoreAndPrepareCredentials:(BOOL)prepareCredentials
                                                error:(NSError **)error
 {
-  NSString *databasePath;
-  char *strappyError;
-  int ok;
-
-  databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
-                                                        error:error]) {
-    return NO;
-  }
-
-  strappyError = NULL;
-  ok = strappy_session_initialize_store([databasePath UTF8String],
-                                        &strappyError);
-  if (ok && prepareCredentials) {
-    static const char *providerIDs[] = {
-      STRAPPY_PROVIDER_OPENROUTER,
-      STRAPPY_PROVIDER_OPENAI_CHATGPT
-    };
-    static const char *accountIDs[] = {
-      STRAPPY_PROVIDER_ACCOUNT_OPENROUTER,
-      STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT
-    };
-    static const char *accountNames[] = {
-      STRAPPY_PROVIDER_ACCOUNT_OPENROUTER_NAME,
-      STRAPPY_PROVIDER_ACCOUNT_OPENAI_CHATGPT_NAME
-    };
-    size_t providerIndex;
-
-    for (providerIndex = 0U;
-         ok && (providerIndex < (sizeof(providerIDs) / sizeof(providerIDs[0])));
-         providerIndex++) {
-      strappy_provider_account_record_list existingAccounts;
-      NSString *providerIdentifier;
-      NSString *providerAccountIdentifier;
-      StrappyKeychain *keychain;
-      NSObject *credentialLock;
-      NSString *legacyEndpoint;
-      NSMutableArray *restoreIdentifiers;
-      NSArray *credentialIdentifiers;
-      NSUInteger credentialIndex;
-
-      strappy_provider_account_record_list_init(&existingAccounts);
-      if (!strappy_db_list_provider_accounts(
-            [databasePath fileSystemRepresentation], providerIDs[providerIndex],
-            0, &existingAccounts, &strappyError)) {
-        ok = 0;
-        break;
-      }
-      providerIdentifier = [NSString stringWithUTF8String:
-        providerIDs[providerIndex]];
-      providerAccountIdentifier = [NSString stringWithUTF8String:
-        (existingAccounts.count > 0U) ?
-          existingAccounts.records[0].account_id : accountIDs[providerIndex]];
-      keychain = [StrappyKeychain sharedKeychain];
-      credentialLock = [keychain
-        credentialLockForProviderIdentifier:providerIdentifier
-        providerAccountIdentifier:providerAccountIdentifier];
-      legacyEndpoint = nil;
-      @synchronized(credentialLock) {
-        if (strcmp(providerIDs[providerIndex], STRAPPY_PROVIDER_OPENROUTER) == 0) {
-          ok = [keychain
-            migrateLegacyOpenRouterCredentialToProviderAccountIdentifier:
-              providerAccountIdentifier
-            endpoint:&legacyEndpoint] ? 1 : 0;
-        } else {
-          ok = [keychain
-            migrateLegacyChatGPTCredentialToProviderAccountIdentifier:
-              providerAccountIdentifier] ? 1 : 0;
-        }
-      }
-      if (ok && (existingAccounts.count == 0U)) {
-        restoreIdentifiers = [NSMutableArray array];
-        credentialIdentifiers = [keychain
-          credentialProviderAccountIdentifiersForProviderIdentifier:
-            providerIdentifier];
-        if ([credentialIdentifiers containsObject:providerAccountIdentifier]) {
-          [restoreIdentifiers addObject:providerAccountIdentifier];
-        }
-        for (credentialIndex = 0U;
-             credentialIndex < [credentialIdentifiers count];
-             credentialIndex++) {
-          NSString *identifier;
-
-          identifier = [credentialIdentifiers objectAtIndex:credentialIndex];
-          if (![restoreIdentifiers containsObject:identifier]) {
-            [restoreIdentifiers addObject:identifier];
-          }
-        }
-        for (credentialIndex = 0U;
-             ok && (credentialIndex < [restoreIdentifiers count]);
-             credentialIndex++) {
-          NSString *identifier;
-          NSString *displayName;
-          NSString *savedDisplayName;
-          const char *endpoint;
-
-          identifier = [restoreIdentifiers objectAtIndex:credentialIndex];
-          savedDisplayName = nil;
-          displayName = [keychain loadDisplayName:&savedDisplayName
-            forProviderIdentifier:providerIdentifier
-            providerAccountIdentifier:identifier] ? savedDisplayName : nil;
-          if ([displayName length] == 0U) {
-            displayName = (credentialIndex == 0U) ?
-              [NSString stringWithUTF8String:accountNames[providerIndex]] :
-              [NSString stringWithFormat:@"%s %lu", accountNames[providerIndex],
-                (unsigned long)(credentialIndex + 1U)];
-          }
-          endpoint = ([identifier isEqualToString:providerAccountIdentifier] &&
-                      ([legacyEndpoint length] > 0U)) ?
-            [legacyEndpoint UTF8String] : NULL;
-          ok = strappy_db_restore_provider_account(
-            [databasePath fileSystemRepresentation], [identifier UTF8String],
-            providerIDs[providerIndex], [displayName UTF8String], endpoint,
-            &strappyError);
-          if (ok) {
-            ok = [keychain saveDisplayName:displayName
-              forProviderIdentifier:providerIdentifier
-              providerAccountIdentifier:identifier] ? 1 : 0;
-          }
-        }
-      } else if (ok &&
-                 ([legacyEndpoint length] > 0U)) {
-        ok = strappy_db_update_provider_account(
-          [databasePath fileSystemRepresentation],
-          existingAccounts.records[0].account_id,
-          existingAccounts.records[0].display_name,
-          [legacyEndpoint UTF8String],
-          existingAccounts.records[0].max_output_tokens, &strappyError);
-      }
-      if (ok && (existingAccounts.count > 0U)) {
-        size_t existingIndex;
-
-        for (existingIndex = 0U;
-             ok && (existingIndex < existingAccounts.count);
-             existingIndex++) {
-          NSString *identifier;
-          NSString *displayName;
-          NSString *savedDisplayName;
-          NSObject *nameCredentialLock;
-
-          identifier = [NSString stringWithUTF8String:
-            existingAccounts.records[existingIndex].account_id];
-          displayName = [NSString stringWithUTF8String:
-            existingAccounts.records[existingIndex].display_name];
-          savedDisplayName = nil;
-          nameCredentialLock = [keychain
-            credentialLockForProviderIdentifier:providerIdentifier
-            providerAccountIdentifier:identifier];
-          @synchronized(nameCredentialLock) {
-            if (![keychain loadDisplayName:&savedDisplayName
-                     forProviderIdentifier:providerIdentifier
-                 providerAccountIdentifier:identifier] ||
-                ![savedDisplayName isEqualToString:displayName]) {
-              ok = [keychain saveDisplayName:displayName
-                forProviderIdentifier:providerIdentifier
-                providerAccountIdentifier:identifier] ? 1 : 0;
-            }
-          }
-        }
-      }
-      strappy_provider_account_record_list_destroy(&existingAccounts);
-      if (!ok && (strappyError == NULL)) {
-        strappy_set_error(&strappyError,
-                          "Could not convert the saved account credential.");
-      }
-    }
-  }
-  if (ok) {
-    NSString *resourcePath;
-
-    resourcePath = [[NSBundle mainBundle] resourcePath];
-    ok = [resourcePath isKindOfClass:[NSString class]] &&
-      ([resourcePath length] > 0U) &&
-      strappy_model_catalog_import_bundled_models(
-        [resourcePath fileSystemRepresentation],
-        [databasePath fileSystemRepresentation],
-        &strappyError);
-    if (!ok && (strappyError == NULL)) {
-      strappy_set_error(&strappyError,
-                        "Bundled model catalog resource is missing.");
-    }
-  }
-  if (!ok) {
-    if (error != nil) {
-      *error = [StrappySession errorFromCString:strappyError];
-    }
-    strappy_session_free_string(strappyError);
-    return NO;
-  }
-
-  return YES;
+  (void)prepareCredentials;
+  return [self validateSessionStoreForDatabasePath:[self sessionsDatabasePath] error:error];
 }
 
 + (NSString *)designatedProviderAccountIdentifierForProviderIdentifier:
@@ -2915,6 +2727,11 @@ static BOOL StrappySessionRecordFromOptions(
                                                         error:
                     (NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return nil;
+  }
+
   NSString *databasePath;
   NSArray *accounts;
   NSString *displayName;
@@ -3012,6 +2829,11 @@ static BOOL StrappySessionRecordFromOptions(
                         maxOutputTokens:(long long)maxOutputTokens
                                   error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   NSString *trimmedName;
   NSString *trimmedEndpoint;
@@ -3152,6 +2974,11 @@ static BOOL StrappySessionRecordFromOptions(
                             bearerToken:(NSString *)bearerToken
                                   error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   strappy_provider_account_record record;
   NSString *providerIdentifier;
@@ -3242,6 +3069,11 @@ static BOOL StrappySessionRecordFromOptions(
 + (BOOL)archiveProviderAccountIdentifier:(NSString *)providerAccountIdentifier
                                     error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   strappy_provider_account_record record;
   NSString *providerIdentifier;
@@ -3345,7 +3177,7 @@ static BOOL StrappySessionRecordFromOptions(
   const char *searchCString;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -3398,7 +3230,7 @@ static BOOL StrappySessionRecordFromOptions(
   char *strappyError;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -3428,7 +3260,7 @@ static BOOL StrappySessionRecordFromOptions(
   char *strappyError;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -3672,7 +3504,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *result;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -3700,6 +3532,11 @@ static BOOL StrappySessionRecordFromOptions(
 + (BOOL)setDefaultModelIdentifier:(NSString *)modelIdentifier
                              error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   char *strappyError;
   int ok;
@@ -3718,7 +3555,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return NO;
   }
@@ -3753,6 +3590,11 @@ static BOOL StrappySessionRecordFromOptions(
 + (BOOL)setDefaultOpenRouterModelIdentifier:(NSString *)modelIdentifier
                                       error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   return [StrappySession setDefaultModelIdentifier:modelIdentifier error:error];
 }
 
@@ -3766,7 +3608,7 @@ static BOOL StrappySessionRecordFromOptions(
   strappy_session_options record;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -3814,6 +3656,11 @@ static BOOL StrappySessionRecordFromOptions(
                        changedFields:(StrappySessionOptionMask)changedFields
                                error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   NSString *resourcePath;
   NSString *workingDirectory;
@@ -3854,7 +3701,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return NO;
   }
@@ -3921,6 +3768,11 @@ static BOOL StrappySessionRecordFromOptions(
      forModelIdentifier:(NSString *)modelIdentifier
                   error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   char *strappyError;
   int ok;
@@ -3939,7 +3791,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return NO;
   }
@@ -4074,6 +3926,11 @@ static BOOL StrappySessionRecordFromOptions(
                                                        error:
                 (NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return nil;
+  }
+
   NSString *databasePath;
   NSString *modelIdentifier;
   strappy_manual_model_input input;
@@ -4098,7 +3955,7 @@ static BOOL StrappySessionRecordFromOptions(
     return nil;
   }
   databasePath = [self sessionsDatabasePath];
-  if (![self ensureSessionsDirectoryForDatabasePath:databasePath error:error]) {
+  if (![self validateSessionStoreForDatabasePath:databasePath error:error]) {
     return nil;
   }
   modelID = NULL;
@@ -4151,6 +4008,11 @@ static BOOL StrappySessionRecordFromOptions(
                                                    error:
             (NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   strappy_manual_model_input input;
   char *strappyError;
@@ -4173,7 +4035,7 @@ static BOOL StrappySessionRecordFromOptions(
     return NO;
   }
   databasePath = [self sessionsDatabasePath];
-  if (![self ensureSessionsDirectoryForDatabasePath:databasePath error:error]) {
+  if (![self validateSessionStoreForDatabasePath:databasePath error:error]) {
     return NO;
   }
   strappyError = NULL;
@@ -4201,6 +4063,11 @@ static BOOL StrappySessionRecordFromOptions(
                                                     error:
             (NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   char *strappyError;
 
@@ -4214,7 +4081,7 @@ static BOOL StrappySessionRecordFromOptions(
     return NO;
   }
   databasePath = [self sessionsDatabasePath];
-  if (![self ensureSessionsDirectoryForDatabasePath:databasePath error:error]) {
+  if (![self validateSessionStoreForDatabasePath:databasePath error:error]) {
     return NO;
   }
   strappyError = NULL;
@@ -4238,6 +4105,11 @@ static BOOL StrappySessionRecordFromOptions(
 
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSArray *accounts;
   NSString *designatedAccountIdentifier;
   NSString *providerAccountIdentifier;
@@ -4321,7 +4193,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     @synchronized(self) {
       StrappySessionModelCatalogRefreshInFlight = NO;
@@ -4442,6 +4314,11 @@ static BOOL StrappySessionRecordFromOptions(
 
 + (StrappySession *)createSessionWithError:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return nil;
+  }
+
   NSString *databasePath;
   NSString *workingDirectory;
   NSArray *workingDirectories;
@@ -4451,7 +4328,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSDictionary *summary;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -4515,7 +4392,7 @@ static BOOL StrappySessionRecordFromOptions(
   size_t index;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -4551,11 +4428,16 @@ static BOOL StrappySessionRecordFromOptions(
     (NSString *)databaseIdentifier
                                                     error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   char *strappyError;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return NO;
   }
@@ -4576,11 +4458,16 @@ static BOOL StrappySessionRecordFromOptions(
 
 + (BOOL)resetDatabaseStudyWithError:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   char *strappyError;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return NO;
   }
@@ -4598,6 +4485,11 @@ static BOOL StrappySessionRecordFromOptions(
 
 + (StrappySession *)beginDatabaseStudyWithError:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return nil;
+  }
+
   NSString *databasePath;
   NSString *defaultModel;
   NSString *studyWorkingDirectory;
@@ -4635,7 +4527,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -4743,6 +4635,11 @@ static BOOL StrappySessionRecordFromOptions(
 + (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier
                                error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   char *strappyError;
   long long sessionId;
@@ -4774,7 +4671,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return NO;
   }
@@ -4798,7 +4695,7 @@ static BOOL StrappySessionRecordFromOptions(
   NSString *path;
 
   path = [self sessionsDatabasePath];
-  if (![self ensureSessionsDirectoryForDatabasePath:path error:error]) return nil;
+  if (![self validateSessionStoreForDatabasePath:path error:error]) return nil;
   return [[[StrappySessionRows alloc] initWithDatabasePath:path error:error] autorelease];
 }
 
@@ -4811,7 +4708,7 @@ static BOOL StrappySessionRecordFromOptions(
   size_t index;
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -4865,7 +4762,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -4925,7 +4822,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -4976,7 +4873,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -5053,7 +4950,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -5152,7 +5049,7 @@ static BOOL StrappySessionRecordFromOptions(
   resourcePath = nil;
   if (renderContext == NULL) {
     databasePath = [StrappySession sessionsDatabasePath];
-    if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+    if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                           error:error]) {
       return nil;
     }
@@ -5226,7 +5123,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -5341,7 +5238,7 @@ static BOOL StrappySessionRecordFromOptions(
   resourcePath = nil;
   if (renderContext == NULL) {
     databasePath = [StrappySession sessionsDatabasePath];
-    if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+    if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                           error:error]) {
       return nil;
     }
@@ -5377,6 +5274,11 @@ static BOOL StrappySessionRecordFromOptions(
                 includedInContext:(BOOL)includedInContext
                             error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   char *strappyError;
   long long modelRequestId;
@@ -5388,7 +5290,7 @@ static BOOL StrappySessionRecordFromOptions(
     [modelRequestIdentifier isKindOfClass:[NSNumber class]] ?
       [modelRequestIdentifier longLongValue] : 0LL;
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return NO;
   }
@@ -5454,7 +5356,7 @@ static BOOL StrappySessionRecordFromOptions(
     return nil;
   }
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -5498,6 +5400,11 @@ static BOOL StrappySessionRecordFromOptions(
         changedFields:(StrappySessionOptionMask)changedFields
                 error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSString *databasePath;
   NSString *resourcePath;
   NSDictionary *summary;
@@ -5546,7 +5453,7 @@ static BOOL StrappySessionRecordFromOptions(
     return NO;
   }
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return NO;
   }
@@ -5683,7 +5590,7 @@ static BOOL StrappySessionRecordFromOptions(
   }
 
   databasePath = [StrappySession sessionsDatabasePath];
-  if (![StrappySession ensureSessionsDirectoryForDatabasePath:databasePath
+  if (![StrappySession validateSessionStoreForDatabasePath:databasePath
                                                         error:error]) {
     return nil;
   }
@@ -5775,6 +5682,11 @@ static BOOL StrappySessionRecordFromOptions(
                      context:(NSDictionary *)context
                        error:(NSError **)error
 {
+  if (!strappy_db_writer_available(NULL)) {
+    if (error != nil) *error = [StrappySession errorFromCString:"This action is unavailable until daemon execution is implemented."];
+    return NO;
+  }
+
   NSMutableDictionary *request;
 
   if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {

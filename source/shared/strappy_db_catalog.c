@@ -585,8 +585,8 @@ int strappy_db_list_provider_accounts(
     return 0;
   }
   strappy_provider_account_record_list_init(list);
-  if (!strappy_db_open(db_path, &db, error_out)) return 0;
-  if (!strappy_db_ensure_schema(db, error_out)) { strappy_db_release(db); return 0; }
+  if (!strappy_db_open_reader(db_path, &db, error_out)) return 0;
+  if (!strappy_db_validate_reader(db, error_out)) { strappy_db_release(db); return 0; }
   stmt = NULL;
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   if (rc == SQLITE_OK) {
@@ -2364,11 +2364,11 @@ int strappy_db_list_discovered_databases(
   }
   strappy_discovered_database_record_list_init(list);
 
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
 
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -2489,10 +2489,10 @@ int strappy_db_list_approved_database_display_names(
   }
   strappy_database_display_name_record_list_init(list);
 
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -4366,12 +4366,12 @@ static int strappy_db_semantic_list_models(
     strappy_set_error(error_out, "Could not allocate model catalog query.");
     return 0;
   }
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     free(pattern);
     strappy_db_sql_buffer_destroy(&query);
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     free(pattern);
     strappy_db_sql_buffer_destroy(&query);
     strappy_db_release(db);
@@ -4541,8 +4541,8 @@ int strappy_db_get_account_model_id(const char *db_path,
   sqlite3 *db; sqlite3_stmt *stmt; int rc;
   if (model_id_out == NULL) { strappy_set_error(error_out,"Model id output is missing."); return 0; }
   *model_id_out=NULL;
-  if (!strappy_db_open(db_path,&db,error_out)) return 0;
-  if (!strappy_db_ensure_schema(db,error_out)) { strappy_db_release(db); return 0; }
+  if (!strappy_db_open_reader(db_path,&db,error_out)) return 0;
+  if (!strappy_db_validate_reader(db,error_out)) { strappy_db_release(db); return 0; }
   stmt=NULL; rc=sqlite3_prepare_v2(db,
     "SELECT m.id FROM models m JOIN provider_accounts a "
     "ON a.provider_id=m.provider_id WHERE a.id=? AND a.lifecycle_state='active' "
@@ -4957,10 +4957,10 @@ int strappy_db_get_default_model(const char *db_path,
   sqlite3 *db;
   int ok;
 
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -5005,8 +5005,8 @@ int strappy_db_get_default_account_model(const char *db_path,
   sqlite3 *db; sqlite3_stmt *stmt; int rc;
   if ((provider_account_id_out==NULL)||(model_id_out==NULL)) { strappy_set_error(error_out,"Default account model output is missing."); return 0; }
   *provider_account_id_out=NULL; *model_id_out=NULL;
-  if (!strappy_db_open(db_path,&db,error_out)) return 0;
-  if (!strappy_db_ensure_schema(db,error_out)) { strappy_db_release(db); return 0; }
+  if (!strappy_db_open_reader(db_path,&db,error_out)) return 0;
+  if (!strappy_db_validate_reader(db,error_out)) { strappy_db_release(db); return 0; }
   stmt=NULL; rc=sqlite3_prepare_v2(db,
     "SELECT default_provider_account_id,default_model_id FROM app_preferences WHERE id=1;",-1,&stmt,NULL);
   if (rc==SQLITE_OK) rc=sqlite3_step(stmt);
@@ -5081,10 +5081,10 @@ int strappy_db_get_session_model(const char *db_path,
     return 0;
   }
 
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -5180,10 +5180,10 @@ int strappy_db_get_session_model_route(
     strappy_set_error(error_out, "Session id is not valid.");
     return 0;
   }
-  if (!strappy_db_open(db_path, &db, error_out)) {
+  if (!strappy_db_open_reader(db_path, &db, error_out)) {
     return 0;
   }
-  if (!strappy_db_ensure_schema(db, error_out)) {
+  if (!strappy_db_validate_reader(db, error_out)) {
     strappy_db_release(db);
     return 0;
   }
@@ -5298,6 +5298,7 @@ static int strappy_catalog_compare(void *context, int left_length,
 
 static int strappy_catalog_error(strappy_catalog_reader *reader, char **error_out)
 {
+  if (error_out != NULL && *error_out != NULL) return 0;
   strappy_set_formatted_error(error_out, "Could not read database catalog: %s",
                               sqlite3_errmsg(reader->db));
   return 0;
@@ -5322,6 +5323,7 @@ int strappy_db_catalog_open(const char *path, const char *search, int show_hidde
   strappy_catalog_reader *reader;
   sqlite3_stmt *stmt = NULL;
   int rc;
+  static const char *const tables[] = { "databases", "database_locations", "database_permissions", "applications", "scan_roots", NULL };
   static const char *keys =
     "CREATE TEMP TABLE catalog_keys AS SELECT l.id AS location_id,d.id AS catalog_id,"
     "l.path,l.last_seen_at_ms,l.size_bytes AS size,p.hidden,"
@@ -5341,14 +5343,13 @@ int strappy_db_catalog_open(const char *path, const char *search, int show_hidde
     return 0;
   }
   *out = NULL;
-  if (!strappy_db_initialize(path, error_out)) return 0;
   reader = calloc(1U, sizeof(*reader));
   if (reader == NULL) {
     strappy_set_error(error_out, "Could not allocate database catalog reader.");
     return 0;
   }
   reader->text = *text;
-  rc = sqlite3_open_v2(path, &reader->db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, NULL);
+  rc = strappy_db_open_reader(path, &reader->db, error_out) ? SQLITE_OK : SQLITE_ERROR;
   if (rc != SQLITE_OK) goto failure;
   sqlite3_busy_timeout(reader->db, 5000);
   if (sqlite3_create_function(reader->db,"catalog_field",4,SQLITE_UTF8,reader,
@@ -5357,7 +5358,8 @@ int strappy_db_catalog_open(const char *path, const char *search, int show_hidde
         strappy_catalog_contains,NULL,NULL) != SQLITE_OK ||
       sqlite3_create_collation(reader->db,"catalog_text",SQLITE_UTF8,reader,
         strappy_catalog_compare) != SQLITE_OK ||
-      sqlite3_exec(reader->db,"BEGIN",NULL,NULL,NULL) != SQLITE_OK) goto failure;
+      !strappy_db_reader_snapshot(reader->db,tables,error_out)) goto failure;
+  if (sqlite3_exec(reader->db,"CREATE INDEX temp.snapshot_databases ON databases(id);CREATE INDEX temp.snapshot_database_locations ON database_locations(id);CREATE INDEX temp.snapshot_database_permissions ON database_permissions(database_id);CREATE INDEX temp.snapshot_applications ON applications(id);CREATE INDEX temp.snapshot_scan_roots ON scan_roots(id);",NULL,NULL,NULL)!=SQLITE_OK) goto failure;
   if (sqlite3_prepare_v2(reader->db,keys,-1,&stmt,NULL) != SQLITE_OK) goto failure;
   rc = sqlite3_step(stmt);
   sqlite3_finalize(stmt); stmt = NULL;
@@ -5547,6 +5549,7 @@ struct strappy_model_reader {
 
 static int strappy_model_list_error(strappy_model_reader *reader, char **error_out)
 {
+  if (error_out != NULL && *error_out != NULL) return 0;
   strappy_set_formatted_error(error_out,"Could not read model list: %s",
     reader->comparison_failed ? "Could not allocate text comparison." : sqlite3_errmsg(reader->db));
   return 0;
@@ -5607,6 +5610,7 @@ int strappy_db_model_list_open(const char *path, const char *custom_provider_nam
   strappy_model_reader *reader;
   sqlite3_stmt *stmt=NULL;
   int rc;
+  static const char *const tables[] = { "models", "model_prices", "model_capabilities", "model_preferences", "model_features", "provider_accounts", "app_preferences", NULL };
   /* Search fields and their order match the original Cocoa combined search
    * string, including numeric zeroes and empty account fields (provider rows).
    * Prices stay semantic decimal text until converted for numeric sorting. */
@@ -5635,17 +5639,17 @@ int strappy_db_model_list_open(const char *path, const char *custom_provider_nam
     strappy_set_error(error_out,"Invalid model list options."); return 0;
   }
   *out=NULL;
-  if (!strappy_db_initialize(path,error_out)) return 0;
   reader=calloc(1U,sizeof(*reader));
   if (reader == NULL) { strappy_set_error(error_out,"Could not allocate model reader."); return 0; }
   reader->text=*text;
-  rc=sqlite3_open_v2(path,&reader->db,SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,NULL);
+  rc = strappy_db_open_reader(path, &reader->db, error_out) ? SQLITE_OK : SQLITE_ERROR;
   if (rc != SQLITE_OK) goto failure;
   sqlite3_busy_timeout(reader->db,5000);
   if (sqlite3_create_function(reader->db,"model_search",-1,SQLITE_UTF8,reader,strappy_model_list_search,NULL,NULL)!=SQLITE_OK ||
       sqlite3_create_function(reader->db,"model_contains",2,SQLITE_UTF8,reader,strappy_model_list_contains,NULL,NULL)!=SQLITE_OK ||
       sqlite3_create_collation(reader->db,"model_text",SQLITE_UTF8,reader,strappy_model_list_compare)!=SQLITE_OK ||
-      sqlite3_exec(reader->db,"BEGIN",NULL,NULL,NULL)!=SQLITE_OK) goto failure;
+      !strappy_db_reader_snapshot(reader->db,tables,error_out)) goto failure;
+  if (sqlite3_exec(reader->db,"CREATE INDEX temp.snapshot_models ON models(id);CREATE INDEX temp.snapshot_model_prices ON model_prices(model_id);CREATE INDEX temp.snapshot_model_capabilities ON model_capabilities(model_id);CREATE INDEX temp.snapshot_model_preferences ON model_preferences(provider_id,wire_model_id);CREATE INDEX temp.snapshot_model_features ON model_features(model_id);CREATE INDEX temp.snapshot_provider_accounts ON provider_accounts(id);",NULL,NULL,NULL)!=SQLITE_OK) goto failure;
   if (sqlite3_prepare_v2(reader->db,"SELECT EXISTS(SELECT 1 FROM provider_accounts WHERE lifecycle_state='active')",
       -1,&stmt,NULL)!=SQLITE_OK || sqlite3_step(stmt)!=SQLITE_ROW) goto failure;
   reader->has_accounts=sqlite3_column_int(stmt,0);

@@ -1,3 +1,4 @@
+include ../daemon/store.mk
 STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
 # Linux-only shared-core harnesses.
 #
@@ -34,7 +35,7 @@ FONTAWESOME_FONT_FILES := \
 	$(FONTAWESOME_FONT_DIR)/FA7-Regular-400.otf \
 	$(FONTAWESOME_FONT_DIR)/FA7-Brands-400.otf
 
-CPPFLAGS += -I$(SHARED_DIR) -I$(CJSON_DIR)
+CPPFLAGS += -DSTRAPPY_DB_WRITER=1 -I$(SHARED_DIR) -I$(CJSON_DIR)
 CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Wsign-conversion -Wfloat-conversion
 SQLITE_LIBS ?= -lsqlite3
 THREAD_LIBS ?= -pthread
@@ -71,6 +72,7 @@ DATABASE_QUERY_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_identity.c \
 	$(SHARED_DIR)/strappy_config.c \
 	$(SHARED_DIR)/strappy_model_catalog.c \
+	$(SHARED_DIR)/strappy_bundled_catalog.c \
 	$(SHARED_DIR)/strappy_tools.c \
 	$(SHARED_DIR)/strappy_skills.c \
 	$(SHARED_DIR)/strappy_study.c \
@@ -112,6 +114,7 @@ RESPONSES_HARNESS_SOURCES = \
 	$(SHARED_DIR)/strappy_core.c \
 	$(STRAPPY_DB_SOURCES) \
 	$(SHARED_DIR)/strappy_model_catalog.c \
+	$(SHARED_DIR)/strappy_bundled_catalog.c \
 	$(SHARED_DIR)/strappy_prompt.c \
 	$(SHARED_DIR)/strappy_quality_policy.c \
 	$(SHARED_DIR)/strappy_assistant_sets.c \
@@ -424,8 +427,8 @@ daemon-test: $(BUILD_DIR)/strappyd $(BUILD_DIR)/ipc_worker_fixture $(BUILD_DIR)/
 	python3 daemon_harness.py $(BUILD_DIR)/strappyd
 	python3 ipc_harness.py $(BUILD_DIR)/strappyd $(BUILD_DIR)/ipc_worker_fixture
 
-$(BUILD_DIR)/strappyd: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_IPC_SOURCES) -pthread -o $@
+$(BUILD_DIR)/strappyd: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
 
 test: daemon-test
 
@@ -434,3 +437,24 @@ $(BUILD_DIR)/ipc_worker_fixture: ipc_worker_fixture.c $(STRAPPY_IPC_SOURCES) ../
 
 $(BUILD_DIR)/ipc_client_harness: ipc_client_harness.c ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -D_GNU_SOURCE ipc_client_harness.c ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c -o $@
+
+$(BUILD_DIR)/store_harness: store_harness.c $(STRAPPY_STORE_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(STRAPPY_STORE_SOURCES) $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+
+$(BUILD_DIR)/store_reader_harness: store_reader_harness.c $(STRAPPY_STORE_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) $< $(STRAPPY_STORE_SOURCES) $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+
+.PHONY: store-test
+store-test: $(BUILD_DIR)/store_harness $(BUILD_DIR)/store_reader_harness
+	python3 store_harness.py $(BUILD_DIR)/store_harness $(BUILD_DIR)/store_reader_harness
+
+test: store-test
+
+$(BUILD_DIR)/store_monitor_harness: store_monitor_harness.c $(STRAPPY_STORE_SOURCES) ../shared/strappy_store_client.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../shared/strappy_store_client.c ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+
+.PHONY: store-monitor-test
+store-monitor-test: $(BUILD_DIR)/strappyd $(BUILD_DIR)/store_monitor_harness
+	python3 store_monitor_harness.py $(BUILD_DIR)/strappyd $(BUILD_DIR)/store_monitor_harness
+
+test: store-monitor-test

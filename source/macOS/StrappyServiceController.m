@@ -75,9 +75,12 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
   NSString *logPath = [logDirectory stringByAppendingPathComponent:@"heartbeat.log"];
   NSString *embedded = [[[NSBundle mainBundle] bundlePath]
       stringByAppendingPathComponent:@"Contents/Library/LaunchServices/strappyd"];
+  NSString *resourceSource = [[NSBundle mainBundle] pathForResource:@"BundledModels" ofType:@"json"];
+  NSString *resourceTarget = [support stringByAppendingPathComponent:@"BundledModels.json"];
+  NSString *database = [library stringByAppendingPathComponent:@"Application Support/Strappy/strappy.sqlite"];
   NSFileManager *manager = [NSFileManager defaultManager];
   NSMutableDictionary *plist = [NSMutableDictionary dictionaryWithObjectsAndKeys:
-      StrappyServiceLabel, @"Label", [NSArray arrayWithObjects:installed, logPath, nil],
+      StrappyServiceLabel, @"Label", [NSArray arrayWithObjects:installed, logPath, database, support, nil],
       @"ProgramArguments", @"/", @"WorkingDirectory",
       [NSNumber numberWithInt:10], @"ThrottleInterval",
       [NSNumber numberWithInt:10], @"ExitTimeOut", nil];
@@ -105,7 +108,7 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
       goto done;
     }
   }
-  unchanged = install && [manager contentsEqualAtPath:embedded andPath:installed] &&
+  unchanged = install && [manager contentsEqualAtPath:resourceSource andPath:resourceTarget] && [manager contentsEqualAtPath:embedded andPath:installed] &&
       [[NSDictionary dictionaryWithContentsOfFile:plistPath] isEqual:plist];
   if (unchanged && StrappyServiceLoaded()) {
     success = YES;
@@ -120,11 +123,14 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
     if (error != NULL) *error = @"Could not remove the background service files.";
     if (unlink([plistPath fileSystemRepresentation]) != 0 && errno != ENOENT) goto done;
     if (unlink([installed fileSystemRepresentation]) != 0 && errno != ENOENT) goto done;
+    if (unlink([resourceTarget fileSystemRepresentation]) != 0 && errno != ENOENT) goto done;
     success = YES;
     goto done;
   }
   if (error != NULL) *error = @"Could not install the background service files.";
-  if (![binary writeToFile:installed atomically:YES] ||
+  if (![[NSData dataWithContentsOfFile:resourceSource] writeToFile:resourceTarget atomically:YES] ||
+      chmod([resourceTarget fileSystemRepresentation], 0600) != 0 ||
+      ![binary writeToFile:installed atomically:YES] ||
       chmod([installed fileSystemRepresentation], 0700) != 0 ||
       ![plist writeToFile:plistPath atomically:YES] ||
       chmod([plistPath fileSystemRepresentation], 0600) != 0) goto done;

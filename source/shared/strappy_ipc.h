@@ -4,7 +4,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define STRAPPY_IPC_VERSION 1U
+#define STRAPPY_IPC_VERSION 2U
+#define STRAPPY_IPC_STORE_ABI 1U
 #define STRAPPY_IPC_HEADER 24U
 #define STRAPPY_IPC_MAX_PAYLOAD 4096U
 #define STRAPPY_IPC_MAX_CLIENTS 16
@@ -45,6 +46,9 @@ int strappy_ipc_decode(const unsigned char *header, strappy_ipc_message *message
 /* Directory must be absolute, owned by euid, mode 0700, and not a symlink.
  * The server owns service.sock and service.lock inside it. */
 strappy_ipc_server *strappy_ipc_server_open(const char *directory);
+/* Before stepping the event loop, publish only after schema and seed
+ * transactions have committed. Not a worker-thread API. */
+void strappy_ipc_server_store_ready(strappy_ipc_server *server);
 /* Single event-loop thread only. Wait at most timeout_ms (0..1000).
  * wake_fd is the daemon's signal pipe, or -1. */
 int strappy_ipc_server_step(strappy_ipc_server *server, int wake_fd, int timeout_ms);

@@ -1,15 +1,16 @@
-# Local service (steps 0–1)
+# Local service (steps 0–2)
 
-`strappyd` is a portable C service supervised by launchd. It provides versioned
-Unix-domain IPC and diagnostic heartbeats, with no database, credentials,
-provider, scanner, or UI dependencies. See [PROTOCOL.md](PROTOCOL.md) for the
-wire contract, client API, socket paths, readiness, and reconnect semantics. The UI still
-owns the existing harness. Heartbeats are temporary validation instrumentation;
-revisit them when migrating the real service.
+`strappyd` is a portable C service supervised by launchd. It owns store
+initialization, bundled catalog seeding, and all database writes. The app opens
+existing stores read-only after IPC v2 readiness. Unmigrated mutation/worker
+entrypoints fail explicitly until steps 3–4. See [STORAGE.md](STORAGE.md) for
+ownership, snapshot lifetimes, startup/upgrade behavior, and runtime validation;
+[PROTOCOL.md](PROTOCOL.md) describes the wire contract.
 
 The normal iOS `.deb` includes a signed armv7/arm64 executable (deployment
 minimums iOS 5/7). Its only dynamic dependency is `/usr/lib/libSystem.B.dylib`.
-No app resources or additional libraries are needed. Both package variants
+SQLite and cJSON are statically linked from the shipped Altivec libraries.
+The daemon reads `BundledModels.json` from the explicitly supplied app directory. Both package variants
 use the job label `com.altivecintelligence.strappyd` and run as `mobile:mobile`.
 
 | File | Rootful | Rootless |
@@ -68,12 +69,13 @@ installs or updates these files:
 - Log: `~/Library/Logs/Strappy/heartbeat.log`, with the same 64 KiB rotation
   and `.1` backup as iOS. New log directories/files are 0700/0600.
 
-The agent runs as the logged-in user, without root privileges. It has no app
-resource or bundled framework dependencies; the legacy compiler also links
+The agent runs as the logged-in user, without root privileges. It statically links Altivec SQLite/cJSON and uses a stable copy of
+`BundledModels.json` beside the installed service. It has no bundled framework
+dependency; the legacy compiler also links
 Apple's system `libgcc_s.1.dylib`. Paths in the plist are absolute. A stable copy
 outside the bundle lets the service survive closing, moving, or replacing the
 app. A per-user file lock serializes installation; reopening an unchanged app
-keeps the existing daemon. Changed binary/plist content unloads the old job,
+keeps the existing daemon. Changed binary/plist/catalog content unloads the old job,
 atomically replaces the files, and loads one replacement.
 
 `XPAppKit` owns launchd compatibility: Tiger uses `OnDemand = false` and plain
@@ -93,5 +95,5 @@ Quit Strappy and run `--uninstall-daemon` before removing the app if the service
 should also be removed. It unloads the job and deletes the plist and installed
 executable, retaining logs, the installation lock file, and all user app data.
 Deleting the app alone leaves the installed service; launching Strappy again
-installs it again. The command-line options do not initialize the UI, database,
-or provider credentials. No harness work has moved into the daemon yet.
+installs it again. The maintenance command-line options do not initialize the UI or provider
+credentials. Installing starts the service, which initializes its store. Provider and scanner workers remain unavailable; store ownership has moved.
