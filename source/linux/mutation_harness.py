@@ -117,7 +117,35 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
                        fallback=directory,rounds=3,web_provider='none',web=0,bash=0,one_tool=0,quality=0)
         rpc('defaults',**options)
         session = int(rpc('create_session',directory=directory))
-        rpc('options',session=session,**options)
+        # Settings must not invalidate the ledger or catalog. Subscribe after
+        # earlier commands drain, then verify the complete notification burst.
+        time.sleep(.05)
+        with socket.socket(socket.AF_UNIX) as subscriber:
+            subscriber.settimeout(2)
+            subscriber.connect(str(directory/'service.sock'))
+            assert exchange(subscriber, 1, 1, struct.pack('!II', 4, 4))[0] == 0
+            assert exchange(subscriber, 3, 2)[0] == 0
+            rpc('options',session=session,**options)
+            magic, version, kind, topic, ident, size, status = header.unpack(exact(subscriber, 24))
+            assert (magic, version, kind, topic, status) == (b'STPY', 4, 3, 32, 0)
+            exact(subscriber, size)
+            subscriber.settimeout(.15)
+            try:
+                extra = subscriber.recv(1)
+                raise AssertionError(('unexpected settings invalidation', extra))
+            except socket.timeout:
+                pass
+            rpc('approve_model',id=model,value=1)
+            subscriber.settimeout(2)
+            magic, version, kind, topic, ident, size, status = header.unpack(exact(subscriber, 24))
+            assert (kind, topic, status) == (3, 34, 0)
+            exact(subscriber, size)
+            subscriber.settimeout(.15)
+            try:
+                extra = subscriber.recv(1)
+                raise AssertionError(('unexpected catalog invalidation', extra))
+            except socket.timeout:
+                pass
         assert scalar('SELECT provider_account_id FROM sessions WHERE id=?',(session,)) == account
         rpc('options',session=session,expected=1,**dict(options,rounds=4294967297))
         rpc('approve_model',id=model,value=4294967297,expected=1)

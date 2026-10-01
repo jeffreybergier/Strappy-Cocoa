@@ -5,9 +5,10 @@
 #include <unistd.h>
 
 static const char *database_path;
-static void changed(void)
+static void changed(unsigned int topics)
 {
     char *error = NULL;
+    (void)topics;
     puts(strappy_db_check_reader(database_path, &error) ? "ready" : "unavailable");
     fflush(stdout);
     free(error);
@@ -16,7 +17,7 @@ int main(int argc, char **argv)
 {
     if (argc != 3) return 1;
     database_path = argv[2];
-    changed();
+    changed(STRAPPY_STORE_ALL);
     if (!strappy_store_client_start(argv[1], argv[2], changed)) return 1;
     while (getchar() != EOF) {}
     return 0;

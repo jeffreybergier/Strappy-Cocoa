@@ -590,7 +590,7 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
              workingDirectory:@""];
   }
   _sessionOptions = [value copy];
-  [[self optionsController] reloadOptionsFromDelegate];
+  [[self optionsController] refreshOptionValues];
 }
 
 - (void)reloadOptionsMenu

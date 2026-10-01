@@ -251,9 +251,14 @@ House style for Strappy source:
     `strappy_config_set_api_model`. Model pickers and prompt options must use
     the allowed-model catalog APIs and must not bypass the whitelist or allow a
     stale disallowed session model to keep running.
-18. The database is the source of truth for UI state. Do not update UI-visible
-    state first and persist it later; write the database change first, then
-    refresh or render the UI from the stored value.
+18. The database is the source of truth for committed UI state. Write database
+    changes first, then refresh or render the stored value. Active-session option
+    edits are an explicit exception: keep a process-local draft shared by session
+    identity, with no IPC or persistence on each edit. Send captures the draft
+    and saves its changed fields on a worker before submitting the prompt. A
+    failed save must prevent submission and retain the editable draft. Service
+    refreshes must not overwrite unsent drafts. Unsent drafts survive controller
+    replacement but are discarded when the UI process exits.
 19. Shared C/database code owns conversation-visible state. Platform UI code
     must not synthesize prompt, response item, tool, API error, or cancellation
     rows before they exist in SQLite; it should request the shared core to

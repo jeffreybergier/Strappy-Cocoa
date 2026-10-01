@@ -1,9 +1,16 @@
 #ifndef STRAPPY_STORE_CLIENT_H
 #define STRAPPY_STORE_CLIENT_H
+enum {
+    STRAPPY_STORE_SESSION = 1U << 0,
+    STRAPPY_STORE_LEDGER = 1U << 1,
+    STRAPPY_STORE_CATALOG = 1U << 2,
+    STRAPPY_STORE_RUN = 1U << 3,
+    STRAPPY_STORE_ALL = 15U
+};
 /* Starts one process-lifetime service monitor. Callback runs on its worker and
  * is a refresh hint; consumers reload committed data on their own UI thread. */
 int strappy_store_client_start(const char *socket_path, const char *database_path,
-                               void (*changed)(void));
+                               void (*changed)(unsigned int topics));
 /* One command per private connection; reconnect retry uses caller's durable key. */
 int strappy_store_client_command(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status);

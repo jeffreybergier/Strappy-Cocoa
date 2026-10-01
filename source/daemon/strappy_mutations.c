@@ -115,3 +115,14 @@ int strappy_mutation(const char *db, const char *resources, const cJSON *c, char
     free(error);
     return ok;
 }
+
+unsigned int strappy_mutation_topics(const cJSON *command)
+{
+    const char *action = strappy_command_text(command, "action");
+    if (!strcmp(action, "options") || !strcmp(action, "create_session")) return 1U;
+    if (!strcmp(action, "include_context")) return 3U;
+    if (!strcmp(action, "delete_session")) return 11U;
+    if (!strcmp(action, "delete_study") || !strcmp(action, "reset_study")) return 15U;
+    /* Account/model/catalog/default changes do not change conversation items. */
+    return 4U;
+}

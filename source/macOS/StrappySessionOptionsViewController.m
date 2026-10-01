@@ -891,18 +891,12 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
 
 - (BOOL)canEditOptions
 {
-  NSNumber *identifier;
 
   if (editsSessionDefaults_) {
     return (defaultOptions_ != nil) ? YES : NO;
   }
   if ((session_ == nil) || [session_ isDatabaseStudySession] ||
       [session_ isPromptInFlight]) {
-    return NO;
-  }
-  identifier = [session_ sessionIdentifier];
-  if ([identifier isKindOfClass:[NSNumber class]] &&
-      [StrappySession isPromptInFlightForSessionIdentifier:identifier]) {
     return NO;
   }
   return YES;

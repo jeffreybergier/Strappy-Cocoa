@@ -354,6 +354,8 @@ enum {
                 includedInContext:(BOOL)includedInContext
                             error:(NSError **)error;
 - (StrappySessionOptions *)optionsWithError:(NSError **)error;
+/* Updates a process-local draft shared by session identity. Send saves it on
+ * its worker before submitting; closing the app discards unsent drafts. */
 - (BOOL)updateOptions:(StrappySessionOptions *)options
         changedFields:(StrappySessionOptionMask)changedFields
                 error:(NSError **)error;

@@ -39,7 +39,7 @@ void strappy_store_client_work_status(unsigned int *active, unsigned int *last, 
 typedef struct strappy_store_monitor {
     char *socket_path;
     char *database_path;
-    void (*changed)(void);
+    void (*changed)(unsigned int topics);
 } strappy_store_monitor;
 
 static void *strappy_store_monitor_run(void *context)
@@ -71,7 +71,7 @@ static void *strappy_store_monitor_run(void *context)
         if (ready) {
             strappy_db_set_service_ready(monitor->database_path, 1);
             strappy_store_refresh_work();
-            monitor->changed();
+            monitor->changed(STRAPPY_STORE_ALL);
         }
         while (ready) {
             struct pollfd item;
@@ -81,13 +81,17 @@ static void *strappy_store_monitor_run(void *context)
             if (result == 0) continue;
             if (result < 0 || strappy_ipc_receive(fd, &message, 1000) != 0 ||
                 message.kind != STRAPPY_IPC_EVENT) break;
-            /* An instance/revision gap always causes a full refresh. Nothing
-             * relies on reconstructing state solely from notifications. */
-            strappy_store_refresh_work();
-            monitor->changed();
+            /* The server coalesces revisions by topic and disconnects slow
+             * subscribers instead of dropping events. Reconnect always performs
+             * a full refresh; a topic hint never requires unrelated UI work. */
+            if (message.operation < STRAPPY_IPC_SESSION_CHANGED ||
+                message.operation > STRAPPY_IPC_RUN_CHANGED || message.length != 36) break;
+            if (message.operation == STRAPPY_IPC_RUN_CHANGED ||
+                message.operation == STRAPPY_IPC_CATALOG_CHANGED) strappy_store_refresh_work();
+            monitor->changed(1U << (message.operation - STRAPPY_IPC_SESSION_CHANGED));
         }
         strappy_db_set_service_ready(monitor->database_path, 0);
-        if (ready) { strappy_store_refresh_work(); monitor->changed(); }
+        if (ready) { strappy_store_refresh_work(); monitor->changed(STRAPPY_STORE_ALL); }
         if (fd >= 0) close(fd);
         {
             struct timeval delay;
@@ -99,7 +103,7 @@ static void *strappy_store_monitor_run(void *context)
 }
 
 int strappy_store_client_start(const char *socket_path, const char *database_path,
-                               void (*changed)(void))
+                               void (*changed)(unsigned int topics))
 {
     pthread_t thread;
     strappy_store_monitor *monitor;

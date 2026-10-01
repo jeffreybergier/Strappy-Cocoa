@@ -763,17 +763,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
 - (BOOL)sessionPromptIsInFlight
 {
-  NSNumber *identifier;
-
-  if ([self session] == nil) {
-    return NO;
-  }
-  if ([[self session] isPromptInFlight]) {
-    return YES;
-  }
-
-  identifier = [[self session] sessionIdentifier];
-  return [StrappySession isPromptInFlightForSessionIdentifier:identifier];
+  return [[self session] isPromptInFlight];
 }
 
 - (void)updateSendingStateFromSession
@@ -922,7 +912,6 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   savedOptions = [[self session] optionsWithError:nil];
   [controller setSessionOptions:savedOptions];
   [self setStatusText:nil];
-  [[self sendBar] reloadOptionsMenu];
   return YES;
 }
 

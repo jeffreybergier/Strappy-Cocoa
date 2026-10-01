@@ -175,7 +175,10 @@ share a revision. Only discard events at/below a watermark after refreshing all
 state through that watermark; do not discard a second topic just because the
 first topic carried the same revision. GUI clients open read-only connections only while their service monitor has
 negotiated store readiness and the matching ABI. Disconnect revokes readiness;
-reconnect and every event cause a full UI refresh. The monitor uses a background
+reconnect causes a full committed-state refresh. Ordinary events preserve their
+topic bits, coalesce on the main loop, and refresh only the affected views. Session
+option changes do not invalidate the ledger or reload conversation HTML. Unsent
+UI option drafts survive refreshes. The monitor uses a background
 thread with bounded I/O and one-second retry delay, never socket I/O on the UI
 thread. Retained paginated readers hold private temporary-table snapshots, not
 live WAL read transactions. See [STORAGE.md](STORAGE.md).

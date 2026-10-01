@@ -714,16 +714,53 @@ static NSDictionary *StrappyOptionsCommand(StrappySessionOptions *options,
     session ? @"options" : @"defaults",@"action",session ? [session stringValue] : @"0",@"session",
     StrappyNumber((long long)mask),@"mask",StrappyText([options modelIdentifier]),@"model",
     StrappyText([options providerAccountIdentifier]),@"account",StrappyText([options assistantSetIdentifier]),@"assistant",
-    StrappyText([options workingDirectory]),@"directory",StrappyWorkingDirectory(),@"fallback",
+    StrappyText([options workingDirectory]),@"directory",(session ? @"" : StrappyWorkingDirectory()),@"fallback",
     StrappyText([options webProvider]),@"web_provider",StrappyNumber([options webSearchEnabled]),@"web",
     StrappyNumber([options bashEnabled]),@"bash",StrappyNumber([options limitToOneTool]),@"one_tool",
     StrappyNumber([options answerQualityEnabled]),@"quality",StrappyNumber((long long)[options roundLimit]),@"rounds",nil];
 }
 
-static void StrappyStoreChanged(void)
+/* UI drafts are process-local and shared by session identity, so changing
+ * selection or recreating a controller does not lose unsent options. Only Send
+ * persists them, on its worker. Never hold this lock across disk or IPC work. */
+static NSMutableDictionary *StrappyOptionDrafts;
+static NSMutableSet *StrappyPendingSubmissions;
+static unsigned long long StrappyOptionDraftGeneration;
+static NSString *StrappyOptionDraftProcess;
+
+static NSDictionary *StrappyOptionDraft(NSNumber *identifier)
+{
+  @synchronized([StrappySession class]) {
+    return [[[StrappyOptionDrafts objectForKey:identifier] retain] autorelease];
+  }
+  return nil;
+}
+
+static void StrappyMergeOptions(StrappySessionOptions *target,
+    StrappySessionOptions *source, StrappySessionOptionMask mask)
+{
+  if (mask & StrappySessionOptionModel) [target setModelIdentifier:[source modelIdentifier]];
+  if (mask & StrappySessionOptionProviderAccount) [target setProviderAccountIdentifier:[source providerAccountIdentifier]];
+  if (mask & StrappySessionOptionAssistantSet) [target setAssistantSetIdentifier:[source assistantSetIdentifier]];
+  if (mask & StrappySessionOptionWorkingDirectory) [target setWorkingDirectory:[source workingDirectory]];
+  if (mask & StrappySessionOptionWebProvider) [target setWebProvider:[source webProvider]];
+  if (mask & StrappySessionOptionWebSearch) [target setWebSearchEnabled:[source webSearchEnabled]];
+  if (mask & StrappySessionOptionBash) [target setBashEnabled:[source bashEnabled]];
+  if (mask & StrappySessionOptionLimitToOneTool) [target setLimitToOneTool:[source limitToOneTool]];
+  if (mask & StrappySessionOptionAnswerQuality) [target setAnswerQualityEnabled:[source answerQualityEnabled]];
+  if (mask & StrappySessionOptionRoundLimit) [target setRoundLimit:[source roundLimit]];
+}
+
+static unsigned int StrappyPendingStoreTopics;
+static void StrappyStoreChanged(unsigned int topics)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-  [StrappySession performSelectorOnMainThread:@selector(serviceStoreChanged:)
+  BOOL schedule;
+  @synchronized([StrappySession class]) {
+    schedule = StrappyPendingStoreTopics == 0;
+    StrappyPendingStoreTopics |= topics;
+  }
+  if (schedule) [StrappySession performSelectorOnMainThread:@selector(serviceStoreChanged:)
                                  withObject:nil waitUntilDone:NO];
   [pool release];
 }
@@ -732,22 +769,31 @@ static void StrappyStoreChanged(void)
 
 + (void)serviceStoreChanged:(id)ignored
 {
+  unsigned int topics;
   (void)ignored;
-  unsigned int active, last, result;
-  strappy_store_client_work_status(&active,&last,&result);
-  if ([self isModelCatalogRefreshInFlight] && active != STRAPPY_IPC_REFRESH_CATALOG) {
-    [self openRouterModelCatalogRefreshDidFinish:(last == STRAPPY_IPC_REFRESH_CATALOG && result == STRAPPY_RUN_COMPLETED) ?
-      [NSDictionary dictionary] : [NSDictionary dictionaryWithObject:@"Model refresh failed or the service restarted." forKey:@"error"]];
-  } else if (![self isModelCatalogRefreshInFlight] && active == STRAPPY_IPC_REFRESH_CATALOG) {
-    @synchronized(self) { StrappySessionModelCatalogRefreshInFlight = YES; }
-    [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification object:self];
+  @synchronized(self) { topics = StrappyPendingStoreTopics; StrappyPendingStoreTopics = 0; }
+  if (topics & (STRAPPY_STORE_CATALOG | STRAPPY_STORE_RUN)) {
+    unsigned int active, last, result;
+    strappy_store_client_work_status(&active,&last,&result);
+    if ([self isModelCatalogRefreshInFlight] && active != STRAPPY_IPC_REFRESH_CATALOG) {
+      [self openRouterModelCatalogRefreshDidFinish:(last == STRAPPY_IPC_REFRESH_CATALOG && result == STRAPPY_RUN_COMPLETED) ?
+        [NSDictionary dictionary] : [NSDictionary dictionaryWithObject:@"Model refresh failed or the service restarted." forKey:@"error"]];
+    } else if (![self isModelCatalogRefreshInFlight] && active == STRAPPY_IPC_REFRESH_CATALOG) {
+      @synchronized(self) { StrappySessionModelCatalogRefreshInFlight = YES; }
+      [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification object:self];
+    }
+    [FileScanner serviceWorkDidChange];
   }
-  [FileScanner serviceWorkDidChange];
-  [[NSNotificationCenter defaultCenter] postNotificationName:StrappyProviderAccountsDidChangeNotification object:nil];
-  [[NSNotificationCenter defaultCenter] postNotificationName:@"StrappyServiceChanged" object:nil];
-  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionDidUpdateNotification object:nil];
-  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogDidChangeNotification object:nil];
-  [[NSNotificationCenter defaultCenter] postNotificationName:FileScannerDatabaseCatalogDidChangeNotification object:nil];
+  if (topics & (STRAPPY_STORE_SESSION | STRAPPY_STORE_LEDGER | STRAPPY_STORE_RUN)) {
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"StrappyServiceChanged" object:nil
+      userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithUnsignedInt:topics] forKey:@"topics"]];
+    [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionDidUpdateNotification object:nil];
+  }
+  if (topics & STRAPPY_STORE_CATALOG) {
+    [[NSNotificationCenter defaultCenter] postNotificationName:StrappyProviderAccountsDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionModelCatalogDidChangeNotification object:nil];
+    [[NSNotificationCenter defaultCenter] postNotificationName:FileScannerDatabaseCatalogDidChangeNotification object:nil];
+  }
 }
 
 
@@ -859,6 +905,7 @@ static void StrappyStoreChanged(void)
         name:@"StrappyServiceChanged" object:nil];
     options_ = [StrappySessionOptionsFromSummary(nil, @"") retain];
     optionsLoaded_ = NO;
+    promptInFlight_ = [StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier_];
     [self performSelectorOnMainThread:@selector(serviceRunChanged:) withObject:nil waitUntilDone:NO];
     if ([summary isKindOfClass:[NSDictionary class]]) {
       cachedSummary_ = [summary retain];
@@ -941,15 +988,11 @@ static void StrappyStoreChanged(void)
 
 - (BOOL)isPromptInFlight
 {
-  strappy_run_record run;
-  BOOL active = NO;
-  @synchronized(self) { if (promptSubmissionPending_) return YES; }
-  if (strappy_run_latest([[StrappySession sessionsDatabasePath] fileSystemRepresentation],
-      [sessionIdentifier_ longLongValue], &run)) {
-    active = run.state == STRAPPY_RUN_ACCEPTED || run.state == STRAPPY_RUN_RUNNING;
-    strappy_run_destroy(&run);
+  @synchronized([StrappySession class]) {
+    if ([StrappyPendingSubmissions containsObject:sessionIdentifier_]) return YES;
   }
-  return active;
+  @synchronized(self) { return promptSubmissionPending_ || promptInFlight_; }
+  return NO;
 }
 
 - (void)serviceRunChanged:(id)ignored
@@ -961,33 +1004,37 @@ static void StrappyStoreChanged(void)
   NSString *pendingKey;
   NSDictionary *pending;
   NSString *terminalError = nil;
-  BOOL terminalChanged;
+  BOOL terminalChanged = NO;
+  unsigned int topics = ignored ? [[[ignored userInfo] objectForKey:@"topics"] unsignedIntValue] : STRAPPY_STORE_ALL;
   (void)ignored;
   @synchronized(self) { optionsLoaded_ = NO; if (promptSubmissionPending_) return; }
-  if (!strappy_run_latest([[StrappySession sessionsDatabasePath] fileSystemRepresentation],
-      [sessionIdentifier_ longLongValue], &run)) return;
-  active = run.state == STRAPPY_RUN_ACCEPTED || run.state == STRAPPY_RUN_RUNNING;
-  pendingKey = [NSString stringWithFormat:@"StrappyPendingPrompt-%@", sessionIdentifier_];
-  pending = [[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey];
-  if (run.request_key && [[pending objectForKey:@"key"] isEqualToString:[NSString stringWithUTF8String:run.request_key]]) {
-    [[NSUserDefaults standardUserDefaults] removeObjectForKey:pendingKey];
-    [[NSUserDefaults standardUserDefaults] synchronize];
-  }
-  else if (!active && [[pending objectForKey:@"prompt"] isKindOfClass:[NSString class]] &&
-      [[pending objectForKey:@"key"] isKindOfClass:[NSString class]] &&
-      [[pending objectForKey:@"key"] lengthOfBytesUsingEncoding:NSUTF8StringEncoding] == 64) {
-    /* Resume only the saved submission identity. A committed retry returns its
-     * original run, including interrupted/terminal states; it never replays it. */
+  active = [self isPromptInFlight];
+  if (topics & (STRAPPY_STORE_RUN | STRAPPY_STORE_LEDGER)) {
+    if (!strappy_run_latest([[StrappySession sessionsDatabasePath] fileSystemRepresentation],
+        [sessionIdentifier_ longLongValue], &run)) return;
+    active = run.state == STRAPPY_RUN_ACCEPTED || run.state == STRAPPY_RUN_RUNNING;
+    pendingKey = [NSString stringWithFormat:@"StrappyPendingPrompt-%@", sessionIdentifier_];
+    pending = [[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey];
+    if (run.request_key && [[pending objectForKey:@"key"] isEqualToString:[NSString stringWithUTF8String:run.request_key]]) {
+      [[NSUserDefaults standardUserDefaults] removeObjectForKey:pendingKey];
+      [[NSUserDefaults standardUserDefaults] synchronize];
+    }
+    else if (!active && [[pending objectForKey:@"prompt"] isKindOfClass:[NSString class]] &&
+        [[pending objectForKey:@"key"] isKindOfClass:[NSString class]] &&
+        [[pending objectForKey:@"key"] lengthOfBytesUsingEncoding:NSUTF8StringEncoding] == 64) {
+      /* Resume only the saved submission identity. A committed retry returns its
+       * original run, including interrupted/terminal states; it never replays it. */
+      strappy_run_destroy(&run);
+      (void)[self beginResponsesPrompt:[pending objectForKey:@"prompt"] context:nil error:nil];
+      return;
+    }
+    terminalChanged = run.id > 0 && (observedServiceRun_ != run.id || observedServiceState_ != run.state);
+    if (run.state == STRAPPY_RUN_FAILED) terminalError = @"The prompt failed. Check the provider account and stored request details.";
+    else if (run.state == STRAPPY_RUN_INTERRUPTED) terminalError = @"The background service stopped during this prompt. It was not replayed; check any tool effects before retrying.";
+    else if (run.state == STRAPPY_RUN_CANCELLED) terminalError = @"The prompt was cancelled.";
+    observedServiceRun_ = run.id; observedServiceState_ = run.state;
     strappy_run_destroy(&run);
-    (void)[self beginResponsesPrompt:[pending objectForKey:@"prompt"] context:nil error:nil];
-    return;
   }
-  terminalChanged = run.id > 0 && (observedServiceRun_ != run.id || observedServiceState_ != run.state);
-  if (run.state == STRAPPY_RUN_FAILED) terminalError = @"The prompt failed. Check the provider account and stored request details.";
-  else if (run.state == STRAPPY_RUN_INTERRUPTED) terminalError = @"The background service stopped during this prompt. It was not replayed; check any tool effects before retrying.";
-  else if (run.state == STRAPPY_RUN_CANCELLED) terminalError = @"The prompt was cancelled.";
-  observedServiceRun_ = run.id; observedServiceState_ = run.state;
-  strappy_run_destroy(&run);
   @synchronized(self) { previous = promptInFlight_; promptInFlight_ = active; }
   summary = [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier_ error:nil];
   if (summary != nil) {
@@ -1001,7 +1048,7 @@ static void StrappyStoreChanged(void)
         [NSNumber XP_numberWithUnsignedInteger:StrappySessionOptionAll],StrappySessionChangedOptionsKey,
         StrappySessionChangeKindOptions,StrappySessionChangeKindKey,nil]];
   }
-  [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionStreamEventNotification
+  if (topics & STRAPPY_STORE_LEDGER) [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionStreamEventNotification
       object:self userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES]
       forKey:@"service_invalidated"]];
   if (active && !previous) [[NSNotificationCenter defaultCenter]
@@ -3632,6 +3679,9 @@ static void StrappyStoreChanged(void)
 
 - (StrappySessionOptions *)optionsWithError:(NSError **)error
 {
+  NSDictionary *draft = StrappyOptionDraft(sessionIdentifier_);
+  if (draft != nil) return [[[draft objectForKey:@"options"] copy] autorelease];
+
   NSString *databasePath;
   StrappySessionOptions *options;
   char *strappyError;
@@ -3701,10 +3751,34 @@ static void StrappyStoreChanged(void)
         changedFields:(StrappySessionOptionMask)changedFields
                 error:(NSError **)error
 {
-  NSDictionary *command = StrappyOptionsCommand(options,changedFields,sessionIdentifier_,error);
-  if (!command || StrappyServiceCommand(STRAPPY_IPC_MUTATE,command,error) == nil) return NO;
-  @synchronized(self) { optionsLoaded_ = NO; }
-  [self serviceRunChanged:nil];
+  strappy_session_options record;
+  StrappySessionOptions *merged;
+  NSDictionary *previous;
+  if (changedFields == 0 || (changedFields & ~(StrappySessionOptionMask)StrappySessionOptionAll) ||
+      [self isPromptInFlight]) {
+    if (error) *error = [StrappySession errorFromCString:"Session options cannot be edited during a prompt."];
+    return NO;
+  }
+  if ([[NSUserDefaults standardUserDefaults] objectForKey:
+      [NSString stringWithFormat:@"StrappyPendingPrompt-%@", sessionIdentifier_]] != nil) {
+    if (error) *error = [StrappySession errorFromCString:"Retry the pending prompt before changing its options."];
+    return NO;
+  }
+  if (!StrappySessionRecordFromOptions(options, &record, error)) return NO;
+  merged = [[self optionsWithError:error] copy];
+  if (!merged) return NO;
+  StrappyMergeOptions(merged, options, changedFields);
+  @synchronized([StrappySession class]) {
+    if (!StrappyOptionDrafts) StrappyOptionDrafts = [[NSMutableDictionary alloc] init];
+    if (!StrappyOptionDraftProcess) StrappyOptionDraftProcess = [[[NSProcessInfo processInfo] globallyUniqueString] copy];
+    previous = [StrappyOptionDrafts objectForKey:sessionIdentifier_];
+    changedFields |= [[previous objectForKey:@"mask"] unsignedIntValue];
+    [StrappyOptionDrafts setObject:[NSDictionary dictionaryWithObjectsAndKeys:
+      merged, @"options", [NSNumber XP_numberWithUnsignedInteger:changedFields], @"mask",
+      [NSString stringWithFormat:@"%@:%llu", StrappyOptionDraftProcess, ++StrappyOptionDraftGeneration], @"generation", nil]
+      forKey:sessionIdentifier_];
+  }
+  [merged release];
   return YES;
 }
 
@@ -3732,14 +3806,23 @@ static void StrappyStoreChanged(void)
     return NO;
   }
   if (!strappy_store_client_request_key(key)) return NO;
-  request = [NSMutableDictionary dictionaryWithObjectsAndKeys:prompt, @"prompt",
-      pending ? [pending objectForKey:@"key"] : [NSString stringWithUTF8String:key], @"key", pendingKey, @"pendingKey", nil];
-  @synchronized([NSUserDefaults standardUserDefaults]) {
-    [[NSUserDefaults standardUserDefaults] setObject:request forKey:pendingKey];
-    if (![[NSUserDefaults standardUserDefaults] synchronize]) {
-      if (error) *error = [StrappySession errorFromCString:"Could not save the submission retry key."];
-      return NO;
+  request = pending ? [[pending mutableCopy] autorelease] :
+    [NSMutableDictionary dictionaryWithObjectsAndKeys:prompt, @"prompt",
+      [NSString stringWithUTF8String:key], @"key", pendingKey, @"pendingKey", nil];
+  if (!pending) {
+    NSDictionary *draft = StrappyOptionDraft(sessionIdentifier_);
+    if (draft) {
+      NSDictionary *command = StrappyOptionsCommand([draft objectForKey:@"options"],
+        [[draft objectForKey:@"mask"] unsignedIntValue], sessionIdentifier_, error);
+      if (!command) return NO;
+      [request setObject:command forKey:@"optionsCommand"];
+      [request setObject:[draft objectForKey:@"generation"] forKey:@"optionsGeneration"];
     }
+  }
+  @synchronized([StrappySession class]) {
+    if (!StrappyPendingSubmissions) StrappyPendingSubmissions = [[NSMutableSet alloc] init];
+    if ([StrappyPendingSubmissions containsObject:sessionIdentifier_]) return NO;
+    [StrappyPendingSubmissions addObject:sessionIdentifier_];
   }
   @synchronized(self) { promptSubmissionPending_ = YES; promptInFlight_ = YES; }
   [[NSNotificationCenter defaultCenter] postNotificationName:StrappySessionPromptDidStartNotification object:self];
@@ -3755,6 +3838,50 @@ static void StrappyStoreChanged(void)
   uint64_t session = (uint64_t)[sessionIdentifier_ longLongValue];
   unsigned int status = STRAPPY_IPC_NOT_READY;
   BOOL received;
+  NSError *optionsError = nil;
+  NSMutableDictionary *savedRequest = [[request mutableCopy] autorelease];
+  NSString *preflightError = nil;
+  @synchronized([NSUserDefaults standardUserDefaults]) {
+    [[NSUserDefaults standardUserDefaults] setObject:savedRequest forKey:[request objectForKey:@"pendingKey"]];
+    if (![[NSUserDefaults standardUserDefaults] synchronize])
+      preflightError = @"Could not save the submission retry key. The prompt was not sent.";
+  }
+  if (!preflightError && [request objectForKey:@"optionsCommand"] &&
+      ![[request objectForKey:@"optionsFlushed"] boolValue]) {
+    if (StrappyServiceCommand(STRAPPY_IPC_MUTATE, [request objectForKey:@"optionsCommand"], &optionsError) == nil) {
+      preflightError = [NSString stringWithFormat:@"The prompt was not sent because its options could not be saved. %@",
+        [optionsError localizedDescription]];
+    } else {
+      [savedRequest setObject:[NSNumber numberWithBool:YES] forKey:@"optionsFlushed"];
+      @synchronized([NSUserDefaults standardUserDefaults]) {
+        [[NSUserDefaults standardUserDefaults] setObject:savedRequest forKey:[request objectForKey:@"pendingKey"]];
+        if (![[NSUserDefaults standardUserDefaults] synchronize])
+          preflightError = @"Could not save submission state. The prompt was not sent.";
+      }
+      if (!preflightError) {
+        @synchronized([StrappySession class]) {
+          NSDictionary *draft = [StrappyOptionDrafts objectForKey:sessionIdentifier_];
+          if ([[draft objectForKey:@"generation"] isEqual:[request objectForKey:@"optionsGeneration"]])
+            [StrappyOptionDrafts removeObjectForKey:sessionIdentifier_];
+        }
+      }
+      @synchronized(self) { optionsLoaded_ = NO; }
+    }
+  }
+  if (preflightError) {
+    /* No submission was attempted. Keep the editable draft, and do not let a
+     * reconnect silently retry a failed settings save. */
+    @synchronized([NSUserDefaults standardUserDefaults]) {
+      [[NSUserDefaults standardUserDefaults] removeObjectForKey:[request objectForKey:@"pendingKey"]];
+      [[NSUserDefaults standardUserDefaults] synchronize];
+    }
+    @synchronized(self) { promptSubmissionPending_ = NO; }
+    @synchronized([StrappySession class]) { [StrappyPendingSubmissions removeObject:sessionIdentifier_]; }
+    [self performSelectorOnMainThread:@selector(promptDidFinish:)
+      withObject:[NSDictionary dictionaryWithObject:preflightError forKey:@"error"] waitUntilDone:NO];
+    [pool release];
+    return;
+  }
   strappy_ipc_put32(payload, (uint32_t)(session >> 32)); strappy_ipc_put32(payload+4, (uint32_t)session);
   memcpy(payload+8, [[request objectForKey:@"key"] UTF8String], 64);
   memcpy(payload+72, [prompt bytes], [prompt length]);
@@ -3770,6 +3897,7 @@ static void StrappyStoreChanged(void)
     }
   }
   @synchronized(self) { promptSubmissionPending_ = NO; }
+  @synchronized([StrappySession class]) { [StrappyPendingSubmissions removeObject:sessionIdentifier_]; }
   if (!received || status != STRAPPY_IPC_OK) {
     NSString *message = !received ? @"Acceptance is unknown. Retry the same prompt to reconnect safely." :
         (status == STRAPPY_IPC_BUSY ? @"The service is busy with another prompt. Try again when it finishes." : @"The service could not accept this prompt.");

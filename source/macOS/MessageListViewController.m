@@ -237,17 +237,7 @@ static BOOL StrappyContextRoundActionValues(
 
 - (BOOL)sessionPromptIsInFlight
 {
-  NSNumber *identifier;
-
-  if (session_ == nil) {
-    return NO;
-  }
-  if ([session_ isPromptInFlight]) {
-    return YES;
-  }
-
-  identifier = [session_ sessionIdentifier];
-  return [StrappySession isPromptInFlightForSessionIdentifier:identifier];
+  return [session_ isPromptInFlight];
 }
 
 - (void)updateSendingStateFromSession

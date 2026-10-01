@@ -772,3 +772,44 @@ OAuth refresh, true memory pressure, newer Mac runtime and logout/login remain
 open. `pinkphone-rsa` remains respring-only for any future disruptive testing.
 iOS 6 remains deferred until the user supplies a device. No phone was kept awake
 by a new service power assertion, and no additional execution privilege was added.
+
+## Active-session option latency correction (2026-10-01)
+
+The production Cocoa bridge now keeps active-session edits in a process-local
+shared draft and saves it on the prompt worker before submission. The iOS options
+panel reuses its loaded catalogs on edits. Session-only daemon notifications no
+longer invalidate conversation HTML or unrelated catalogs, and queued topic bits
+are combined before main-loop delivery. Future-session default and other metadata
+mutation APIs retain their existing synchronous contracts.
+
+`session_options_device_probe.m`, built with
+`make -C source/iOS -f ../linux/session_options_device_probe.mk session-options-probe`,
+ran as `mobile` on `koolphone5` (iOS 8.4.1 / armv7). It links the production Cocoa
+bridge with only the settings and submission transport functions replaced. Its
+loaded session is an in-memory fixture; it never contacts the real daemon or
+provider and never writes the application database.
+
+The passing run reported:
+
+- 1,000 option edits in **515.444 ms**, averaging **0.515 ms per edit**, with zero
+  mutation/submission IPC calls.
+- Send returned in **3.280 ms** on the main thread while the settings transport
+  deliberately waited **300 ms**. The main loop advanced five times during the
+  failed-save scenario.
+- Drafts survived controller replacement and invalidation; field masks preserved
+  an earlier Bash edit when another controller changed the round limit.
+- A rejected settings save retained the draft and sent no prompt. Concurrent
+  edits during submission were rejected.
+- A lost submission reply retained the durable retry key and saved-settings
+  marker. Retrying submitted the identical key without repeating the settings
+  mutation. Edits were rejected while acceptance was unresolved.
+
+These are bridge timings and behavioral assertions, not graphical tap-to-display
+measurements. Unsent drafts are discarded at UI process exit. No application
+package was installed as part of this probe.
+
+Final clean builds passed for iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64;
+full build output contained no warnings. `make -C source/linux clean test` passed,
+including new subscribed-client assertions that option mutations emit only the
+session topic and model approvals emit only the catalog topic. Generated build
+and test logs were retained locally outside the checkout and are not committed.

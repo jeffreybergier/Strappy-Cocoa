@@ -328,11 +328,17 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
 
 - (void)reloadOptionsFromDelegate
 {
+  [self reloadOptionsSnapshot];
+  [self refreshOptionValues];
+}
+
+- (void)refreshOptionValues
+{
   NSDictionary *selectedModel;
   BOOL hostedToolsEnabled;
   BOOL localFunctionsEnabled;
 
-  [self reloadOptionsSnapshot];
+  [self setSessionOptions:[[self optionsDelegate] sessionOptions]];
   selectedModel = StrappyPromptSelectedModel([self models],
                                               [self sessionOptions]);
   hostedToolsEnabled = StrappyPromptModelBoolean(selectedModel,
@@ -978,7 +984,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     }
     (void)[[self optionsDelegate] updateSessionOptions:options
                                          changedFields:changedFields];
-    [self reloadOptionsFromDelegate];
+    [self refreshOptionValues];
     return;
   }
   if ([indexPath section] ==
@@ -1004,7 +1010,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
           kStrappyPromptOptionsSectionSearchProvider]
                     withRowAnimation:UITableViewRowAnimationNone];
     } else {
-      [self reloadOptionsFromDelegate];
+      [self refreshOptionValues];
     }
     return;
   }
@@ -1028,7 +1034,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     (void)[[self optionsDelegate]
       updateSessionOptions:options
              changedFields:StrappySessionOptionAssistantSet];
-    [self reloadOptionsFromDelegate];
+    [self refreshOptionValues];
     return;
   }
   if (([indexPath section] != kStrappyPromptOptionsSectionModels) ||
@@ -1055,7 +1061,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
     }
     (void)[[self optionsDelegate]
       updateSessionOptions:options changedFields:changedFields];
-    [self reloadOptionsFromDelegate];
+    [self refreshOptionValues];
   }
 }
 

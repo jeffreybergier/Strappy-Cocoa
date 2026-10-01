@@ -20,5 +20,6 @@
     (id<StrappySessionOptionsTableViewControllerDelegate>)optionsDelegate
                        presentedModally:(BOOL)presentedModally;
 - (void)reloadOptionsFromDelegate;
+- (void)refreshOptionValues;
 
 @end

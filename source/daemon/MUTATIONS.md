@@ -73,12 +73,33 @@ implicitly duplicate creation, study, or authentication changes. Prompt submissi
 retains its durable retry-key behavior from step 3. Study's key is stored with the
 run, but starting study is not a retryable create-session transaction.
 
-The existing synchronous Cocoa setting APIs use bounded command I/O (two seconds
-per ordinary send/read phase); work-start commands acknowledge acceptance without
-waiting for a scan, download or study. They can briefly stall their caller when
-the service is unavailable. Authentication refresh runs on the existing background
-thread with a longer reply deadline. A future asynchronous settings UI can remove
-the short synchronous waits without changing store ownership.
+Active-session options use a process-local draft shared by session identity.
+Editing a loaded option does no IPC, database work, or conversation rendering.
+The options panel reuses its account/model/assistant catalogs until explicit
+catalog invalidation or presentation, and run-state checks use the service-fed
+cache. Only changed fields are merged, so stale controller copies cannot undo
+another field's local edit. Service refreshes preserve the draft. Navigating away
+and back preserves it; terminating the UI before Send discards it.
+
+Send captures the draft and its field mask, then a worker persists the stable
+retry request, saves the options, and submits the prompt. A rejected or
+unacknowledged settings save prevents submission and retains the draft for an
+explicit retry. The pending request records a durable `optionsFlushed` flag
+before submission; lost submission replies reuse the original prompt/key without
+reapplying options to an already accepted run. Option editing is disabled while
+acceptance remains unresolved. No database schema or wire-version change is
+needed. The save and submission are separate commands: the daemon still arbitrates
+other clients and rejects conflicting operations with `busy`.
+
+Successful options mutations invalidate only sessions; model/account/default
+mutations invalidate catalogs, and context inclusion invalidates the ledger.
+The client preserves topic bits and combines queued callbacks on the main loop.
+Session-only invalidation does not regenerate conversation HTML or reload the
+WebView. Reconnect refreshes all committed state while preserving local drafts.
+
+Other metadata mutation APIs, including future-session defaults, retain their
+existing synchronous contracts. Authentication refresh uses its background
+thread. The active-session draft path does not change those API contracts.
 
 ## Verification
 
@@ -96,3 +117,13 @@ visibility, and status recovery using separate client connections. It must never
 be pointed at a user's live store. See [VALIDATION.md](VALIDATION.md) for evidence
 and the distinction between command-level device tests and graphical lifecycle
 validation.
+
+`session_options_device_probe.m` tests the production Cocoa edit/send bridge
+against delayed/failing transport replacements. From `source/iOS`, build with
+`make -f ../linux/session_options_device_probe.mk session-options-probe` after a
+normal build. Run `build-release/session-options-probe` as mobile on a test
+phone. The probe uses an already-loaded in-memory session, private process
+preferences, and no live daemon, database writes, credentials, or provider calls.
+It covers shared drafts, field-mask merging, invalidation, main-loop responsiveness,
+failed saves, and durable submission retries. This measures the bridge rather
+than simulating graphical taps.

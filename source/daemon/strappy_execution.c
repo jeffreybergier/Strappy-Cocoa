@@ -265,9 +265,9 @@ static void strappy_execution_command(const strappy_ipc_message *request,
                 if (result && strlen(result) <= STRAPPY_IPC_MAX_PAYLOAD) {
                     reply->length = (uint32_t)strlen(result); memcpy(reply->payload,result,reply->length);
                 }
-                strappy_ipc_server_committed(e->server,STRAPPY_IPC_SESSION_CHANGED);
-                strappy_ipc_server_committed(e->server,STRAPPY_IPC_CATALOG_CHANGED);
-                strappy_ipc_server_committed(e->server,STRAPPY_IPC_LEDGER_CHANGED);
+                unsigned int topics = strappy_mutation_topics(command), topic;
+                for (topic = 0; topic < 4; ++topic) if (topics & (1U << topic))
+                    strappy_ipc_server_committed(e->server, STRAPPY_IPC_SESSION_CHANGED + topic);
             }
         }
         pthread_mutex_unlock(&e->mutex);

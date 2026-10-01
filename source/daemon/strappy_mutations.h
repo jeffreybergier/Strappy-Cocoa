@@ -10,4 +10,6 @@ int strappy_mutation(const char *db, const char *resources, const cJSON *command
 int strappy_service_account_command(const char *db, const cJSON *command, char **result);
 int strappy_service_refresh_catalog(const char *db, const char *account);
 int strappy_service_scanner_profile(void);
+/* Post-commit invalidation topics; bit positions match the IPC event range. */
+unsigned int strappy_mutation_topics(const cJSON *command);
 #endif
