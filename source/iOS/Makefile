@@ -101,7 +101,15 @@ $(PHONE_DEB_ROOTLESS): DEB_VARIANT = rootless
 $(PHONE_DEB_ROOTLESS): DEB_ARCH = $(DEB_UNIVERSAL_ARCH)
 $(PHONE_DEB_ROOTLESS): DEB_INSTALL_PREFIX = /var/jb
 
-$(PHONE_DEBS): $(APP_BUNDLE)
+STRAPPY_DAEMON = $(INT_DIR)/strappyd
+STRAPPY_DAEMON_INPUTS = ../daemon/strappyd.c daemon/com.altivecintelligence.strappyd.plist.in daemon/lifecycle.sh.in
+
+$(STRAPPY_DAEMON): ../daemon/strappyd.c Makefile
+	@mkdir -p "$(INT_DIR)"
+	@export PATH=$(BIN_DIR):$(PATH); $(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) $< -o $@
+	@$(PHONE_LDID) -S $@
+
+$(PHONE_DEBS): $(APP_BUNDLE) $(STRAPPY_DAEMON) $(STRAPPY_DAEMON_INPUTS) Makefile
 	@echo " [5/5] Packaging $(DEB_VARIANT) Debian archive..."
 	@rm -rf "$(DEB_STAGE)"
 	@mkdir -p "$(DEB_STAGE)/DEBIAN" "$(DEB_APP_DIR)"
@@ -112,7 +120,10 @@ $(PHONE_DEBS): $(APP_BUNDLE)
 		echo "  > ldid-signing staged $(APP_NAME).app bundle"; \
 		$(PHONE_LDID) "$$flags" "$(DEB_APP_DIR)/$(APP_NAME).app"; \
 	fi
-	@installed_size=$$(du -sk "$(DEB_APP_DIR)/$(APP_NAME).app" | awk '{print $$1}'); \
+	@mkdir -p "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/usr/libexec" "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/Library/LaunchDaemons"
+	@cp "$(STRAPPY_DAEMON)" "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/usr/libexec/strappyd"
+	@sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/com.altivecintelligence.strappyd.plist.in > "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/Library/LaunchDaemons/com.altivecintelligence.strappyd.plist"
+	@installed_size=$$(du -sk "$(DEB_STAGE)" | awk '{print $$1}'); \
 	{ \
 	  echo "Package: $(DEB_PACKAGE_ID)"; \
 	  echo "Name: $(APP_NAME)"; \
@@ -127,9 +138,11 @@ $(PHONE_DEBS): $(APP_BUNDLE)
 	@{ \
 	  echo '#!/bin/sh'; \
 	  echo 'set -e'; \
+	  sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/lifecycle.sh.in; \
 	  echo ''; \
 	  echo 'case "$$1" in'; \
 	  echo '  install|upgrade)'; \
+	  echo '    strappy_service stop'; \
 	  echo '    if command -v killall >/dev/null 2>&1; then'; \
 	  echo '      killall $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
 	  echo '      sleep 1'; \
@@ -146,9 +159,11 @@ $(PHONE_DEBS): $(APP_BUNDLE)
 	@{ \
 	  echo '#!/bin/sh'; \
 	  echo 'set -e'; \
+	  sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/lifecycle.sh.in; \
 	  echo ''; \
 	  echo 'case "$$1" in'; \
 	  echo '  remove|upgrade|deconfigure)'; \
+	  echo '    strappy_service stop'; \
 	  echo '    if command -v killall >/dev/null 2>&1; then'; \
 	  echo '      killall $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
 	  echo '      sleep 1'; \
@@ -165,9 +180,11 @@ $(PHONE_DEBS): $(APP_BUNDLE)
 	@{ \
 	  echo '#!/bin/sh'; \
 	  echo 'set -e'; \
+	  sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/lifecycle.sh.in; \
 	  echo ''; \
 	  echo 'case "$$1" in'; \
 	  echo '  configure)'; \
+	  echo '    strappy_service start'; \
 	  echo '    if command -v uicache >/dev/null 2>&1; then'; \
 	  echo '      su mobile -c "uicache -p $(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || uicache -p "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || su mobile -c uicache >/dev/null 2>&1 || uicache >/dev/null 2>&1 || true'; \
 	  echo '    fi'; \
@@ -179,7 +196,7 @@ $(PHONE_DEBS): $(APP_BUNDLE)
 	@find "$(DEB_STAGE)" -type d -exec chmod 0755 {} \;
 	@find "$(DEB_STAGE)" -type f -exec chmod 0644 {} \;
 	@chmod 0755 "$(DEB_STAGE)/DEBIAN/preinst" "$(DEB_STAGE)/DEBIAN/prerm" "$(DEB_STAGE)/DEBIAN/postinst"
-	@chmod 0755 "$(DEB_APP_DIR)/$(APP_NAME).app/$(APP_NAME)"
+	@chmod 0755 "$(DEB_APP_DIR)/$(APP_NAME).app/$(APP_NAME)" "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/usr/libexec/strappyd"
 	@fakeroot sh -c 'chown -R 0:0 "$$1" && dpkg-deb -Z"$$3" --build "$$1" "$$2"' sh "$(DEB_STAGE)" "$@" "$(DEB_COMPRESSION)"
 
 .PHONY: __deb

@@ -1,8 +1,10 @@
 # Strappy daemon migration plan
 
-Status: proposed implementation checklist. All tasks are unchecked; no daemon
-implementation or device validation has been completed as part of writing this
-plan.
+Status: step 0 heartbeat implementation is present. Device validation on
+`koolphone5` covers iOS 8.4.1, not iOS 5; the iOS 5 and rootless device gates
+remain open. See `source/daemon/README.md` for operation and
+`source/daemon/VALIDATION.md` for recorded evidence. Harness migration has not
+started.
 
 ## Objective
 
@@ -30,10 +32,10 @@ supervises it; opening the UI is not required to start it.
 
 The daemon has only three behaviors:
 
-- [ ] Log startup, including timestamp, PID, and effective UID.
-- [ ] Log a heartbeat every 60 seconds while the process is scheduled, including
+- [x] Log startup, including timestamp, PID, and effective UID.
+- [x] Log a heartbeat every 60 seconds while the process is scheduled, including
    timestamp, PID, and a monotonically increasing heartbeat counter.
-- [ ] Handle SIGTERM cooperatively and log shutdown from normal execution context.
+- [x] Handle SIGTERM cooperatively and log shutdown from normal execution context.
 
 Use an interruptible wait rather than a busy loop. Flush each log record so it
 can be observed immediately. Do not perform logging inside a signal handler.
@@ -44,25 +46,30 @@ once the real service exists.
 
 ### Packaging and launchd lifecycle
 
-- [ ] Extend `source/iOS/Makefile` to build, sign, and package the executable and
+- [x] Extend `source/iOS/Makefile` to build, sign, and package the executable and
   launchd plist alongside the app. Include all required runtime dependencies.
-- [ ] Support the existing rootful and rootless package layouts. The iOS 5 gate is
+- [x] Support the existing rootful and rootless package layouts. The iOS 5 gate is
   specifically the rootful package; rootless support requires a separate,
   newer-device test. Resolve executable, resource, library, and log paths
   explicitly instead of relying on a shell environment or current directory.
-- [ ] Start by configuring the service to run as `mobile`. Confirm the effective
+- [x] Start by configuring the service to run as `mobile`. Confirm the effective
   identity in its startup log and provision writable log directories for it.
-- [ ] Use launchd configuration compatible with the target OS to start on load and
+- [x] Use launchd configuration compatible with the target OS to start on load and
   restart after unexpected exit. Keep lifecycle compatibility handling in the
   appropriate platform boundary; modern launchctl commands cannot be assumed
   to exist on iOS 5.
-- [ ] Package scripts load the job after installation and unload it before upgrade
+- [x] Package scripts load the job after installation and unload it before upgrade
   or removal. Upgrade replaces the executable and reloads exactly one job.
   Removal stops the process and removes its registration.
-- [ ] Do not rely on modern XPC, ServiceManagement, or unified logging APIs in this
+- [x] Do not rely on modern XPC, ServiceManagement, or unified logging APIs in this
   first executable. Do not fork or detach it from launchd.
 
 ### Acceptance checks on a real iOS 5 device
+
+The same lifecycle checks were exercised on `koolphone5` (iOS 8.4.1); see
+`source/daemon/VALIDATION.md`. These boxes remain unchecked because they are
+specifically the iOS 5 gate. Locked-screen scheduling gaps and unobserved
+first-unlock timing are documented there.
 
 Record the device/OS/jailbreak, package version, service identity, commands,
 timestamps, and relevant log excerpts for these checks:

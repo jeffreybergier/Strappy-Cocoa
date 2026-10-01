@@ -1,0 +1,20 @@
+#!/bin/sh
+# Sourced by package scripts: use the legacy launchctl interface on iOS 5+.
+strappy_service() {
+    strappy_plist='@PREFIX@/Library/LaunchDaemons/com.altivecintelligence.strappyd.plist'
+    strappy_log_dir='@PREFIX@/var/log/strappy'
+    case "$1" in
+        stop)
+            if /bin/launchctl list com.altivecintelligence.strappyd >/dev/null 2>&1; then
+                /bin/launchctl unload "$strappy_plist"
+            fi
+            ;;
+        start)
+            mkdir -p "$strappy_log_dir"
+            chown mobile:mobile "$strappy_log_dir"
+            chmod 0700 "$strappy_log_dir"
+            strappy_service stop
+            /bin/launchctl load "$strappy_plist"
+            ;;
+    esac
+}

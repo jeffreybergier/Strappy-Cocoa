@@ -416,3 +416,12 @@ model-rows-test: $(FONTAWESOME_GENERATED) $(CATALOG_FOUNDATION_OBJECTS) | $(BUIL
 		-o $(BUILD_DIR)/model_rows_harness $$(gnustep-config --base-libs) \
 		$(SQLITE_LIBS) $(THREAD_LIBS) $(PLATFORM_LIBS) -lcurl
 	$(BUILD_DIR)/model_rows_harness
+
+.PHONY: daemon-test
+daemon-test: $(BUILD_DIR)/strappyd | $(TEST_DIR)
+	python3 daemon_harness.py $(BUILD_DIR)/strappyd
+
+$(BUILD_DIR)/strappyd: ../daemon/strappyd.c | $(BUILD_DIR)
+	$(CC) $(CFLAGS) $< -o $@
+
+test: daemon-test
