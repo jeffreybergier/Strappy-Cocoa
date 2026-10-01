@@ -337,3 +337,72 @@ and installed. The unchanged daemon retained PID **10130**, with exactly one
 launchd job and a heartbeat at **09:22:53**. The service directory/executable
 were 0700, the launchd plist was 0600, and the log directory/file were 0700/0600,
 all owned by `me`. The normal app remained closed after the termination test.
+
+## Step 1: portable IPC (2026-10-01)
+
+The service now hosts the transport described in `PROTOCOL.md`. Application
+readiness remains false. No real provider, database, scanner, credential, or
+prompt work was moved into the daemon in this milestone. Mutation operation
+IDs return structured not-ready replies; transaction event integration and
+application-state snapshots remain dependent on steps 2–4.
+
+Offline coverage includes:
+
+- Independent network-order wire vectors; portable C client round trips,
+  expected-UID rejection, bounded monotonic receive deadlines, and writes to a
+  disconnected peer with default SIGPIPE handling.
+- Every header split, coalesced frames, maximum payload, invalid magic/kind,
+  oversized lengths, zero IDs, invalid status, incompatible header/negotiated
+  versions, commands before negotiation, unknown commands, and duplicate or
+  decreasing request IDs (including rejected mutations).
+- Partial-frame disconnects, slow non-reading clients, concurrent healthy
+  clients, same-user authentication, a different UID despite relaxed filesystem
+  permissions, socket permissions, server exclusion, stale-socket recovery,
+  instance identity changes, and refusal to replace a regular file.
+- Synthetic worker publication for all four event topics, a commit racing with
+  atomic subscribe/snapshot, unsubscribe behavior, and resynchronization.
+  Real persistent-state notifications must use this boundary after their
+  database transaction commits; this milestone does not claim a database hook.
+- An idle subscriber receiving an event after 31 seconds, alongside expiration
+  of an incomplete handshake. This caught and fixed a stale output-deadline bug:
+  the first queued message after idle must start a fresh progress deadline.
+- Existing heartbeat log rotation and cooperative SIGTERM checks. Socket tests
+  use private directories under `/tmp` because this workspace's mounted
+  repository filesystem rejects chmod on Unix sockets with `EINVAL`.
+
+Native runtime checks use isolated test daemons under the normal UID 501; they
+leave the existing installed launchd services unchanged. No reboot, respring,
+Keychain approval, provider request, or application data mutation was performed.
+
+| Host | Observed result |
+| --- | --- |
+| `x4-vm`, Tiger 10.4.11 / PPC | Native C hello, snapshot, subscribe, unsubscribe; an independent Python 2.3 client validates big-endian wire bytes, byte-at-a-time framing, duplicate rejection, not-ready and unknown-operation replies. SIGKILL/stale-socket restart, reconnect, SIGTERM, and socket removal pass. |
+| `pinkphone-rsa`, iOS 15 / arm64 | Native C negotiation, snapshot, subscription, unsubscribe, SIGKILL/stale-socket restart, reconnect, SIGTERM, and socket removal pass as mobile from the rootless tree. |
+| `koolphone5`, iOS 8 / armv7 | SSH to the configured host refused connections on repeated attempts. Runtime IPC validation remains outstanding; the armv7 slice builds successfully. |
+
+On `pinkphone-rsa`, the initial copy under `/tmp` was killed before service
+startup (exit 137). The same signed executable ran from
+`/var/jb/var/strappy-ipc-step1-20261001`. This establishes the working rootless
+execution path, not a diagnosis of the temporary-path kill. The production
+package already places its executable under `/var/jb/usr/libexec`. A later
+in-place SCP overwrite of the test executable also produced exit 137; copying
+to a fresh file and renaming it into place restored successful execution of the
+final binary. Use replacement files when refreshing signed device probes.
+This does not establish the exact signing-cache cause.
+
+Final checks for this milestone:
+
+- `make -C source clean release`: iOS armv7/arm64 and Mac
+  PPC/i386/x86_64/arm64; passed with no warnings in the full output.
+- `make -C source/linux clean test`: includes IPC client, daemon, and synthetic
+  worker harnesses alongside the complete shared-core offline suite; all passed.
+- Clang static analysis of the daemon, IPC server/client, and C XPFoundation
+  compatibility module: no findings.
+- Generated logs remain local: `/tmp/strappy-ipc-build.log`,
+  `/tmp/strappy-ipc-tests.log`, and `/tmp/strappy-ipc-analysis.log`. Native
+  command output is retained in the task transcript; test processes are stopped.
+
+These checks establish transport behavior, not UI service-adapter integration,
+provider execution, durable submission deduplication, real store snapshots,
+launchd package upgrade behavior for this new transport, or continuous execution
+during phone sleep. Those later milestones retain their existing checklist.

@@ -1,6 +1,7 @@
-/* Step-zero launchd heartbeat. No app state or provider access.
+/* Launchd service transport and heartbeat. No app state or provider access.
  * Feature-test macros belong to the build: _POSIX_C_SOURCE would force
  * Leopard-only UNIX2003 symbols even when the Apple SDK targets Tiger. */
+#include "../shared/strappy_ipc.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -59,17 +60,59 @@ static int strappy_log(const char *path, const char *backup,
     return failed ? -1 : 0;
 }
 
+static int strappy_probe(const char *path)
+{
+    strappy_ipc_message message;
+    unsigned char instance[16];
+    int fd = strappy_ipc_connect(path, geteuid(), 3000);
+    unsigned int operation;
+    if (fd < 0) return EXIT_FAILURE;
+    for (operation = STRAPPY_IPC_HELLO; operation <= STRAPPY_IPC_UNSUBSCRIBE; ++operation) {
+        memset(&message, 0, sizeof(message));
+        message.kind = STRAPPY_IPC_REQUEST;
+        message.operation = operation; message.request_id = operation;
+        if (operation == STRAPPY_IPC_HELLO) {
+            message.length = 8;
+            strappy_ipc_put32(message.payload, 1); strappy_ipc_put32(message.payload + 4, 1);
+        }
+        if (strappy_ipc_send(fd, &message, 3000) != 0 ||
+            strappy_ipc_receive(fd, &message, 3000) != 0 ||
+            message.kind != STRAPPY_IPC_REPLY || message.operation != operation ||
+            message.request_id != operation || message.status != STRAPPY_IPC_OK ||
+            message.length != 32 || strappy_ipc_get32(message.payload + 24) != 1 ||
+            strappy_ipc_get32(message.payload + 28) != STRAPPY_IPC_MAX_PAYLOAD) {
+            (void)close(fd); return EXIT_FAILURE;
+        }
+        if (operation == STRAPPY_IPC_HELLO) memcpy(instance, message.payload, 16);
+        else if (memcmp(instance, message.payload, 16) != 0) {
+            (void)close(fd); return EXIT_FAILURE;
+        }
+    }
+    (void)close(fd);
+    puts("IPC v1: same-user hello, snapshot, subscribe, unsubscribe passed; execution not ready");
+    return EXIT_SUCCESS;
+}
+
 int main(int argc, char **argv)
 {
     struct sigaction action;
     unsigned long long counter = 0;
     char *backup;
+    char *directory;
+    strappy_ipc_server *server = NULL;
+    time_t heartbeat;
     size_t length;
     int result = EXIT_FAILURE;
+    (void)signal(SIGPIPE, SIG_IGN);
+    if (argc == 3 && strcmp(argv[1], "--ipc-probe") == 0) return strappy_probe(argv[2]);
     if (argc != 2 || argv[1][0] != '/') return EXIT_FAILURE;
     length = strlen(argv[1]);
     backup = malloc(length + 3);
     if (backup == NULL) return EXIT_FAILURE;
+    directory = malloc(length + 1);
+    if (directory == NULL) { free(backup); return EXIT_FAILURE; }
+    memcpy(directory, argv[1], length + 1);
+    *strrchr(directory, '/') = '\0';
     memcpy(backup, argv[1], length);
     memcpy(backup + length, ".1", 3);
     (void)umask(077);
@@ -79,26 +122,24 @@ int main(int argc, char **argv)
     action.sa_handler = strappy_stop;
     (void)sigemptyset(&action.sa_mask);
     if (sigaction(SIGTERM, &action, NULL) != 0) goto done;
+    server = strappy_ipc_server_open(directory);
+    if (server == NULL) goto done;
     if (strappy_log(argv[1], backup, "startup", counter) != 0) goto done;
+    heartbeat = time(NULL);
     while (!strappy_stopping) {
-        fd_set readers;
-        struct timeval timeout;
-        int ready;
-        FD_ZERO(&readers);
-        FD_SET(strappy_signal_pipe[0], &readers);
-        timeout.tv_sec = 60;
-        timeout.tv_usec = 0;
-        ready = select(strappy_signal_pipe[0] + 1, &readers, NULL, NULL, &timeout);
+        time_t now;
+        if (strappy_ipc_server_step(server, strappy_signal_pipe[0], 1000) != 0) goto done;
         if (strappy_stopping) break;
-        if (ready < 0) {
-            if (errno == EINTR) continue;
-            goto done;
+        now = time(NULL);
+        if (now - heartbeat >= 60 || now < heartbeat) {
+            if (strappy_log(argv[1], backup, "heartbeat", ++counter) != 0) goto done;
+            heartbeat = now;
         }
-        if (ready == 0 && strappy_log(argv[1], backup, "heartbeat", ++counter) != 0)
-            goto done;
     }
     if (strappy_log(argv[1], backup, "shutdown", counter) == 0) result = EXIT_SUCCESS;
 done:
+    strappy_ipc_server_close(server);
+    free(directory);
     if (strappy_signal_pipe[0] >= 0) (void)close(strappy_signal_pipe[0]);
     if (strappy_signal_pipe[1] >= 0) (void)close(strappy_signal_pipe[1]);
     free(backup);

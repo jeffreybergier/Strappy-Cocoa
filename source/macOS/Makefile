@@ -1,3 +1,4 @@
+STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
 # Altivec Intelligence - Strappy (Mac)
 APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m StrappyServiceController.m XPAppKit.m PreferencesWindowController.m \
@@ -63,7 +64,7 @@ MAC_ANALYZE_SOURCE_FLAGS += -fblocks
 $(INT_DIR)/x64/XPAppKit.o $(INT_DIR)/arm/XPAppKit.o: MAC_FLAGS += -fblocks
 VALIDATE_PATHS = . $(SHARED_DIR)
 
-# The heartbeat has only system C dependencies; keep it independent of the UI.
+# The service has only system C dependencies; keep it independent of the UI.
 STRAPPY_DAEMON = $(INT_DIR)/strappyd
 STRAPPY_DAEMON_FLAGS = $(OPT_FLAGS) -std=c99 -Wall -Wextra
 $(BUNDLE): $(STRAPPY_DAEMON)
@@ -73,18 +74,18 @@ $(ZIP_FILE): $(UNIVERSAL_BIN) $(STRAPPY_DAEMON)
 $(STRAPPY_DAEMON): $(INT_DIR)/strappyd-ppc $(INT_DIR)/strappyd-x86 $(INT_DIR)/strappyd-x64 $(INT_DIR)/strappyd-arm
 	$(LIPO) -create $^ -output $@
 
-$(INT_DIR)/strappyd-ppc: ../daemon/strappyd.c Makefile
+$(INT_DIR)/strappyd-ppc: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p $(INT_DIR)
-	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_PPC) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch ppc -isysroot $(SDK_MAC_OLD_PATH) $< -lgcc_s.10.4 -o $@
+	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_PPC) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch ppc -isysroot $(SDK_MAC_OLD_PATH) $< $(STRAPPY_IPC_SOURCES) -lgcc_s.10.4 -o $@
 
-$(INT_DIR)/strappyd-x86: ../daemon/strappyd.c Makefile
+$(INT_DIR)/strappyd-x86: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p $(INT_DIR)
-	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_X86) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch i386 -isysroot $(SDK_MAC_OLD_PATH) $< -lgcc_s.10.4 -o $@
+	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_X86) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch i386 -isysroot $(SDK_MAC_OLD_PATH) $< $(STRAPPY_IPC_SOURCES) -lgcc_s.10.4 -o $@
 
-$(INT_DIR)/strappyd-x64: ../daemon/strappyd.c Makefile
+$(INT_DIR)/strappyd-x64: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p $(INT_DIR)
-	$(COMPILER_X64) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target x86_64-apple-macos$(MAC_MIN_MID) -isysroot $(SDK_MAC_NEW_PATH) --ld-path=$(LD64_LLD) -Wl,-platform_version,macos,$(MAC_MIN_MID),$(SDK_MAC_NEW) $< -o $@
+	$(COMPILER_X64) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target x86_64-apple-macos$(MAC_MIN_MID) -isysroot $(SDK_MAC_NEW_PATH) --ld-path=$(LD64_LLD) -Wl,-platform_version,macos,$(MAC_MIN_MID),$(SDK_MAC_NEW) $< $(STRAPPY_IPC_SOURCES) -o $@
 
-$(INT_DIR)/strappyd-arm: ../daemon/strappyd.c Makefile
+$(INT_DIR)/strappyd-arm: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p $(INT_DIR)
-	$(COMPILER_ARM) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target arm64-apple-macos$(MAC_MIN_NEW) -isysroot $(SDK_MAC_NEW_PATH) $< -o $@
+	$(COMPILER_ARM) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target arm64-apple-macos$(MAC_MIN_NEW) -isysroot $(SDK_MAC_NEW_PATH) $< $(STRAPPY_IPC_SOURCES) -o $@

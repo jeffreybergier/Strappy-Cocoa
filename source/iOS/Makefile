@@ -1,3 +1,4 @@
+STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
 # Altivec Intelligence - Strappy (iPhone)
 APP_NAME = Strappy
 SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
@@ -104,9 +105,9 @@ $(PHONE_DEB_ROOTLESS): DEB_INSTALL_PREFIX = /var/jb
 STRAPPY_DAEMON = $(INT_DIR)/strappyd
 STRAPPY_DAEMON_INPUTS = ../daemon/strappyd.c daemon/com.altivecintelligence.strappyd.plist.in daemon/lifecycle.sh.in
 
-$(STRAPPY_DAEMON): ../daemon/strappyd.c Makefile
+$(STRAPPY_DAEMON): ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p "$(INT_DIR)"
-	@export PATH=$(BIN_DIR):$(PATH); $(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) $< -o $@
+	@export PATH=$(BIN_DIR):$(PATH); $(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) $< $(STRAPPY_IPC_SOURCES) -o $@
 	@$(PHONE_LDID) -S $@
 
 $(PHONE_DEBS): $(APP_BUNDLE) $(STRAPPY_DAEMON) $(STRAPPY_DAEMON_INPUTS) Makefile

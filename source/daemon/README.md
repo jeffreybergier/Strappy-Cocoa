@@ -1,7 +1,9 @@
-# Heartbeat service (step 0)
+# Local service (steps 0–1)
 
-`strappyd` is a portable C diagnostic process supervised by launchd. It has no
-IPC, database, credentials, provider, scanner, or UI dependencies. The UI still
+`strappyd` is a portable C service supervised by launchd. It provides versioned
+Unix-domain IPC and diagnostic heartbeats, with no database, credentials,
+provider, scanner, or UI dependencies. See [PROTOCOL.md](PROTOCOL.md) for the
+wire contract, client API, socket paths, readiness, and reconnect semantics. The UI still
 owns the existing harness. Heartbeats are temporary validation instrumentation;
 revisit them when migrating the real service.
 

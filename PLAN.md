@@ -159,32 +159,40 @@ the UI uses the existing shared C renderer to generate HTML and JavaScript.
 
 ## Step 1: define the service boundary and portable IPC
 
-- [ ] Implement and validate the service protocol described below.
+- [x] Implement and validate the service protocol described below.
 
 Use one versioned protocol over a local Unix-domain socket as the initial
 transport. C XPC requires macOS 10.7 and NSXPCConnection requires 10.8, so neither
 can be the only transport for Tiger/PPC support. An optional XPC adapter can be
 considered later if it offers a concrete benefit.
 
-- [ ] Define framed, explicitly serialized messages with bounded payload sizes,
+- [x] Define framed, explicitly serialized messages with bounded payload sizes,
   protocol versions, request IDs, structured errors, and replies. Never send
   raw C structures across PPC/Intel/ARM or 32/64-bit boundaries.
-- [ ] Restrict socket access and validate peers against the intended local user.
+- [x] Restrict socket access and validate peers against the intended local user.
   Keep the IPC event loop responsive while execution happens on workers.
-- [ ] Add readiness and compatibility negotiation, service-instance identity,
+- [x] Add readiness and compatibility negotiation, service-instance identity,
   subscriptions, and a state snapshot operation.
-- [ ] Establish commands for submitting prompts, cancelling runs, changing session
+- [x] Establish commands for submitting prompts, cancelling runs, changing session
   options, creating/deleting sessions, managing model/database approvals, and
   starting scans or database study.
-- [ ] Establish events for session, ledger, catalog, and run-state changes. Send
+- [x] Establish events for session, ledger, catalog, and run-state changes. Send
   persistent-state notifications only after the associated transaction commits.
-- [ ] Define reconnect semantics: subscribe and obtain a snapshot/revision without
+- [x] Define reconnect semantics: subscribe and obtain a snapshot/revision without
   losing changes between those operations. Treat notifications as refresh hints,
   not the only record of state. Resynchronize after a gap or service restart.
 
-- [ ] Validate framing, malformed input, disconnects, duplicate requests,
+- [x] Validate framing, malformed input, disconnects, duplicate requests,
   incompatible versions, and slow subscribers with offline tests before
   connecting providers.
+
+Step 1 is transport-only: mutation command IDs are established and return
+structured `execution_not_ready` errors until steps 2–4 supply store ownership
+and workers. The service snapshot reports identity, revision, and readiness;
+it does not claim application state is available. The thread-safe post-commit
+publication boundary is exercised by an offline synthetic worker. See
+`source/daemon/PROTOCOL.md` and `source/daemon/VALIDATION.md` for the exact
+contract, coverage, and remaining device limitations.
 
 ## Step 2: separate database readers from writers
 

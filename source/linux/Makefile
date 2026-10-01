@@ -1,3 +1,4 @@
+STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
 # Linux-only shared-core harnesses.
 #
 # These are developer smoke tests for Strappy's portable C code. They compile
@@ -418,10 +419,18 @@ model-rows-test: $(FONTAWESOME_GENERATED) $(CATALOG_FOUNDATION_OBJECTS) | $(BUIL
 	$(BUILD_DIR)/model_rows_harness
 
 .PHONY: daemon-test
-daemon-test: $(BUILD_DIR)/strappyd | $(TEST_DIR)
+daemon-test: $(BUILD_DIR)/strappyd $(BUILD_DIR)/ipc_worker_fixture $(BUILD_DIR)/ipc_client_harness | $(TEST_DIR)
+	$(BUILD_DIR)/ipc_client_harness
 	python3 daemon_harness.py $(BUILD_DIR)/strappyd
+	python3 ipc_harness.py $(BUILD_DIR)/strappyd $(BUILD_DIR)/ipc_worker_fixture
 
-$(BUILD_DIR)/strappyd: ../daemon/strappyd.c | $(BUILD_DIR)
-	$(CC) $(CFLAGS) -D_POSIX_C_SOURCE=200809L $< -o $@
+$(BUILD_DIR)/strappyd: ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_IPC_SOURCES) -pthread -o $@
 
 test: daemon-test
+
+$(BUILD_DIR)/ipc_worker_fixture: ipc_worker_fixture.c $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_IPC_SOURCES) -pthread -o $@
+
+$(BUILD_DIR)/ipc_client_harness: ipc_client_harness.c ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -D_GNU_SOURCE ipc_client_harness.c ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c -o $@

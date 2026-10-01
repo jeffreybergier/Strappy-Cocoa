@@ -8,7 +8,7 @@ import tempfile
 import time
 
 binary = str(Path(sys.argv[1]).resolve())
-with tempfile.TemporaryDirectory() as directory:
+with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as directory:
     log = Path(directory) / "heartbeat.log"
     backup = Path(str(log) + ".1")
     for run in range(2):
@@ -19,7 +19,7 @@ with tempfile.TemporaryDirectory() as directory:
             deadline = time.monotonic() + 5
             while True:
                 try:
-                    if b"event=startup" in log.read_bytes():
+                    if f"event=startup pid={process.pid} ".encode() in log.read_bytes():
                         break
                 except FileNotFoundError:
                     pass  # Rotation has renamed the old file; creation follows.
