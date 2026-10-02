@@ -8,10 +8,12 @@ enum {
     STRAPPY_STORE_ALL = 15U
 };
 /* Starts one process-lifetime service monitor. Callback runs on its worker and
- * is a refresh hint; consumers reload committed data on their own UI thread. */
+ * is a refresh hint; consumers schedule reads of committed data and publish UI updates. */
 int strappy_store_client_start(const char *socket_path, const char *database_path,
                                void (*changed)(unsigned int topics));
-/* One command per private connection; reconnect retry uses caller's durable key. */
+/* Process-lifetime FIFO control worker and persistent connection. Blocking
+ * completion for background callers only. Durable commands may reconnect/retry;
+ * ordinary mutations never replay after an uncertain acknowledgement. */
 int strappy_store_client_command(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status);
 int strappy_store_client_request_key(char key[65]);

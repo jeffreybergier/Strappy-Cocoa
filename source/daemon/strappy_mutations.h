@@ -2,6 +2,10 @@
 #define STRAPPY_MUTATIONS_H
 #include "../shared/strappy_ipc.h"
 #include "cJSON.h"
+#include "../shared/strappy_db.h"
+/* Borrowed strings: do not destroy the returned options. */
+int strappy_command_options(const cJSON *command, strappy_session_options *options,
+    strappy_session_option_mask *mask);
 /* Transient command objects contain strings only; never persisted as JSON. */
 const char *strappy_command_text(const cJSON *object, const char *key);
 long long strappy_command_number(const cJSON *object, const char *key);

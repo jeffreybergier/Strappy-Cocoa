@@ -3,6 +3,7 @@
 #include "../shared/strappy_responses.h"
 #include "../shared/strappy_core.h"
 #include <string.h>
+#include <unistd.h>
 static int credentials(const char *provider, const char *account, int refresh,
     char **token, char **identity, void *context, char **error)
 {
@@ -29,7 +30,9 @@ int strappy_service_scanner_profile(void) { return 0; }
 int strappy_service_account_command(const char *db, const cJSON *c, char **result)
 {
     const char *action = strappy_command_text(c,"action");
-    (void)result;
+    if (!strcmp(action,"refresh_oauth") && !strcmp(strappy_command_text(c,"id"),"slow-fixture")) {
+        sleep(2); *result = strappy_string_duplicate("fixture"); return *result != NULL;
+    }
     if (!strcmp(action,"archive_account"))
         return strappy_db_archive_provider_account(db,strappy_command_text(c,"id"),NULL);
     if (!strcmp(action,"update_account"))

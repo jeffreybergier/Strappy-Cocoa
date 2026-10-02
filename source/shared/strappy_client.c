@@ -250,6 +250,7 @@ int strappy_client_set_cainfo(const char *path, char **error_out)
     strappy_set_error(error_out, "Could not allocate CA certificate path.");
     return 0;
   }
+  if (!strappy_client_ensure_curl_initialized(error_out)) { free(copy); return 0; }
   free(strappy_cainfo_path);
   strappy_cainfo_path = copy;
   return 1;

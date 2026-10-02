@@ -43,6 +43,12 @@ unsigned int strappy_run_accept(const char *path, long long session,
 unsigned int strappy_run_accept_if_idle(const char *path, long long session,
     const char *key, const char *prompt, strappy_run_record *r, int accept_new)
 {
+    return strappy_run_accept_with_options(path,session,key,prompt,r,accept_new,NULL,0);
+}
+unsigned int strappy_run_accept_with_options(const char *path, long long session,
+    const char *key, const char *prompt, strappy_run_record *r, int accept_new,
+    const strappy_session_options *options, strappy_session_option_mask mask)
+{
     sqlite3 *db = NULL; sqlite3_stmt *q = NULL;
     unsigned int status = STRAPPY_IPC_STORAGE_ERROR;
     int rc;
@@ -60,11 +66,14 @@ unsigned int strappy_run_accept_if_idle(const char *path, long long session,
     if (!accept_new) { status = STRAPPY_IPC_BUSY; goto finish; }
     sqlite3_finalize(q); q = NULL;
     if (!strappy_db_session_exists(db, session, NULL)) { status = STRAPPY_IPC_INVALID; goto finish; }
-    rc = sqlite3_prepare_v2(db, "SELECT 1 FROM prompt_runs WHERE state IN (1,2) LIMIT 1", -1, &q, NULL);
-    if (rc == SQLITE_OK) rc = sqlite3_step(q);
+    rc = sqlite3_prepare_v2(db, "SELECT 1 FROM prompt_runs WHERE session_id=? AND state IN (1,2) LIMIT 1", -1, &q, NULL);
+    if (rc == SQLITE_OK) { sqlite3_bind_int64(q,1,session); rc = sqlite3_step(q); }
     if (rc == SQLITE_ROW) { status = STRAPPY_IPC_BUSY; goto finish; }
     if (rc != SQLITE_DONE) goto finish;
     sqlite3_finalize(q); q = NULL;
+    if (options && !strappy_db_update_session_options_in_transaction(db,session,options,mask,NULL,NULL,NULL)) {
+        status = STRAPPY_IPC_INVALID; goto finish;
+    }
     rc = sqlite3_prepare_v2(db, "INSERT INTO prompt_runs(session_id,request_key,prompt,state,created_at_ms,updated_at_ms) VALUES(?,?,?,1,?,?)", -1, &q, NULL);
     if (rc != SQLITE_OK) goto finish;
     sqlite3_bind_int64(q, 1, session); sqlite3_bind_text(q, 2, key, -1, SQLITE_TRANSIENT);

@@ -1,4 +1,4 @@
-# Prompt execution (step 3)
+# Prompt execution
 
 The daemon accepts prompts for configured sessions, persists their
 stable client request keys, and runs `strappy_session_send_prompt_with_events_and_load`
@@ -10,8 +10,10 @@ The UI saves an unresolved submission and its random key in local defaults befor
 sending. It reuses that key after reconnect, including when the session is opened
 again. An identical retry returns the original run; a different prompt/session
 under the same key is a conflict. Transport IDs are unrelated to these keys.
-The wire limit currently permits 4024 UTF-8 prompt bytes; the UI rejects larger
-prompts explicitly. Acknowledgment means durable acceptance, not completion.
+The combined submission carries an 8-byte session ID, 64-byte retry key,
+4-byte settings length, optional transient settings JSON, and UTF-8 prompt.
+The total payload is bounded at 4096 bytes. The UI reports oversized combined
+submissions explicitly. Legacy prompt-only submissions remain supported. Acknowledgment means durable acceptance, not completion.
 
 The run lifecycle is accepted, running, completed, failed, cancelled or
 interrupted. The daemon persists processing/retry fields as typed columns; the
@@ -20,14 +22,25 @@ Session/ledger/run events invalidate DB-backed views. WebView work stays in the
 client, and no UI prompt execution fallback remains. Submission-pending spinners
 are temporary presentation state, not evidence that a daemon run is active.
 
-There is one execution worker and no pending-work queue across sessions. Other
-submissions get a busy error, whereas retries of the same key succeed. This
-bounds concurrency while process-global curl CA configuration, OAuth CA state,
-credential callbacks, identity and localization remain configured once per
-process. The database writer cache already serializes connections. Increasing
-concurrency requires another audit; it is not a matter of adding threads.
+Each active session owns an execution worker and cancellation state. There is
+at most one active run per session and at most 32 ordinary prompt workers per
+service. A separate maintenance worker runs scan/catalog/study jobs. Short
+control mutations do not reserve an execution slot; create/delete for an idle
+session remain available during prompts and maintenance. Deleting or changing
+options/context on an executing session returns busy. There is no durable queue
+of future prompts: acceptance starts the session worker, and repeated keys
+resolve to the original run even when capacity is full.
 
-IPC handlers run on bounded command threads separate from that worker and from
+The control dispatcher serializes mutations and acceptance. Combined submissions
+validate settings, then save changed fields and accept the run in one SQLite
+transaction. A failure rolls both back; a durable retry never reapplies settings.
+Configuration/CA paths and credential callbacks are initialized before workers.
+The writer cache serializes short DB operations; network and tool execution do
+not hold its lock. Thread-local execution ownership routes cancellation through
+HTTP, tools and credential refresh to the correct session. Account credential
+locks continue to serialize refreshes for a shared account.
+
+IPC handlers reuse bounded per-connection command workers separate from execution and from
 the socket loop. Cancel requests name both session and run, persist their intent,
 and set a mutex-protected cancellation flag. HTTP, retry waits, OAuth refresh and
 tools cooperate through the existing cancellation callbacks. Bash terminates and
@@ -80,7 +93,8 @@ presentation stays in the UI; see [MUTATIONS.md](MUTATIONS.md).
 `make -C source/linux clean test` includes actual Unix-socket, SQLite and Responses
 runtime tests against an offline loopback HTTP fixture. The execution harness
 covers lost acknowledgments, durable retries, input conflicts, simultaneous
-clients, cross-session busy behavior, cancellation in HTTP and Bash, SIGTERM
+clients, parallel sessions with isolated cancellation, create/delete during blocked
+provider execution, atomic settings rollback and retry preservation, cancellation in HTTP and Bash, SIGTERM
 child cleanup, restart interruption without replay, and reopened read-only state.
 A separate reader-capability executable checks denied writes and readiness
 revocation. No host provider credentials are used by these tests.

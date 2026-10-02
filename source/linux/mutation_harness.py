@@ -172,7 +172,7 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         wait(entered.is_set)
         assert scalar('SELECT state FROM prompt_runs WHERE session_id=?',(study,)) == 2
         rpc('delete_session',session=study,expected=7)
-        rpc('approve_database',id=catalog,value=0,expected=7)
+        rpc('approve_database',id=catalog,value=1)
         run = scalar('SELECT id FROM prompt_runs WHERE session_id=?',(study,))
         assert command(directory,17,struct.pack('!QQ',study,run))[0] == 0
         wait(idle)
@@ -205,7 +205,7 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         retry = struct.pack('!Q',cancelled_study) + b'a'*64 + b'Database Study'
         status, result = command(directory,16,retry)
         assert status == 0 and struct.unpack('!QI',result)[1] == 5
-        assert command(directory,16,struct.pack('!Q',cancelled_study)+b'd'*64+b'New work')[0] == 7
+        assert command(directory,16,struct.pack('!Q',cancelled_study)+b'd'*64+b'New work')[0] == 0
         then = time.monotonic()
         process.send_signal(signal.SIGTERM)
         assert process.wait(timeout=5) == 0

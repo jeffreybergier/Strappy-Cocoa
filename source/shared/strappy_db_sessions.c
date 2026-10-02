@@ -1983,7 +1983,25 @@ int strappy_db_load_default_session_options(
 }
 
 int strappy_db_update_session_options(
-  const char *db_path,
+  const char *db_path, long long session_id, const strappy_session_options *options,
+  strappy_session_option_mask changed_fields, strappy_session_options *saved_options_out,
+  strappy_session_option_mask *actual_changed_fields_out, char **error_out)
+{
+  sqlite3 *db;
+  int ok;
+  if (!strappy_db_open(db_path,&db,error_out)) return 0;
+  ok = strappy_db_ensure_schema(db,error_out) &&
+    strappy_db_exec(db,"BEGIN IMMEDIATE","Could not begin session options",error_out) &&
+    strappy_db_update_session_options_in_transaction(db,session_id,options,changed_fields,
+      saved_options_out,actual_changed_fields_out,error_out) &&
+    strappy_db_exec(db,"COMMIT","Could not commit session options",error_out);
+  if (!ok) sqlite3_exec(db,"ROLLBACK",NULL,NULL,NULL);
+  strappy_db_release(db);
+  return ok;
+}
+
+int strappy_db_update_session_options_in_transaction(
+  sqlite3 *db,
   long long session_id,
   const strappy_session_options *options,
   strappy_session_option_mask changed_fields,
@@ -2001,7 +2019,6 @@ int strappy_db_update_session_options(
   strappy_session_options current;
   strappy_session_options merged;
   strappy_session_option_mask actual_changed_fields;
-  sqlite3 *db;
   long long now_ms;
   int allowed;
   int ok;
@@ -2055,29 +2072,13 @@ int strappy_db_update_session_options(
   strappy_session_options_init(&merged);
   selected_account_id = NULL;
   selected_model_id = NULL;
-  if (!strappy_db_open(db_path, &db, error_out)) {
-    return 0;
-  }
-  if (!strappy_db_ensure_schema(db, error_out) ||
-      !strappy_db_exec(db,
-                       "BEGIN IMMEDIATE;",
-                       "Could not begin session-options update",
-                       error_out)) {
-    strappy_db_release(db);
-    return 0;
-  }
   if (!strappy_db_copy_session_options(db,
                                        session_id,
                                        &current,
                                        error_out) ||
       !strappy_db_copy_options(&current, &merged, error_out)) {
-    strappy_db_exec(db,
-                    "ROLLBACK;",
-                    "Could not roll back session-options update",
-                    NULL);
     strappy_session_options_destroy(&current);
     strappy_session_options_destroy(&merged);
-    strappy_db_release(db);
     return 0;
   }
 
@@ -2295,14 +2296,9 @@ int strappy_db_update_session_options(
   if (!strappy_db_copy_session_options(db,
                                        session_id,
                                        &current,
-                                       error_out) ||
-      !strappy_db_exec(db,
-                       "COMMIT;",
-                       "Could not commit session-options update",
-                       error_out)) {
+                                       error_out)) {
     goto rollback;
   }
-  strappy_db_release(db);
   strappy_session_options_destroy(&merged);
   free(selected_account_id);
   free(selected_model_id);
@@ -2318,15 +2314,10 @@ int strappy_db_update_session_options(
   return 1;
 
 rollback:
-  strappy_db_exec(db,
-                  "ROLLBACK;",
-                  "Could not roll back session-options update",
-                  NULL);
   strappy_session_options_destroy(&current);
   strappy_session_options_destroy(&merged);
   free(selected_account_id);
   free(selected_model_id);
-  strappy_db_release(db);
   return 0;
 }
 

@@ -19,30 +19,34 @@ static NSString *failure;
 
 char *strappy_test_mutation(unsigned int operation, const cJSON *command, unsigned int *status)
 {
-  int reject;
-  assert(![NSThread isMainThread]);
-  assert(operation == STRAPPY_IPC_MUTATE);
-  assert(!strcmp(cJSON_GetObjectItemCaseSensitive(command,"action")->valuestring,"options"));
-  assert(!strcmp(cJSON_GetObjectItemCaseSensitive(command,"rounds")->valuestring,"7"));
-  pthread_mutex_lock(&mutex); ++saves; reject = failSave; pthread_mutex_unlock(&mutex);
-  usleep(300000); /* A deliberately slow daemon must not block the main loop. */
-  *status = reject ? STRAPPY_IPC_BUSY : STRAPPY_IPC_OK;
-  return reject ? NULL : strdup("");
+  (void)operation; (void)command; (void)status;
+  assert(0 && "Send must use one combined command"); return NULL;
 }
 int strappy_test_command(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status)
 {
-  int lost;
-  assert(![NSThread isMainThread]);
-  assert(operation == STRAPPY_IPC_SUBMIT_PROMPT && length > 72);
+  int lost, reject;
+  unsigned int size;
+  char json[4097];
+  cJSON *settings;
+  assert(![NSThread XP_isMainThread]);
+  assert(operation == STRAPPY_IPC_SUBMIT_WITH_OPTIONS && length > 76);
+  size = strappy_ipc_get32(payload+72);
+  assert(size > 0 && size < length-76);
+  memcpy(json,payload+76,size); json[size] = 0;
+  settings = cJSON_Parse(json);
+  assert(settings && !strcmp(cJSON_GetObjectItemCaseSensitive(settings,"rounds")->valuestring,"7"));
+  cJSON_Delete(settings);
   pthread_mutex_lock(&mutex);
-  assert(saves > 0 && !failSave);
-  ++submissions;
-  if (submittedKey[0]) assert(!memcmp(submittedKey,payload+8,64));
-  else { memcpy(submittedKey,payload+8,64); submittedKey[64] = 0; }
-  lost = loseReply;
+  ++saves; reject = failSave; lost = loseReply;
+  if (!reject) {
+    ++submissions;
+    if (submittedKey[0]) assert(!memcmp(submittedKey,payload+8,64));
+    else { memcpy(submittedKey,payload+8,64); submittedKey[64] = 0; }
+  }
   pthread_mutex_unlock(&mutex);
-  *status = STRAPPY_IPC_OK;
+  usleep(300000);
+  *status = reject ? STRAPPY_IPC_INVALID : STRAPPY_IPC_OK;
   return !lost;
 }
 
@@ -144,17 +148,16 @@ int main(void)
   waitFinish();
   assert(saves == 2 && submissions == 1);
   assert(![s updateOptions:options changedFields:StrappySessionOptionRoundLimit error:NULL]);
-  assert([[[[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey]
-    objectForKey:@"optionsFlushed"] boolValue]);
+  assert([[[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey] objectForKey:@"optionsCommand"] != nil);
   loseReply = 0; accepted = 0;
   assert([s beginResponsesPrompt:@"offline probe" context:nil error:&error]);
   start = [NSDate timeIntervalSinceReferenceDate];
   while (!accepted && [NSDate timeIntervalSinceReferenceDate]-start < 5) pump();
-  assert(accepted && saves == 2 && submissions == 2);
+  assert(accepted && saves == 3 && submissions == 2);
   assert([[NSUserDefaults standardUserDefaults] objectForKey:pendingKey] == nil);
   [[NSNotificationCenter defaultCenter] removeObserver:observer];
   [[NSUserDefaults standardUserDefaults] synchronize];
-  puts("PASS: shared drafts, field merge, invalidation, responsive Send, failed save blocks submission, durable retry skips settings replay");
+  puts("PASS: shared drafts, field merge, invalidation, responsive Send, failed save blocks submission, durable retry preserves combined payload");
   [failure release];
   [pool release];
   return 0;

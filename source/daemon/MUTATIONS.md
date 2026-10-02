@@ -8,9 +8,11 @@ Database Study loop. The old UI run registry and unused execution callbacks were
 removed. UI-only drafts, pending prompt retry keys, appearance preferences,
 rendering and font staging remain local.
 
-One runtime owner serializes prompts, study, scanning, catalog refresh, and
-metadata/account changes. Conflicting commands return `busy`; clients must not
-optimistically update persisted state. Database calls commit before persistent
+The FIFO control path serializes short metadata mutations and prompt acceptance.
+Each active prompt owns a separate session worker; one maintenance worker owns
+study, scanning, and catalog refresh. Mutating the executing session returns
+`busy`, while idle-session creation/deletion remains available. Clients render
+committed state. Explicit credential refresh has a separate network lane. Database calls commit before persistent
 invalidation events. Catalog invalidations also hint that transient worker status
 changed; consumers query `work_status`, rather than interpreting events as rows.
 IPC socket handling and worker status/cancellation stay responsive during work.
@@ -67,7 +69,7 @@ cannot reactivate an archived account. Metadata updates restore the previous
 bearer credential if the database update fails. Keychain and SQLite cannot form
 one atomic transaction.
 
-Mutations use a single connection/attempt. If a reply is lost, clients refresh
+Ordinary mutations use one attempt on the persistent control connection. If a reply is lost, clients refresh
 stored state and explicitly report an unknown acknowledgment; they do not
 implicitly duplicate creation, study, or authentication changes. Prompt submission
 retains its durable retry-key behavior from step 3. Study's key is stored with the
@@ -82,14 +84,14 @@ another field's local edit. Service refreshes preserve the draft. Navigating awa
 and back preserves it; terminating the UI before Send discards it.
 
 Send captures the draft and its field mask, then a worker persists the stable
-retry request, saves the options, and submits the prompt. A rejected or
-unacknowledged settings save prevents submission and retains the draft for an
-explicit retry. The pending request records a durable `optionsFlushed` flag
-before submission; lost submission replies reuse the original prompt/key without
-reapplying options to an already accepted run. Option editing is disabled while
-acceptance remains unresolved. No database schema or wire-version change is
-needed. The save and submission are separate commands: the daemon still arbitrates
-other clients and rejects conflicting operations with `busy`.
+retry request and submits prompt plus settings in one command. The daemon saves
+changed fields and accepts the run in one transaction. Rejected acceptance
+retains the draft; an uncertain reply retains the original prompt, key and
+settings for retry. A matching durable key returns its original run without
+reapplying settings. The UI discards a draft only after acceptance is confirmed
+by reply or committed run state. Option editing is disabled while acceptance
+remains unresolved. Older pending requests with `optionsFlushed` are still read,
+but new requests no longer need that marker. There is no schema migration.
 
 Successful options mutations invalidate only sessions; model/account/default
 mutations invalidate catalogs, and context inclusion invalidates the ledger.

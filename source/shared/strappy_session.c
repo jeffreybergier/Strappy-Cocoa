@@ -374,7 +374,7 @@ int strappy_session_load_default_options(
                                                  error_out);
 }
 
-static int strappy_session_validate_options_update(
+int strappy_session_validate_options_update(
   const char *resource_dir,
   const strappy_session_options *options,
   strappy_session_option_mask changed_fields,

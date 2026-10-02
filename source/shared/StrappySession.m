@@ -1023,6 +1023,11 @@ static void StrappyStoreChanged(unsigned int topics)
     pendingKey = [NSString stringWithFormat:@"StrappyPendingPrompt-%@", sessionIdentifier_];
     pending = [[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey];
     if (run.request_key && [[pending objectForKey:@"key"] isEqualToString:[NSString stringWithUTF8String:run.request_key]]) {
+      @synchronized([StrappySession class]) {
+        NSDictionary *draft = [StrappyOptionDrafts objectForKey:sessionIdentifier_];
+        if ([[draft objectForKey:@"generation"] isEqual:[pending objectForKey:@"optionsGeneration"]])
+          [StrappyOptionDrafts removeObjectForKey:sessionIdentifier_];
+      }
       [[NSUserDefaults standardUserDefaults] removeObjectForKey:pendingKey];
       [[NSUserDefaults standardUserDefaults] synchronize];
     }
@@ -3864,37 +3869,32 @@ static void StrappyStoreChanged(unsigned int topics)
   uint64_t session = (uint64_t)[sessionIdentifier_ longLongValue];
   unsigned int status = STRAPPY_IPC_NOT_READY;
   BOOL received;
-  NSError *optionsError = nil;
   NSMutableDictionary *savedRequest = [[request mutableCopy] autorelease];
   NSString *preflightError = nil;
-  @synchronized([NSUserDefaults standardUserDefaults]) {
-    [[NSUserDefaults standardUserDefaults] setObject:savedRequest forKey:[request objectForKey:@"pendingKey"]];
-    if (![[NSUserDefaults standardUserDefaults] synchronize])
-      preflightError = @"Could not save the submission retry key. The prompt was not sent.";
+  char *settingsJSON = NULL;
+  unsigned int settingsLength = 0;
+  NSDictionary *settings = [[request objectForKey:@"optionsFlushed"] boolValue] ? nil : [request objectForKey:@"optionsCommand"];
+  if (settings) {
+    cJSON *json = cJSON_CreateObject();
+    NSEnumerator *keys = [settings keyEnumerator];
+    NSString *key;
+    while ((key = [keys nextObject]) != nil)
+      cJSON_AddStringToObject(json,[key UTF8String],[[[settings objectForKey:key] description] UTF8String]);
+    settingsJSON = cJSON_PrintUnformatted(json); cJSON_Delete(json);
+    if (!settingsJSON) preflightError = @"Could not encode prompt options.";
+    else settingsLength = (unsigned int)strlen(settingsJSON);
   }
-  if (!preflightError && [request objectForKey:@"optionsCommand"] &&
-      ![[request objectForKey:@"optionsFlushed"] boolValue]) {
-    if (StrappyServiceCommand(STRAPPY_IPC_MUTATE, [request objectForKey:@"optionsCommand"], &optionsError) == nil) {
-      preflightError = [NSString stringWithFormat:@"The prompt was not sent because its options could not be saved. %@",
-        [optionsError localizedDescription]];
-    } else {
-      [savedRequest setObject:[NSNumber numberWithBool:YES] forKey:@"optionsFlushed"];
-      @synchronized([NSUserDefaults standardUserDefaults]) {
-        [[NSUserDefaults standardUserDefaults] setObject:savedRequest forKey:[request objectForKey:@"pendingKey"]];
-        if (![[NSUserDefaults standardUserDefaults] synchronize])
-          preflightError = @"Could not save submission state. The prompt was not sent.";
-      }
-      if (!preflightError) {
-        @synchronized([StrappySession class]) {
-          NSDictionary *draft = [StrappyOptionDrafts objectForKey:sessionIdentifier_];
-          if ([[draft objectForKey:@"generation"] isEqual:[request objectForKey:@"optionsGeneration"]])
-            [StrappyOptionDrafts removeObjectForKey:sessionIdentifier_];
-        }
-      }
-      @synchronized(self) { optionsLoaded_ = NO; }
+  if ([prompt length] + settingsLength + 76 > STRAPPY_IPC_MAX_PAYLOAD)
+    preflightError = @"The prompt and options exceed the service message limit.";
+  if (!preflightError) {
+    @synchronized([NSUserDefaults standardUserDefaults]) {
+      [[NSUserDefaults standardUserDefaults] setObject:savedRequest forKey:[request objectForKey:@"pendingKey"]];
+      if (![[NSUserDefaults standardUserDefaults] synchronize])
+        preflightError = @"Could not save the submission retry key. The prompt was not sent.";
     }
   }
   if (preflightError) {
+    free(settingsJSON);
     /* No submission was attempted. Keep the editable draft, and do not let a
      * reconnect silently retry a failed settings save. */
     @synchronized([NSUserDefaults standardUserDefaults]) {
@@ -3910,9 +3910,20 @@ static void StrappyStoreChanged(unsigned int topics)
   }
   strappy_ipc_put32(payload, (uint32_t)(session >> 32)); strappy_ipc_put32(payload+4, (uint32_t)session);
   memcpy(payload+8, [[request objectForKey:@"key"] UTF8String], 64);
-  memcpy(payload+72, [prompt bytes], [prompt length]);
-  received = strappy_store_client_command(STRAPPY_IPC_SUBMIT_PROMPT, payload,
-      (unsigned int)[prompt length] + 72U, &status) ? YES : NO;
+  strappy_ipc_put32(payload+72, settingsLength);
+  if (settingsLength) memcpy(payload+76,settingsJSON,settingsLength);
+  memcpy(payload+76+settingsLength,[prompt bytes],[prompt length]);
+  free(settingsJSON);
+  received = strappy_store_client_command(STRAPPY_IPC_SUBMIT_WITH_OPTIONS, payload,
+      (unsigned int)[prompt length] + settingsLength + 76U, &status) ? YES : NO;
+  if (received && status == STRAPPY_IPC_OK) {
+    @synchronized([StrappySession class]) {
+      NSDictionary *draft = [StrappyOptionDrafts objectForKey:sessionIdentifier_];
+      if ([[draft objectForKey:@"generation"] isEqual:[request objectForKey:@"optionsGeneration"]])
+        [StrappyOptionDrafts removeObjectForKey:sessionIdentifier_];
+    }
+    @synchronized(self) { optionsLoaded_ = NO; }
+  }
   if (received) {
     @synchronized([NSUserDefaults standardUserDefaults]) {
       NSDictionary *saved = [[NSUserDefaults standardUserDefaults] dictionaryForKey:[request objectForKey:@"pendingKey"]];
@@ -3926,7 +3937,7 @@ static void StrappyStoreChanged(unsigned int topics)
   @synchronized([StrappySession class]) { [StrappyPendingSubmissions removeObject:sessionIdentifier_]; }
   if (!received || status != STRAPPY_IPC_OK) {
     NSString *message = !received ? @"Acceptance is unknown. Retry the same prompt to reconnect safely." :
-        (status == STRAPPY_IPC_BUSY ? @"The service is busy with another prompt. Try again when it finishes." : @"The service could not accept this prompt.");
+        (status == STRAPPY_IPC_BUSY ? @"This session already has an active prompt, or the service has reached its execution limit." : @"The service could not accept this prompt.");
     [self performSelectorOnMainThread:@selector(promptDidFinish:)
         withObject:[NSDictionary dictionaryWithObject:message forKey:@"error"] waitUntilDone:NO];
   } else {

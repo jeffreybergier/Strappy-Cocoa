@@ -91,7 +91,8 @@ run state using the read-only run API after subscribing, just like history.
 ## Mutation command boundary
 
 Operations 16 (submit prompt) and 17 (cancel run) use the binary payloads below.
-Operations 18–27 are defined in the Step 4 command table at the end of this file.
+Operations 28 (combined submission) and 29 (credential refresh) are described
+below. Operations 18–27 are defined in the Step 4 command table at the end of this file.
 
 Unknown operations return `unknown_operation`. Error replies use the numeric
 status in the header and an un-NUL-terminated ASCII error code as payload:
@@ -122,12 +123,25 @@ prompt before this reply. Identical retries return the original run and current
 state, including after restart. Reusing a key with different input returns
 `request_conflict` (8). There is no automatic replay of interrupted work.
 
-One run may be accepted/running across the entire daemon. A different submission
-while busy returns `service_busy` (7) without acceptance. This also enforces one
-active prompt per session. The fixed execution worker is separate from the IPC
-loop. Each peer has at most one command worker; at most 16 commands can be in
-progress, and another command on that peer waits until its previous reply.
+One run may be accepted/running per session, with up to 32 ordinary session
+workers and a separate maintenance worker. Another submission for an active
+session returns `service_busy` (7). Each peer reuses one command worker; up to
+16 peers can be connected. Commands on a control connection execute FIFO.
 Storage waits and provider/tool work never block socket servicing.
+
+`submit_with_options` (28): u64 session ID, 64-byte retry key, u32 settings-byte
+length, that many bytes of a string-valued JSON `options` command, followed by
+nonempty UTF-8 prompt text. The settings length may be zero. The full payload
+must fit 4096 bytes. Settings must target the same session. Validation and
+settings/run writes precede acknowledgement; the writes commit atomically.
+Reply/state and prompt/session retry-key conflict semantics match operation 16.
+On a retry of an accepted key, captured settings are not reapplied, even if the
+retry's settings differ. The original committed run remains authoritative.
+
+`refresh_credentials` (29): the same string-valued `refresh_oauth` JSON command
+as the mutation boundary, with its normal result/status. Other actions are
+rejected. The UI sends it on an independent connection; its worker does not
+acquire the short-command control lock. The bounded reply timeout is 120 seconds.
 
 `cancel_run` (17): u64 session ID followed by u64 run ID. The run must be the
 session's latest run, protecting a newer prompt from a stale cancel. Success has

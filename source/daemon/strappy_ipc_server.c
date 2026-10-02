@@ -19,6 +19,8 @@ struct strappy_ipc_peer {
     uint32_t last_id;
     pthread_t worker;
     int working, finished, wake_fd;
+    int worker_started, worker_stop, command_ready;
+    pthread_cond_t command_changed;
     unsigned int refresh;
     pthread_mutex_t *mutex;
     void (*handler)(const strappy_ipc_message *, strappy_ipc_message *, void *);
@@ -61,18 +63,30 @@ static void strappy_ipc_error(strappy_ipc_message *reply)
 static void *strappy_ipc_command(void *context)
 {
     struct strappy_ipc_peer *p = context;
-    p->handler(&p->command, &p->response, p->context);
-    strappy_ipc_error(&p->response);
-    pthread_mutex_lock(p->mutex);
-    p->finished = 1;
-    pthread_mutex_unlock(p->mutex);
-    /* Even rejected/read-only commands must wake an idle event loop. */
-    while (write(p->wake_fd, "c", 1) < 0 && errno == EINTR) {}
+    for (;;) {
+        pthread_mutex_lock(p->mutex);
+        while (!p->command_ready && !p->worker_stop)
+            pthread_cond_wait(&p->command_changed,p->mutex);
+        if (!p->command_ready) { pthread_mutex_unlock(p->mutex); break; }
+        p->command_ready = 0;
+        pthread_mutex_unlock(p->mutex);
+        p->handler(&p->command, &p->response, p->context);
+        strappy_ipc_error(&p->response);
+        pthread_mutex_lock(p->mutex);
+        p->finished = 1;
+        pthread_mutex_unlock(p->mutex);
+        /* Rejected/read-only commands must also wake an idle event loop. */
+        while (write(p->wake_fd, "c", 1) < 0 && errno == EINTR) {}
+    }
     return NULL;
 }
 static void strappy_ipc_drop(struct strappy_ipc_peer *peer)
 {
-    if (peer->working) pthread_join(peer->worker, NULL);
+    if (peer->worker_started) {
+        pthread_mutex_lock(peer->mutex); peer->worker_stop = 1;
+        pthread_cond_signal(&peer->command_changed); pthread_mutex_unlock(peer->mutex);
+        pthread_join(peer->worker,NULL); pthread_cond_destroy(&peer->command_changed);
+    }
     if (peer->fd >= 0) (void)close(peer->fd);
     memset(peer, 0, sizeof(*peer)); peer->fd = -1;
 }
@@ -146,15 +160,22 @@ static void strappy_ipc_request(strappy_ipc_server *s, struct strappy_ipc_peer *
                 strappy_ipc_snapshot(s, &reply);
             }
         } else if (request.operation >= STRAPPY_IPC_SUBMIT_PROMPT &&
-                   request.operation <= STRAPPY_IPC_REFRESH_CATALOG)
+                   request.operation <= STRAPPY_IPC_REFRESH_CREDENTIALS)
         {
             if (s->handler) {
                 memcpy(request.payload, p->input + STRAPPY_IPC_HEADER, request.length);
                 p->command = request; p->response = reply;
                 p->handler = s->handler; p->context = s->context; p->mutex = &s->mutex;
-                p->finished = 0; p->wake_fd = s->wake[1];
-                if (pthread_create(&p->worker, NULL, strappy_ipc_command, p) == 0) {
-                    p->working = 1;
+                p->wake_fd = s->wake[1];
+                if (!p->worker_started && pthread_cond_init(&p->command_changed,NULL) == 0) {
+                    if (pthread_create(&p->worker,NULL,strappy_ipc_command,p) == 0) p->worker_started = 1;
+                    else pthread_cond_destroy(&p->command_changed);
+                }
+                if (p->worker_started) {
+                    pthread_mutex_lock(&s->mutex);
+                    p->finished = 0; p->command_ready = 1; p->working = 1;
+                    pthread_cond_signal(&p->command_changed);
+                    pthread_mutex_unlock(&s->mutex);
                     p->received = 0; p->needed = STRAPPY_IPC_HEADER;
                     return;
                 }
@@ -268,7 +289,7 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
             pthread_mutex_lock(&s->mutex); finished = p->finished;
             pthread_mutex_unlock(&s->mutex);
             if (!finished) continue;
-            pthread_join(p->worker, NULL); p->working = 0;
+            p->working = 0;
             strappy_ipc_queue(p, &p->response);
             if (p->refresh && p->subscribed) {
                 unsigned int topic;
@@ -306,7 +327,7 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
             pthread_mutex_lock(&s->mutex); finished = p->finished;
             pthread_mutex_unlock(&s->mutex);
             if (!finished) continue;
-            pthread_join(p->worker, NULL); p->working = 0;
+            p->working = 0;
             strappy_ipc_queue(p, &p->response);
             if (p->refresh && p->subscribed) {
                 unsigned int topic;
@@ -385,7 +406,11 @@ void strappy_ipc_server_drain(strappy_ipc_server *s)
 {
     int i;
     if (!s) return;
-    for (i = 0; i < STRAPPY_IPC_MAX_CLIENTS; ++i) if (s->peers[i].working) {
-        pthread_join(s->peers[i].worker, NULL); s->peers[i].working = 0;
+    for (i = 0; i < STRAPPY_IPC_MAX_CLIENTS; ++i) if (s->peers[i].worker_started) {
+        struct strappy_ipc_peer *p = &s->peers[i];
+        pthread_mutex_lock(&s->mutex); p->worker_stop = 1;
+        pthread_cond_signal(&p->command_changed); pthread_mutex_unlock(&s->mutex);
+        pthread_join(p->worker,NULL); pthread_cond_destroy(&p->command_changed);
+        p->worker_started = p->working = 0;
     }
 }

@@ -6,6 +6,10 @@
 #include <sqlite3.h>
 #include <stddef.h>
 
+int strappy_db_update_session_options_in_transaction(sqlite3 *db, long long session_id,
+    const strappy_session_options *options, strappy_session_option_mask mask,
+    strappy_session_options *saved, strappy_session_option_mask *changed, char **error);
+
 /* Private contracts shared only by the strappy_db implementation units. */
 
 #define STRAPPY_DB_DEFAULT_MODEL_KEY "default_model_id"

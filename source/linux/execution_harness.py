@@ -120,28 +120,72 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
             db.execute("INSERT INTO models(id,provider_id,wire_model_id,name,last_seen_at_ms) VALUES('other:fixture','other','fixture','Fixture',1)")
             db.execute("INSERT INTO model_capabilities VALUES('other:fixture','unknown',0,1,0)")
             db.execute("INSERT INTO model_preferences(provider_id,wire_model_id,allowed,updated_at_ms) VALUES('other','fixture',1,1)")
+            db.execute("UPDATE app_preferences SET default_model_id='other:fixture',default_provider_account_id='daemon-offline' WHERE id=1")
             for session in (1,2):
                 db.execute("INSERT INTO sessions(id,model_id,provider_account_id,created_at_ms,updated_at_ms) VALUES(?,'other:fixture','daemon-offline',1,1)", (session,))
                 db.execute("INSERT INTO session_settings(session_id,web_provider,bash_enabled,updated_at_ms) VALUES(?,'none',1,1)", (session,))
                 db.execute("INSERT INTO session_working_directories VALUES(?,?,1)", (session, str(directory)))
+        settings = {'action':'options','session':'1','mask':'256','rounds':'7',
+                    'web':'0','bash':'1','one_tool':'0','quality':'0','web_provider':'none'}
+        def combined(key, values=settings, prompt=b'Hello daemon'):
+            encoded = json.dumps(values).encode()
+            return struct.pack('!Q',1)+key.encode()+struct.pack('!I',len(encoded))+encoded+prompt
+        # Explicit OAuth networking uses an independent command worker.
+        with concurrent.futures.ThreadPoolExecutor(1) as pool:
+            refreshing = pool.submit(command,directory,29,b'{"action":"refresh_oauth","id":"slow-fixture"}')
+            time.sleep(.1)
+            started = time.monotonic()
+            assert command(directory,25,b'{"action":"create_account","id":"other","name":"Concurrent control"}')[0] == 0
+            assert time.monotonic()-started < 1
+            assert refreshing.result()[0] == 0
+        # An acceptance failure rolls the settings back in the same transaction.
+        with sqlite3.connect(dbpath) as db:
+            previous_rounds = db.execute('SELECT round_limit FROM session_settings WHERE session_id=1').fetchone()[0]
+            db.execute("CREATE TRIGGER reject_accept BEFORE INSERT ON prompt_runs BEGIN SELECT RAISE(ABORT,'fixture'); END")
+        assert command(directory,28,combined('f'*64))[0] == 9
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute('SELECT round_limit FROM session_settings WHERE session_id=1').fetchone()[0] == previous_rounds
+            assert db.execute('SELECT count(*) FROM prompt_runs').fetchone()[0] == 0
+            db.execute('DROP TRIGGER reject_accept')
+        invalid = dict(settings,rounds='0')
+        assert command(directory,28,combined('f'*64,invalid))[0] == 1
         # Lost acknowledgment: disconnect before reading; retry while request runs.
         key = 'a'*64
         with connect(directory) as sock:
-            send(sock, 16, 2, struct.pack('!Q', 1)+key.encode()+b'Hello daemon')
+            send(sock, 28, 2, combined(key))
         wait_for(lambda: state(key) in (1,2))
         wait_for(entered.is_set)
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute('SELECT round_limit FROM session_settings WHERE session_id=1').fetchone()[0] == 7
+        # A retry may not overwrite the settings captured by the accepted run.
+        assert command(directory,28,combined(key,dict(settings,rounds='9')))[0] == 0
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute('SELECT round_limit FROM session_settings WHERE session_id=1').fetchone()[0] == 7
         subprocess.run([reader, str(dbpath), '2'], check=True)
         status, accepted = submit(directory, key)
         assert status == 0, status
         run, phase = struct.unpack('!QI', accepted)
         assert submit(directory, key, prompt=b'different')[0] == 8
         assert submit(directory, 'b'*64)[0] == 7
-        assert submit(directory, 'b'*64, session=2)[0] == 7
+        assert submit(directory, 'b'*64, session=2)[0] == 0
+        wait_for(lambda: len(requests) == 2)
+        # A blocked provider must not block committed session mutations.
+        start_control = time.monotonic()
+        status, created = command(directory,25,json.dumps({'action':'create_session','directory':str(directory)}).encode())
+        assert status == 0
+        assert command(directory,25,json.dumps({'action':'delete_session','session':created.decode()}).encode())[0] == 0
+        assert command(directory,25,b'{"action":"delete_session","session":"1"}')[0] == 7
+        assert time.monotonic()-start_control < 2
+        # Cancelling one session leaves the other running.
+        second_run = struct.unpack('!QI',submit(directory,'b'*64,session=2)[1])[0]
+        assert command(directory,17,struct.pack('!QQ',2,second_run))[0] == 0
+        wait_for(lambda: state('b'*64) == 5)
+        assert state(key) == 2
         # UI lifetime is absent: no client remains while provider completes.
         gate.set()
         wait_for(lambda: state(key) == 3)
         assert struct.unpack('!QI', submit(directory, key)[1]) == (run, 3)
-        assert len(requests) == 1
+        assert len(requests) == 2
         subprocess.run([reader, str(dbpath), '3'], check=True)
         with sqlite3.connect(dbpath) as db:
             assert db.execute('SELECT COUNT(*) FROM conversation_items').fetchone()[0] > 0

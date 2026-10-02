@@ -5,14 +5,23 @@ reply. `StrappyAsync` captures a bridge invocation and runs it on a serial comma
 worker; completion and notification delivery occur on the main thread. The
 `StrappySession` and `FileScanner` mutation gateways reject main-thread calls
 before connecting, so new callers cannot accidentally reintroduce the stall.
-No wire-protocol change is needed: requests still receive correlated replies,
-with the waiting confined to a worker.
+The process-lifetime C client owns a FIFO control worker and persistent command
+connection, established when the service becomes ready. Replies use increasing
+request IDs. A separate subscribed connection receives invalidations; monitor
+status queries use their own persistent connection so they do not wait behind
+commands. Reconnect revalidates version, ABI, and readiness; mutations are never
+replayed after a lost reply. Durable prompt/cancel commands may reconnect/retry.
+The daemon also retains its per-connection command worker between requests.
+Explicit OAuth refresh uses a separate one-shot command connection and daemon
+worker because it may wait on the network; it cannot occupy the control FIFO.
+Keychain operations and large physical deletions can still take time, so the
+control worker remains asynchronous to the GUI main thread.
 
 ## Choosing when to wait
 
 | Operation | UI behavior | Confirmation |
 | --- | --- | --- |
-| Active-session model, account, tools, limits | Edit a shared local draft immediately | Send's existing worker saves captured fields before submitting the prompt |
+| Active-session model, account, tools, limits | Edit a shared local draft immediately | Send captures fields and submits them atomically with prompt acceptance |
 | Future-session defaults | Show a pending edit; disable its editor while saving | Reload stored defaults on completion, including failure |
 | Model/database approval or visibility, context inclusion, study reset/delete | Enqueue and return | Service notifications refresh committed values; failure reaches the common error channel |
 | Conversation/account/model creation, account/model save, deletion | Keep the originating editor responsive; disable duplicate saves | Only select a returned identifier, dismiss, or remove selection after acknowledgment |
@@ -70,9 +79,12 @@ Each query creates its own private SQLite catalog snapshot, filters and groups
 it, and warms its first page before transferring exclusive ownership to the UI.
 No mutable snapshot is used simultaneously by both threads. Bounded lazy paging
 remains: later pages are small local SQLite reads on the UI thread. This change
-does not claim that all UI disk work is asynchronous: sidebar/timeline reads,
+does not claim that all UI disk work is asynchronous: timeline reads,
 small account/allowed-model lists, rendering, and lazy pages are still local work.
-Those paths do not wait for daemon IPC.
+Those paths do not wait for daemon IPC. Sidebar snapshot construction and section
+building now run on the query worker. Main-thread completion applies the snapshot
+and performs any pending selection after the committed row is available. Newer
+reloads supersede stale results. No provisional conversation rows are synthesized.
 
 ## Native regression fixture
 

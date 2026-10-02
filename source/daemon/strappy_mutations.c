@@ -22,6 +22,30 @@ long long strappy_command_number(const cJSON *object, const char *key)
     errno = 0; n = strtoll(s, &end, 10);
     return !*s || *end || errno ? -1 : n;
 }
+int strappy_command_options(const cJSON *c, strappy_session_options *input,
+    strappy_session_option_mask *mask)
+{
+    long long value = strappy_command_number(c,"mask");
+    const char *booleans[] = { "web", "bash", "one_tool", "quality" };
+    unsigned int i;
+    strappy_session_options_init(input);
+    if (value < 0 || (value & ~STRAPPY_SESSION_OPTION_ALL) ||
+        strappy_command_number(c,"rounds") < 1 ||
+        strappy_command_number(c,"rounds") > STRAPPY_SESSION_MAX_LIMIT) return 0;
+    for (i = 0; i < 4; ++i)
+        if (strappy_command_number(c,booleans[i]) < 0 || strappy_command_number(c,booleans[i]) > 1) return 0;
+    *mask = (strappy_session_option_mask)value;
+    input->model_id = (char *)strappy_command_text(c,"model");
+    input->provider_account_id = (char *)strappy_command_text(c,"account");
+    input->assistant_set_id = (char *)strappy_command_text(c,"assistant");
+    input->working_directory = (char *)strappy_command_text(c,"directory");
+    input->round_limit = (long)strappy_command_number(c,"rounds");
+    input->web_search_enabled = (int)strappy_command_number(c,"web");
+    input->bash_enabled = (int)strappy_command_number(c,"bash");
+    input->limit_to_one_tool = (int)strappy_command_number(c,"one_tool");
+    input->answer_quality_enabled = (int)strappy_command_number(c,"quality");
+    return strappy_web_provider_parse(strappy_command_text(c,"web_provider"),&input->web_provider);
+}
 int strappy_mutation(const char *db, const char *resources, const cJSON *c, char **result)
 {
     const char *action = strappy_command_text(c, "action");
@@ -58,24 +82,9 @@ int strappy_mutation(const char *db, const char *resources, const cJSON *c, char
     } else if (!strcmp(action,"options") || !strcmp(action,"defaults")) {
         strappy_session_options input, saved;
         strappy_session_option_mask changed;
-        long long mask = strappy_command_number(c,"mask");
-        strappy_session_options_init(&input); strappy_session_options_init(&saved);
-        input.model_id = (char *)strappy_command_text(c,"model");
-        input.provider_account_id = (char *)strappy_command_text(c,"account");
-        input.assistant_set_id = (char *)strappy_command_text(c,"assistant");
-        input.working_directory = (char *)strappy_command_text(c,"directory");
-        input.round_limit = (long)strappy_command_number(c,"rounds");
-        input.web_search_enabled = (int)strappy_command_number(c,"web");
-        input.bash_enabled = (int)strappy_command_number(c,"bash");
-        input.limit_to_one_tool = (int)strappy_command_number(c,"one_tool");
-        input.answer_quality_enabled = (int)strappy_command_number(c,"quality");
-        if (mask >= 0 && !(mask & ~STRAPPY_SESSION_OPTION_ALL) &&
-            strappy_command_number(c,"rounds") > 0 && strappy_command_number(c,"rounds") <= STRAPPY_SESSION_MAX_LIMIT &&
-            strappy_command_number(c,"web") >= 0 && strappy_command_number(c,"web") <= 1 &&
-            strappy_command_number(c,"bash") >= 0 && strappy_command_number(c,"bash") <= 1 &&
-            strappy_command_number(c,"one_tool") >= 0 && strappy_command_number(c,"one_tool") <= 1 &&
-            strappy_command_number(c,"quality") >= 0 && strappy_command_number(c,"quality") <= 1 &&
-            strappy_web_provider_parse(strappy_command_text(c,"web_provider"),&input.web_provider)) {
+        strappy_session_option_mask mask = 0;
+        strappy_session_options_init(&saved);
+        if (strappy_command_options(c,&input,&mask)) {
             if (!strcmp(action,"defaults"))
                 ok = strappy_session_update_default_options(db,strappy_command_text(c,"fallback"),resources,
                     &input,(strappy_session_option_mask)mask,&saved,&changed,&error);

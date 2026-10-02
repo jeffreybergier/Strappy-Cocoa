@@ -111,7 +111,7 @@ int strappy_ipc_receive(int fd, strappy_ipc_message *message, int timeout_ms)
 {
     unsigned char header[STRAPPY_IPC_HEADER];
     long long deadline = strappy_ipc_platform_milliseconds() + timeout_ms;
-    if (!message || timeout_ms <= 0 || timeout_ms > 30000 ||
+    if (!message || timeout_ms <= 0 || timeout_ms > 120000 ||
         strappy_ipc_transfer(fd, header, sizeof(header), 0, deadline) != 0 ||
         strappy_ipc_decode(header, message) != 0) return -1;
     return strappy_ipc_transfer(fd, message->payload, message->length, 0, deadline);

@@ -25,6 +25,7 @@
   id<SessionListViewControllerDelegate> delegate_;
   BOOL          suppressSelectionNotification_;
   BOOL          creatingSession_;
+  BOOL          pendingSelectionNotification_;
 }
 
 - (void)setDelegate:(id<SessionListViewControllerDelegate>)delegate;

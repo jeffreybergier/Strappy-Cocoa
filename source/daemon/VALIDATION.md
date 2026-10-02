@@ -857,3 +857,67 @@ the PPC dispatcher fixture also cross-built without warnings. Build/test logs
 remain outside the repository. The macOS launchctl installation/verification
 path now executes on the same background command queue; CLI maintenance
 commands retain their synchronous behavior.
+
+## Persistent control and concurrent sessions (2026-10-02)
+
+The UI client now owns a permanent FIFO control worker/connection, with an
+independent notification/status path. Daemon command workers persist with their
+connections. Prompt workers and cancellation belong to individual sessions;
+short mutations no longer reserve the execution worker. Combined submissions
+commit captured option changes and run acceptance together. Explicit OAuth
+refresh uses an independent connection/worker so network latency does not occupy
+the control FIFO. The IPC reader now permits the existing bounded 120-second
+credential reply timeout instead of rejecting it before reading.
+
+The offline execution fixture holds a loopback provider response open while two
+sessions execute, verifies create/delete for an idle session, refuses deletion
+of an executing session, and cancels one session without cancelling the other.
+It also tests settings rollback when run insertion fails, retry preservation of
+accepted settings, and control mutations during a delayed credential refresh.
+Existing HTTP/Bash cancellation, service restart, durable retry, and shutdown
+checks remain part of the suite.
+
+`control_client_harness` runs the production C client against a deterministic
+socket peer. It verifies one connection for repeated commands, increasing
+request IDs, no replay after a lost mutation reply, reconnect, and an OAuth
+refresh blocked until an independent control command arrives. Clang static
+analysis of the client, IPC server, and execution dispatcher reports no findings.
+
+Native `control_device_probe` runs against a fresh isolated database and creates
+only synthetic account/model configuration. Thirty committed create/delete pairs
+using the persistent client measured:
+
+| Host | Mean per pair | Maximum per pair |
+| --- | ---: | ---: |
+| `koolphone5`, iOS 8.4.1 / armv7 | 21.579 ms | 44.992 ms |
+| `pinkphone-rsa`, iOS 15 / arm64 | 4.174 ms | 4.500 ms |
+| `x4-vm`, Tiger / PPC VM | 32.351 ms | 147.191 ms |
+
+These are IPC-plus-commit fixture timings, not graphical tap-to-display timings
+or before/after speedup measurements. The probes ran as UID 501, used no provider
+credentials, made no provider requests, and did not replace installed apps or
+services. The test scripts stopped and waited for their daemons; temporary fixtures were removed.
+The rootless phone again required executing signed probes under `/var/jb/var`;
+its initial `/var/tmp` attempt was killed before startup. The Mac probe used the
+matching AltivecCore framework via `DYLD_FRAMEWORK_PATH`.
+
+The updated native options fixture passed on both phones. Send returned in
+3.998 ms on armv7 and 1.148 ms on arm64 while combined acceptance deliberately
+waited 300 ms; the main loop advanced 6 and 25 times respectively. One thousand
+local option edits still generated zero IPC calls. Rejected combined acceptance
+retained the draft and created no submission; an uncertain reply retained the
+same retry key and captured settings. No graphical navigation or rendering
+acceptance test was performed.
+
+Build the native fixtures after the normal platform build:
+
+```
+make -C source/iOS -f ../linux/control_device_probe.mk control-probe
+make -C source/macOS -f ../linux/control_device_probe.mk control-probe
+make -C source/iOS -f ../linux/session_options_device_probe.mk session-options-probe
+```
+
+Final clean builds passed for iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64
+with no compiler warnings. The complete offline Linux suite passed, including
+the final heap-owned control-request implementation and independent OAuth lane.
+Build and analysis logs remain outside the checkout and are not committed.

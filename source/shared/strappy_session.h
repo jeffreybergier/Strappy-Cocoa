@@ -122,6 +122,10 @@ int strappy_session_load_default_options(
   const char *fallback_working_directory,
   strappy_session_options *options,
   char **error_out);
+int strappy_session_validate_options_update(const char *resource_dir,
+  const strappy_session_options *options, strappy_session_option_mask changed_fields,
+  char **error_out);
+
 int strappy_session_update_options(
   const char *db_path,
   long long session_id,

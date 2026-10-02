@@ -189,15 +189,25 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   [[self settingsButton] setEnabled:enabled];
 }
 
+- (NSDictionary *)loadSidebarWithError:(NSError **)error
+{
+  StrappySessionRows *sessions = [StrappySession sidebarRowsWithError:error];
+  NSArray *sections = sessions ? [StrappySessionSections sectionsForSessions:sessions] : nil;
+  if (!sections) { if (error && !*error) *error = [sessions readError]; return nil; }
+  return [NSDictionary dictionaryWithObjectsAndKeys:sessions,@"sessions",sections,@"sections",nil];
+}
+
 - (void)reloadData
 {
-  NSError *error;
-  StrappySessionRows *sessions;
-  NSArray *sections;
+  [[StrappyAsync queryTarget:self receiver:self completion:@selector(sidebarLoaded:) context:nil]
+    loadSidebarWithError:NULL];
+}
 
-  error = nil;
-  sessions = [StrappySession sidebarRowsWithError:&error];
-  sections = sessions != nil ? [StrappySessionSections sectionsForSessions:sessions] : nil;
+- (void)sidebarLoaded:(StrappyAsyncResult *)result
+{
+  NSError *error = [result error];
+  StrappySessionRows *sessions = [[result value] objectForKey:@"sessions"];
+  NSArray *sections = [[result value] objectForKey:@"sections"];
   if (sections == nil) {
     [self showError:error != nil ? error : [sessions readError]
               title:NSLocalizedString(@"Could not load conversations", nil)];
@@ -207,6 +217,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   [self setSections:sections];
   [[self tableView] reloadData];
   [self selectSessionIdentifier:[self selectedSessionId]];
+  if (pendingSelectionNotification_) { pendingSelectionNotification_ = NO; [self notifySelectedSession]; }
 }
 
 - (BOOL)rebuildSections
@@ -239,8 +250,8 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
                          select:(BOOL)select
 {
   if (select) [self setSelectedSessionId:sessionIdentifier];
+  if (select) pendingSelectionNotification_ = YES;
   [self reloadData];
-  if (select) [self notifySelectedSession];
 }
 
 - (void)applySessionSummary:(NSDictionary *)summary select:(BOOL)select
@@ -468,10 +479,8 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
     [self setSelectedSessionId:nil];
   }
 
+  if (wasSelectedSession) pendingSelectionNotification_ = YES;
   [self reloadData];
-  if (wasSelectedSession) {
-    [self notifySelectedSession];
-  }
 }
 
 - (UIView *)promptInFlightAccessoryViewForCell:(UITableViewCell *)cell

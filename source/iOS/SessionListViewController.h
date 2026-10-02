@@ -8,7 +8,9 @@
                  didSelectSession:(StrappySession *)session;
 @end
 
-@interface SessionListViewController : UITableViewController
+@interface SessionListViewController : UITableViewController {
+  BOOL pendingSelectionNotification_;
+}
 
 @property (nonatomic, assign) id<SessionListViewControllerDelegate> delegate;
 

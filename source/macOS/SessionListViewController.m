@@ -446,6 +446,8 @@ static void StrappyDrawTintedImage(NSImage *image,
        selector:@selector(sessionPromptActivityDidChange:)
            name:StrappySessionPromptDidFinishNotification
          object:nil];
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelCatalogDidChange:)
+    name:StrappySessionDidUpdateNotification object:nil];
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(modelCatalogDidChange:)
@@ -652,16 +654,26 @@ static void StrappyDrawTintedImage(NSImage *image,
   return rows_ == nil || index == NSNotFound ? -1 : (NSInteger)index;
 }
 
+- (NSDictionary *)loadSidebarWithError:(NSError **)error
+{
+  StrappySessionRows *sessions = [StrappySession sidebarRowsWithError:error];
+  NSArray *sections = sessions ? [StrappySessionSections sectionsForSessions:sessions] : nil;
+  if (!sections) { if (error && !*error) *error = [sessions readError]; return nil; }
+  return [NSDictionary dictionaryWithObjectsAndKeys:sessions,@"sessions",sections,@"sections",nil];
+}
+
 - (void)reloadData
 {
-  NSError *error;
-  StrappySessionRows *sessions;
-  NSArray *sections;
-  StrappySessionTableRows *rows;
+  [[StrappyAsync queryTarget:self receiver:self completion:@selector(sidebarLoaded:) context:nil]
+    loadSidebarWithError:NULL];
+}
 
-  error = nil;
-  sessions = [StrappySession sidebarRowsWithError:&error];
-  sections = sessions != nil ? [StrappySessionSections sectionsForSessions:sessions] : nil;
+- (void)sidebarLoaded:(StrappyAsyncResult *)result
+{
+  NSError *error = [result error];
+  StrappySessionRows *sessions = [[result value] objectForKey:@"sessions"];
+  NSArray *sections = [[result value] objectForKey:@"sections"];
+  StrappySessionTableRows *rows;
   if (sections == nil) {
     [self showError:error != nil ? error : [sessions readError]
               title:NSLocalizedString(@"Could not load conversations", nil)
@@ -677,7 +689,9 @@ static void StrappyDrawTintedImage(NSImage *image,
   [tableView_ reloadData];
   suppressSelectionNotification_ = NO;
   [self selectSessionIdentifier:selectedSessionId_];
-  if ([self rowForSessionIdentifier:selectedSessionId_] < 0) [self notifySelectedSession];
+  if (pendingSelectionNotification_ || [self rowForSessionIdentifier:selectedSessionId_] < 0) {
+    pendingSelectionNotification_ = NO; [self notifySelectedSession];
+  }
   [self updateToolbarSegments];
 }
 
@@ -696,6 +710,7 @@ static void StrappyDrawTintedImage(NSImage *image,
     [selectedSessionId_ release];
     selectedSessionId_ = [sessionIdentifier retain];
   }
+  if (select) pendingSelectionNotification_ = YES;
   [self reloadData];
 }
 
@@ -965,7 +980,6 @@ static void StrappyDrawTintedImage(NSImage *image,
   if (![result succeeded] || ![identifier isKindOfClass:[NSNumber class]]) return;
 
   [self reloadSessionIdentifier:identifier select:YES];
-  [self notifySelectedSession];
 }
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView
