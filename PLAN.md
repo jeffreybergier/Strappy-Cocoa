@@ -353,7 +353,7 @@ not implied complete by implementation or build success.
 
 For implementation changes, run the required clean iOS/macOS builds for all
 repository architectures and capture the full output, resolving warnings.
-Run `make -C source/linux clean test` for shared C/database/runtime changes and
+Run `make -C source/daemon/tests clean test` for shared C/database/runtime changes and
 add meaningful offline IPC/recovery tests. Keep generated logs out of commits.
 
 Device tests must cover UI termination, daemon termination during a provider

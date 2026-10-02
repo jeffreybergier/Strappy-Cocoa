@@ -121,7 +121,7 @@ flowchart TB
   than full catalog arrays, with a final refresh even after a partial failure.
   The offline `catalog_harness` checks 20,000 rows, bounded page-query work,
   filtering, sorting, identity lookup, and snapshot isolation. Run
-  `make -C source/linux catalog-foundation-test` with GNUstep installed to check
+  `make -C source/daemon/tests catalog-foundation-test` with GNUstep installed to check
   the actual Objective-C cache, Unicode search, lazy sections, and notifications.
 - Model preferences use provider-owned rows directly, with the same 32-row
   paging and 128-row cache. SQLite retains temporary search/sort keys for a
@@ -132,9 +132,9 @@ flowchart TB
   pickers retain their existing allowed-model APIs. `model_list_harness` checks
   21,000 models against the eager loader, all column sorts, default protection,
   account visibility, snapshot isolation, and bounded query work. The optional
-  `make -C source/linux model-rows-test` checks Unicode search, cache eviction,
+  `make -C source/daemon/tests model-rows-test` checks Unicode search, cache eviction,
   metadata-only access, and deferred read errors using GNUstep.
-- `make -C source/linux session-sections-test` checks session date grouping,
+- `make -C source/daemon/tests session-sections-test` checks session date grouping,
   calendar boundaries, daylight-saving transitions, and the Tiger calendar
   fallback. This optional Foundation harness requires `libgnustep-base-dev`
   and an Objective-C compiler on Linux.
@@ -328,7 +328,7 @@ docker compose run --rm make clean test
 | [`source/shared`](https://github.com/jeffreybergier/Strappy-Cocoa/tree/main/source/shared) | C core, tools, storage, prompts |
 | [`source/iOS`](https://github.com/jeffreybergier/Strappy-Cocoa/tree/main/source/iOS) | UIKit app and `.deb` packaging |
 | [`source/macOS`](https://github.com/jeffreybergier/Strappy-Cocoa/tree/main/source/macOS) | AppKit app and quad-fat packaging |
-| [`source/linux`](https://github.com/jeffreybergier/Strappy-Cocoa/tree/main/source/linux) | Linux test harnesses |
+| [`source/daemon/tests`](https://github.com/jeffreybergier/Strappy-Cocoa/tree/main/source/daemon/tests) | Linux test harnesses |
 
 Good starting points:
 

@@ -598,6 +598,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
               object:endpointField_];
   }
   if (tokenField_ != nil) {
+    [[NSNotificationCenter defaultCenter] removeObserver:self
+      name:NSControlTextDidChangeNotification object:tokenField_];
     [[NSNotificationCenter defaultCenter]
       removeObserver:self
                 name:NSControlTextDidBeginEditingNotification
@@ -727,7 +729,6 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   NSDictionary *account;
   NSString *provider;
   NSString *providerName;
-  NSString *token;
   NSRect bounds;
   CGFloat width;
   CGFloat top;
@@ -787,12 +788,9 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     tokenField_ = [[[NSSecureTextField alloc] initWithFrame:NSMakeRect(
       kStrappyAccountsInset, top, width, kStrappyAccountsControlHeight)]
       autorelease];
-    token = nil;
-    token = [StrappySession bearerTokenForProviderAccountIdentifier:
-      selectedAccountIdentifier_ error:nil];
-    [tokenField_ setStringValue:(token != nil) ? token : @""];
-    [[tokenField_ cell] setPlaceholderString:
-      NSLocalizedString(@"Paste API key", nil)];
+    [tokenField_ setStringValue:@""];
+    tokenEdited_ = NO;
+    [[tokenField_ cell] setPlaceholderString:NSLocalizedString(@"Leave unchanged to keep saved key",nil)];
     [[NSNotificationCenter defaultCenter]
       addObserver:self
          selector:@selector(controlTextDidBeginEditing:)
@@ -872,10 +870,9 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     tokenField_ = [[[NSSecureTextField alloc] initWithFrame:NSMakeRect(
       kStrappyAccountsInset, top, width, kStrappyAccountsControlHeight)]
       autorelease];
-    token = nil;
-    token = [StrappySession bearerTokenForProviderAccountIdentifier:
-      selectedAccountIdentifier_ error:nil];
-    [tokenField_ setStringValue:(token != nil) ? token : @""];
+    [tokenField_ setStringValue:@""];
+    tokenEdited_ = NO;
+    [[tokenField_ cell] setPlaceholderString:NSLocalizedString(@"Leave unchanged to keep saved key",nil)];
     [tokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     [rightPaneView_ addSubview:tokenField_];
     [[NSNotificationCenter defaultCenter]
@@ -1002,7 +999,14 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   [deleteButton_ setAutoresizingMask:NSViewMaxXMargin | NSViewMaxYMargin];
   [deleteButton_ setEnabled:![StrappySession hasInFlightSessions]];
   [rightPaneView_ addSubview:deleteButton_];
+  if (tokenField_) [[NSNotificationCenter defaultCenter] addObserver:self
+    selector:@selector(controlTextDidChange:) name:NSControlTextDidChangeNotification object:tokenField_];
   [self configureKeyViewLoopForProvider:provider];
+}
+
+- (void)controlTextDidChange:(NSNotification *)notification
+{
+  if ([notification object] == tokenField_) tokenEdited_ = YES;
 }
 
 - (void)controlTextDidBeginEditing:(NSNotification *)notification
@@ -1097,7 +1101,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
               title:NSLocalizedString(@"Account Name Is Required", nil)];
     return;
   }
-  if ([provider isEqualToString:@"openrouter"] && ([token length] == 0U)) {
+  if ([provider isEqualToString:@"openrouter"] && ([token length] == 0U) &&
+      (tokenEdited_ || ![[account objectForKey:@"has_credential"] boolValue])) {
     [self showError:nil
               title:NSLocalizedString(@"API Key Is Required", nil)];
     return;
@@ -1115,7 +1120,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   [maxOutputTokensButton_ setEnabled:NO];
   [saveButton_ setEnabled:NO];
   [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save account",nil) receiver:self completion:@selector(accountSaved:) context:selectedAccountIdentifier_] updateProviderAccountIdentifier:selectedAccountIdentifier_
-    displayName:name responsesEndpoint:endpoint maxOutputTokens:maxOutputTokens bearerToken:token error:NULL];
+    displayName:name responsesEndpoint:endpoint maxOutputTokens:maxOutputTokens bearerToken:tokenEdited_ ? token : nil error:NULL];
 }
 
 - (void)accountSaved:(StrappyAsyncResult *)result

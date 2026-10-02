@@ -4,13 +4,9 @@
 #import "FileScanner.h"
 #import "StrappySession.h"
 
-#import "StrappyKeychain.h"
 #import "strappy_core.h"
-#import "strappy_model_catalog.h"
-#import "strappy_openai_oauth.h"
 #import "strappy_prompt.h"
 #import "strappy_provider.h"
-#import "strappy_responses.h"
 #import "strappy_session.h"
 #import "strappy_study.h"
 #import "XPFoundation.h"
@@ -26,23 +22,7 @@
   sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
 @end
 
-typedef struct StrappyChatGPTAuthorizationCancellationContext {
-  id<StrappyChatGPTAuthorizationObserver> observer;
-  id context;
-} StrappyChatGPTAuthorizationCancellationContext;
 
-static int StrappyChatGPTAuthorizationShouldCancel(void *userData)
-{
-  StrappyChatGPTAuthorizationCancellationContext *context;
-
-  context = (StrappyChatGPTAuthorizationCancellationContext *)userData;
-  if ((context == NULL) || (context->observer == nil)) {
-    return 1;
-  }
-  return [context->observer
-    strappyChatGPTAuthorizationShouldCancelWithContext:context->context] ?
-    1 : 0;
-}
 
 static NSString *StrappyStageWebViewFonts(void)
 {
@@ -1115,7 +1095,7 @@ static void StrappyStoreChanged(unsigned int topics)
   [pool release];
 }
 
-+ (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath
++ (void)bootstrapProcess
 {
   char *strappyError;
   NSString *fontsPath;
@@ -1134,10 +1114,6 @@ static void StrappyStoreChanged(unsigned int topics)
   }
 
 
-  if (![caCertPath isKindOfClass:[NSString class]] || ([caCertPath length] == 0U)) {
-    [NSException raise:NSInvalidArgumentException
-                format:@"[StrappySession bootstrapProcessWithCACertPath:] caCertPath is required"];
-  }
 
   /* WKWebView may only read files below its read-access URL. Keep the web
    * fonts beside the session HTML on every platform. Legacy WebViews can read
@@ -1149,14 +1125,8 @@ static void StrappyStoreChanged(unsigned int topics)
   }
 
   strappyError = NULL;
-  ok = strappy_session_configure_process([caCertPath fileSystemRepresentation],
-                                         [fontsPath fileSystemRepresentation],
+  ok = strappy_session_configure_presentation([fontsPath fileSystemRepresentation],
                                          &strappyError);
-  if (ok) {
-    ok = strappy_openai_oauth_set_cainfo(
-      [caCertPath fileSystemRepresentation],
-      &strappyError);
-  }
   if (!ok) {
     NSString *message = nil;
     if (strappyError != NULL) {
@@ -1823,88 +1793,57 @@ static void StrappyStoreChanged(unsigned int topics)
 }
 
 + (NSString *)performChatGPTDeviceAuthorizationForProviderAccountIdentifier:
-                (NSString *)providerAccountIdentifier
+                (NSString *)identifier
                 observer:(id<StrappyChatGPTAuthorizationObserver>)observer
                 context:(id)operationContext
                 error:(NSError **)error
 {
-  StrappyChatGPTAuthorizationCancellationContext cancellationContext;
-  strappy_openai_oauth_configuration configuration;
-  strappy_openai_oauth_device device;
-  strappy_openai_oauth_credentials credentials;
-  NSString *verificationURL;
-  NSString *userCode;
-  NSString *accessToken;
-  NSString *refreshToken;
-  NSString *accountIdentifier;
-  char *strappyError;
-  int ok;
-
-  if (([providerAccountIdentifier length] == 0U) || (observer == nil)) {
-    if (error != nil) {
-      *error = [self errorFromCString:
-        "ChatGPT authorization inputs are incomplete."];
+  char requestKey[65];
+  if (!strappy_store_client_request_key(requestKey)) return nil;
+  NSString *key = [NSString stringWithUTF8String:requestKey];
+  if (error) *error = nil;
+  NSString *action = @"auth_start";
+  BOOL displayedCode = NO;
+  if (![identifier length] || observer == nil || key == nil) return nil;
+  for (;;) {
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    NSString *reply;
+    NSString *identity = nil;
+    cJSON *snapshot;
+    const cJSON *state, *url, *code, *account;
+    BOOL cancelled = [observer strappyChatGPTAuthorizationShouldCancelWithContext:operationContext];
+    reply = StrappyServiceCommand(STRAPPY_IPC_AUTH,
+      [NSDictionary dictionaryWithObjectsAndKeys:cancelled ? @"auth_cancel" : action,@"action",
+        identifier,@"id",key,@"key",nil],error);
+    snapshot = reply ? cJSON_Parse([reply UTF8String]) : NULL;
+    state = cJSON_GetObjectItemCaseSensitive(snapshot,"state");
+    url = cJSON_GetObjectItemCaseSensitive(snapshot,"url");
+    code = cJSON_GetObjectItemCaseSensitive(snapshot,"code");
+    account = cJSON_GetObjectItemCaseSensitive(snapshot,"identity");
+    if (!cancelled && cJSON_IsString(state) && !strcmp(state->valuestring,"awaiting_user") &&
+        !displayedCode && cJSON_IsString(url) && cJSON_IsString(code)) {
+      [observer strappyChatGPTAuthorizationDidReceiveVerificationURL:
+          [NSString stringWithUTF8String:url->valuestring]
+        userCode:[NSString stringWithUTF8String:code->valuestring] context:operationContext];
+      displayedCode = YES;
     }
-    return nil;
+    if (!cancelled && cJSON_IsString(state) && !strcmp(state->valuestring,"signed_in") && cJSON_IsString(account))
+      identity = [[NSString alloc] initWithUTF8String:account->valuestring];
+    BOOL finished = cancelled || !cJSON_IsString(state) || identity != nil ||
+      !strcmp(state->valuestring,"failed") || !strcmp(state->valuestring,"cancelled");
+    cJSON_Delete(snapshot);
+    if (finished && identity == nil && !cancelled)
+      (void)StrappyServiceCommand(STRAPPY_IPC_AUTH,[NSDictionary dictionaryWithObjectsAndKeys:
+        @"auth_cancel",@"action",identifier,@"id",key,@"key",nil],NULL);
+    if (finished && !identity && error != NULL && *error == nil)
+      *error = [self errorFromCString:cancelled ? "ChatGPT sign-in cancelled." : "ChatGPT sign-in failed."];
+    NSError *retainedError = error ? [*error retain] : nil;
+    [pool drain];
+    if (error) *error = [retainedError autorelease];
+    if (finished) return [identity autorelease];
+    action = @"auth_status";
+    [NSThread sleepForTimeInterval:0.25];
   }
-  cancellationContext.observer = observer;
-  cancellationContext.context = operationContext;
-  strappy_openai_oauth_default_configuration(&configuration);
-  strappy_openai_oauth_device_init(&device);
-  strappy_openai_oauth_credentials_init(&credentials);
-  strappyError = NULL;
-  ok = strappy_openai_oauth_start_device_authorization(
-    &configuration, &device, StrappyChatGPTAuthorizationShouldCancel,
-    &cancellationContext, &strappyError);
-  if (ok) {
-    verificationURL = [NSString stringWithUTF8String:
-      configuration.verification_url];
-    userCode = [NSString stringWithUTF8String:device.user_code];
-    if ((verificationURL == nil) || (userCode == nil)) {
-      ok = 0;
-      strappy_set_error(&strappyError,
-                        "ChatGPT authorization response is invalid.");
-    } else {
-      [observer
-        strappyChatGPTAuthorizationDidReceiveVerificationURL:verificationURL
-                                                     userCode:userCode
-                                                      context:operationContext];
-    }
-  }
-  if (ok && !StrappyChatGPTAuthorizationShouldCancel(&cancellationContext)) {
-    ok = strappy_openai_oauth_complete_device_authorization(
-      &configuration, &device, &credentials,
-      StrappyChatGPTAuthorizationShouldCancel, &cancellationContext,
-      &strappyError);
-  } else {
-    ok = 0;
-  }
-  accountIdentifier = nil;
-  if (ok) {
-    accessToken = [NSString stringWithUTF8String:credentials.access_token];
-    refreshToken = [NSString stringWithUTF8String:credentials.refresh_token];
-    accountIdentifier = [NSString stringWithUTF8String:credentials.account_id];
-    if (StrappyChatGPTAuthorizationShouldCancel(&cancellationContext) ||
-        StrappyServiceCommand(STRAPPY_IPC_MUTATE,
-          [NSDictionary dictionaryWithObjectsAndKeys:@"save_oauth",@"action",
-            StrappyText(providerAccountIdentifier),@"id",StrappyText(accessToken),@"access",
-            StrappyText(refreshToken),@"refresh",StrappyText(accountIdentifier),@"identity",
-            StrappyNumber(credentials.expires_at_milliseconds),@"expiry",nil],error) == nil)
-      accountIdentifier = nil;
-    if (accountIdentifier == nil) {
-      ok = 0;
-      strappy_set_error(&strappyError,
-                        "The Keychain refused the ChatGPT credential write.");
-    }
-  }
-  if (!ok && (error != nil)) {
-    *error = [self errorFromCString:(strappyError != NULL) ? strappyError :
-      "ChatGPT sign-in failed."];
-  }
-  strappy_free_string(strappyError);
-  strappy_openai_oauth_credentials_destroy(&credentials);
-  strappy_openai_oauth_device_destroy(&device);
-  return accountIdentifier;
 }
 
 + (NSString *)refreshChatGPTCredentialsForProviderAccountIdentifier:
@@ -2135,24 +2074,8 @@ static void StrappyStoreChanged(unsigned int topics)
         (definition->credential_kind ==
           STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER);
       if ((definition != NULL) && !hasCredential) {
-        StrappyKeychain *keychain;
-        NSObject *credentialLock;
-
-        keychain = [StrappyKeychain sharedKeychain];
-        credentialLock = [keychain
-          credentialLockForProviderIdentifier:providerIdentifier
-          providerAccountIdentifier:accountIdentifier];
-        @synchronized(credentialLock) {
-          if ([providerIdentifier isEqualToString:@"openrouter"]) {
-            hasCredential = [keychain
-              hasBearerTokenForProviderIdentifier:providerIdentifier
-              providerAccountIdentifier:accountIdentifier];
-          } else {
-            hasCredential = [keychain
-              hasChatGPTCredentialsForProviderAccountIdentifier:
-                accountIdentifier];
-          }
-        }
+        NSDictionary *status = [self credentialStatusForProviderAccountIdentifier:accountIdentifier error:NULL];
+        hasCredential = [[status objectForKey:@"present"] boolValue];
       }
       missingFields = strappy_provider_account_missing_required_fields(
         definition,
@@ -2168,6 +2091,7 @@ static void StrappyStoreChanged(unsigned int topics)
         available = NO;
       }
       availableAccount = [[account mutableCopy] autorelease];
+      [availableAccount setObject:[NSNumber numberWithBool:hasCredential] forKey:@"has_credential"];
       [availableAccount setObject:[NSNumber numberWithBool:available]
                            forKey:@"available"];
       [availableAccount setObject:[NSNumber numberWithUnsignedInt:missingFields]
@@ -2262,52 +2186,24 @@ static void StrappyStoreChanged(unsigned int topics)
     nil],error) != nil;
 }
 
-+ (NSString *)bearerTokenForProviderAccountIdentifier:
-                (NSString *)providerAccountIdentifier
-                                                  error:(NSError **)error
++ (NSDictionary *)credentialStatusForProviderAccountIdentifier:(NSString *)identifier
+                                                         error:(NSError **)error
 {
-  NSString *databasePath;
-  strappy_provider_account_record record;
-  NSString *providerIdentifier;
-  NSString *token;
-  StrappyKeychain *keychain;
-  NSObject *credentialLock;
-  char *strappyError;
-
-  if ([providerAccountIdentifier length] == 0U) {
-    if (error != nil) {
-      *error = [self errorFromCString:
-        "Provider account identifier is missing."];
-    }
-    return nil;
-  }
-  databasePath = [self sessionsDatabasePath];
-  strappy_provider_account_record_init(&record);
-  strappyError = NULL;
-  if (!strappy_db_get_provider_account([databasePath fileSystemRepresentation],
-                                       [providerAccountIdentifier UTF8String],
-                                       &record, &strappyError)) {
-    if (error != nil) {
-      *error = [self errorFromCString:strappyError];
-    }
-    strappy_provider_account_record_destroy(&record);
-    strappy_free_string(strappyError);
-    return nil;
-  }
-  providerIdentifier = [NSString stringWithUTF8String:record.provider_id];
-  strappy_provider_account_record_destroy(&record);
-  strappy_free_string(strappyError);
-  keychain = [StrappyKeychain sharedKeychain];
-  credentialLock = [keychain
-    credentialLockForProviderIdentifier:providerIdentifier
-    providerAccountIdentifier:providerAccountIdentifier];
-  token = nil;
-  @synchronized(credentialLock) {
-    (void)[keychain loadBearerToken:&token
-      forProviderIdentifier:providerIdentifier
-      providerAccountIdentifier:providerAccountIdentifier];
-  }
-  return token;
+  NSString *reply = StrappyServiceCommand(STRAPPY_IPC_AUTH,
+    [NSDictionary dictionaryWithObjectsAndKeys:@"credential_status",@"action",
+      StrappyText(identifier),@"id",nil],error);
+  cJSON *snapshot = reply ? cJSON_Parse([reply UTF8String]) : NULL;
+  const cJSON *present = cJSON_GetObjectItemCaseSensitive(snapshot,"present");
+  const cJSON *identity = cJSON_GetObjectItemCaseSensitive(snapshot,"identity");
+  const cJSON *refresh = cJSON_GetObjectItemCaseSensitive(snapshot,"needs_refresh");
+  NSDictionary *result = nil;
+  if (cJSON_IsBool(present) && cJSON_IsString(identity) && cJSON_IsBool(refresh))
+    result = [NSDictionary dictionaryWithObjectsAndKeys:
+      [NSNumber numberWithBool:cJSON_IsTrue(present) ? YES : NO],@"present",
+      [NSString stringWithUTF8String:identity->valuestring],@"identity",
+      [NSNumber numberWithBool:cJSON_IsTrue(refresh) ? YES : NO],@"needs_refresh",nil];
+  cJSON_Delete(snapshot);
+  return result;
 }
 
 + (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
@@ -2317,6 +2213,9 @@ static void StrappyStoreChanged(unsigned int topics)
                             bearerToken:(NSString *)bearerToken
                                   error:(NSError **)error
 {
+  if (bearerToken == nil) return [self updateProviderAccountIdentifier:providerAccountIdentifier
+    displayName:displayName responsesEndpoint:responsesEndpoint maxOutputTokens:maxOutputTokens error:error];
+
   return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
     @"update_account",@"action",
     StrappyText(providerAccountIdentifier),@"id",

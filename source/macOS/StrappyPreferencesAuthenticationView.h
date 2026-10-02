@@ -19,6 +19,7 @@
   NSTextField *accountNameField_;
   NSTextField *endpointField_;
   NSSecureTextField *tokenField_;
+  BOOL tokenEdited_;
   NSButton *maxOutputTokensButton_;
   NSTextField *maxOutputTokensField_;
   NSButton *saveButton_;

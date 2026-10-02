@@ -1,6 +1,6 @@
 #include "strappy_mutations.h"
-#include "../shared/strappy_session.h"
-#include "../shared/strappy_study.h"
+#include "strappy_session_execution.h"
+#include "strappy_study_execution.h"
 #include "../shared/strappy_core.h"
 #include <stdlib.h>
 #include <string.h>
@@ -117,7 +117,7 @@ int strappy_mutation(const char *db, const char *resources, const cJSON *c, char
     } else if (!strcmp(action,"create_account")) {
         ok = strappy_db_create_provider_account(db,id,strappy_command_text(c,"name"),NULL,result,&error);
     } else if (!strcmp(action,"update_account") || !strcmp(action,"archive_account") ||
-               !strcmp(action,"delete_oauth") || !strcmp(action,"save_oauth") || !strcmp(action,"refresh_oauth")) {
+               !strcmp(action,"delete_oauth") || !strcmp(action,"refresh_oauth")) {
         ok = strappy_service_account_command(db,c,result);
     }
     /* Return only stable status codes; provider and Keychain diagnostics may contain secrets. */

@@ -1,6 +1,7 @@
 # Recovery and lifecycle
 
-The existing IPC v4 / reader ABI 2 and SQLite `user_version=1` are unchanged.
+IPC is now v5 for daemon-owned authorization; reader ABI 2 and SQLite
+`user_version=1` are unchanged.
 No schema migration is added.
 
 ## Restart and external effects

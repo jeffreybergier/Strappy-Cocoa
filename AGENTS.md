@@ -14,12 +14,13 @@ not leaking memory or dereferencing null pointers. Capture build output in the
 terminal transcript or a local working log, but do not commit generated build or
 analysis logs unless the user explicitly asks for them.
 
-Linux-only shared-core harnesses live under `source/linux`. They are fast
+Linux-only shared-core harnesses live under `source/daemon/tests`.
+`source/linux/Makefile` forwards legacy invocations to that directory. They are fast
 developer smoke tests for portable C code and do not replace the required
 Altivec iOS/macOS clean builds. The current harness targets are
 `database_query_harness`, `scanner_profile_harness`, `bash_harness`,
 `webview_harness`, `responses_harness` and `prompt_generator_harness`, run through
-`make -C source/linux clean test`.
+`make -C source/daemon/tests clean test`.
 The default test suite is unconditionally offline even when the ignored,
 owner-only `.env.chatgpt.json` OAuth credential cache exists. Run the explicit
 `live-test` or `openai-web-search-live-test` target with
@@ -34,10 +35,10 @@ explicit live-test opt-in and secret-free output requirements.
 The sibling `openrouter-live-test` target uses the same bounded credentials and
 model but sends the app's OpenRouter-specific request profile. It also makes
 exactly one request and requires the explicit live-test opt-in.
-Use `make -C source/linux prompts` to write all assistant-set prompts with web
+Use `make -C source/daemon/tests prompts` to write all assistant-set prompts with web
 search set to none, auto, native, Exa, and Parallel under
-`source/linux/build-linux/system-prompts`, or use
-`make -C source/linux review-prompts` to print all twenty variants.
+`source/daemon/tests/build-linux/system-prompts`, or use
+`make -C source/daemon/tests review-prompts` to print all twenty variants.
 `database_query_harness` also covers
 OpenRouter model catalog persistence, catalog search, default model selection,
 allowed-model whitelisting, per-session model selection, and stale
@@ -110,7 +111,8 @@ House style for Strappy source:
     allowlists, first-prompt preflight assistant text, preflight calls and
     argument values, answer-quality checks, and availability. Keep tool schemas
     in `GuidanceTools.json` in sync with the tool-name constants in
-    `strappy_tools.h` and the executor in `strappy_tools.c`; do not duplicate
+    `source/shared/strappy_tool_metadata.h` and the daemon executor in
+    `source/daemon/strappy_tools.c`; do not duplicate
     prompt or tool guidance in Objective-C UI code. At the model-facing
     boundary, `strappy_tools.c` owns tool JSON
     argument validation, dispatch, and output serialization. Specialized C
@@ -271,13 +273,23 @@ House style for Strappy source:
 20. iOS Objective-C code must use bracketed accessor/message syntax instead of
     dot syntax, even when dot syntax would be accepted by the compiler.
 21. When changing shared C behavior, especially database, tool, prompt, client,
-    or JSON parsing code, run `make -C source/linux clean test` where the host
+    or JSON parsing code, run `make -C source/daemon/tests clean test` where the host
     Linux environment has the required dependencies. Keep the harnesses updated
     as new shared behavior is added or existing behavior changes, so regressions
     can be caught without waiting for full Apple-target builds.
 22. SQLite `PRAGMA user_version` is intentionally pinned at `1`. Do not
     increase it or add migration steps without explicit user permission; this
     database has not shipped yet.
+
+23. `source/daemon` owns provider HTTP/SSE, Responses execution, tool and
+    filesystem execution, credential configuration, OAuth device authorization,
+    refresh, and Keychain access. The iOS/macOS app source lists must not compile
+    these implementations or include their private headers. Shared session/run/
+    study readers, tool metadata, prompt previews, rendering, IPC, and common
+    types remain in `source/shared`. The platform authentication classes only
+    present daemon state and send commands. Never return stored access, refresh,
+    or bearer tokens to the UI. `make -C source/daemon/tests app-boundary-test`
+    checks app source lists and transitive local headers.
 
 The iOS App is a bit special because it's not sandboxed. It must be installed
 via .deb file, not .ipa file so that it can scan the whole filesystem for

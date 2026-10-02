@@ -1,11 +1,11 @@
 /* Daemon-only Objective-C/C session credential boundary. */
-#import "../shared/StrappyKeychain.h"
+#import "StrappyKeychain.h"
 #import "../shared/XPFoundation.h"
-#import "../shared/XPKeychain.h"
+#import "XPKeychain.h"
 #include "../shared/strappy_core.h"
 #include "../shared/strappy_provider.h"
-#include "../shared/strappy_openai_oauth.h"
-#include "../shared/strappy_responses.h"
+#include "strappy_openai_oauth.h"
+#include "strappy_responses.h"
 #include "strappy_execution.h"
 #include <string.h>
 #include <stdio.h>
@@ -231,8 +231,8 @@ int strappy_service_credentials_probe(const char *database)
 }
 
 #include "strappy_mutations.h"
-#include "../shared/strappy_model_catalog.h"
-#include "../shared/strappy_file_scanner.h"
+#include "strappy_model_catalog.h"
+#include "strappy_file_scanner.h"
 #include <stdlib.h>
 
 static NSString *StrappyCommandString(const cJSON *c, const char *key)
@@ -268,7 +268,7 @@ int strappy_service_refresh_catalog(const char *db, const char *account)
     strappy_secure_free_string(token); strappy_secure_free_string(identity); free(error);
     strappy_provider_account_record_destroy(&record); return ok;
 }
-int strappy_service_account_command(const char *db, const cJSON *c, char **result)
+static int StrappyServiceAccountCommand(const char *db, const cJSON *c, char **result)
 {
     const char *action = strappy_command_text(c,"action"), *account = strappy_command_text(c,"id");
     strappy_provider_account_record record;
@@ -280,7 +280,22 @@ int strappy_service_account_command(const char *db, const cJSON *c, char **resul
     strappy_provider_account_record_init(&record);
     if (!strappy_db_get_provider_account(db,account,&record,&error) || !strcmp(record.lifecycle_state,STRAPPY_PROVIDER_ACCOUNT_ARCHIVED)) goto done;
     provider = [NSString stringWithUTF8String:record.provider_id];
-    if (!strcmp(action,"refresh_oauth")) {
+    if (!strcmp(action,"credential_status")) {
+        NSString *identity = nil;
+        long long expiry = 0, now = strappy_unix_milliseconds();
+        BOOL present;
+        cJSON *snapshot = cJSON_CreateObject();
+        if ([provider isEqualToString:@"openai_chatgpt"])
+            present = [keychain loadChatGPTAccessToken:NULL refreshToken:NULL accountIdentifier:&identity
+                expiresAtMilliseconds:&expiry providerAccountIdentifier:identifier];
+        else present = [keychain hasBearerTokenForProviderIdentifier:provider providerAccountIdentifier:identifier];
+        ok = snapshot && cJSON_AddBoolToObject(snapshot,"present",present ? 1 : 0) &&
+            cJSON_AddStringToObject(snapshot,"identity",identity ? [identity UTF8String] : "") &&
+            cJSON_AddBoolToObject(snapshot,"needs_refresh",present && [provider isEqualToString:@"openai_chatgpt"] &&
+                (now <= 0 || expiry - now <= 5LL * 60LL * 1000LL));
+        if (ok) { *result = cJSON_PrintUnformatted(snapshot); ok = *result != NULL; }
+        cJSON_Delete(snapshot);
+    } else if (!strcmp(action,"refresh_oauth")) {
         char *token = NULL, *identity = NULL;
         NSString *current = nil;
         if (![provider isEqualToString:@"openai_chatgpt"] ||
@@ -337,4 +352,21 @@ int strappy_service_account_command(const char *db, const cJSON *c, char **resul
     }
 done:
     free(error); strappy_provider_account_record_destroy(&record); return ok;
+}
+
+int strappy_service_account_command(const char *db, const cJSON *command, char **result)
+{
+    NSString *identifier = StrappyCommandString(command,"id");
+    /* All credential reads/writes/refreshes for an account share one lock. */
+    strappy_provider_account_record record;
+    int ok = 0;
+    strappy_provider_account_record_init(&record);
+    if (strappy_db_get_provider_account(db,[identifier UTF8String],&record,NULL)) {
+        NSObject *lock = [[StrappyKeychain sharedKeychain]
+            credentialLockForProviderIdentifier:[NSString stringWithUTF8String:record.provider_id]
+            providerAccountIdentifier:identifier];
+        @synchronized(lock) { ok = StrappyServiceAccountCommand(db,command,result); }
+    }
+    strappy_provider_account_record_destroy(&record);
+    return ok;
 }

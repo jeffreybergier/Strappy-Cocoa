@@ -148,11 +148,7 @@ static BOOL StrappyAsyncErrorVisible;
   [StrappyAppearance applyApplicationTintToWindow:[self window]];
 
   {
-    NSString *cacert;
-
-    cacert = [AltivecCore certPath];
-    NSParameterAssert(cacert);
-    [StrappySession bootstrapProcessWithCACertPath:cacert];
+    [StrappySession bootstrapProcess];
   }
 
   [AIFontAwesome registerBundledFonts];

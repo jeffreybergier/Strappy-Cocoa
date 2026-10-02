@@ -1,7 +1,7 @@
 #ifndef STRAPPY_DB_H
 #define STRAPPY_DB_H
 
-#include "strappy_config.h"
+#include "strappy_options.h"
 
 #include <stddef.h>
 

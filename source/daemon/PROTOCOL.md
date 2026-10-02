@@ -1,4 +1,4 @@
-# Strappy local service protocol v4
+# Strappy local service protocol v5
 
 The daemon runs the C Responses runtime, scans, study, catalog refresh and
 shared mutations. GUI clients read history, run state and catalogs from SQLite.
@@ -35,7 +35,7 @@ A frame is a 24-byte header followed by exactly `length` payload bytes:
 | Offset | Width | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `STPY` |
-| 4 | 2 | Protocol version, currently 4 |
+| 4 | 2 | Protocol version, currently 5 |
 | 6 | 2 | Kind: request 1, reply 2, event 3 |
 | 8 | 4 | Operation |
 | 12 | 4 | Request ID; zero only for unsolicited events |
@@ -215,7 +215,7 @@ app-wide asynchronous error delivery.
 
 ## Validation
 
-`make -C source/linux daemon-test` exercises the actual daemon plus a worker
+`make -C source/daemon/tests daemon-test` exercises the actual daemon plus a worker
 fixture. The complete offline suite includes it. Native, provider-free smoke
 checks use the same portable C client:
 
@@ -226,7 +226,7 @@ strappyd --ipc-probe /absolute/private/directory/service.sock
 See `VALIDATION.md` for observed platforms and limitations. The probe does not
 connect to providers or access application data.
 
-## Step 4 command payloads (IPC v4, reader ABI 2)
+## Step 4 command payloads (IPC v5, reader ABI 2)
 
 Operations 18–25 and 27 accept bounded UTF-8 JSON objects with string values only.
 JSON is transient wire serialization, never a database document. Integer fields
@@ -267,8 +267,39 @@ Operation 25 actions:
   `price_read`, `price_write`. `archive_model`: provider `id`, `wire`.
 - `delete_study`: assistant database `id`; `reset_study`: no other fields.
 - `include_context`: `session`, model request `id`, `value` (0/1).
-- `save_oauth`: account `id`, `access`, `refresh`, `identity`, `expiry` in Unix
-  milliseconds; `refresh_oauth`: `id`, expected `identity`; `delete_oauth`: `id`.
+- `refresh_oauth`: account `id`, expected `identity`; `delete_oauth`: `id`.
+  `save_oauth` is an internal service operation and is rejected over IPC.
 
 Only prompt submission is automatically retried by the client. A lost mutation
 acknowledgment requires reading committed state before an explicit retry.
+
+## Authentication (v5)
+
+Operation `auth` (30) accepts the same bounded, string-valued command objects.
+It uses a connection command worker independently of the metadata control lock.
+Version 5 requires a matching app/service pair; the store ABI and SQLite
+`user_version` are unchanged.
+
+- `credential_status`: account `id`. Returns an object with `present` and
+  `needs_refresh` booleans and an `identity` display string. It performs no
+  provider request and never returns a saved token.
+- `auth_start`: account `id` and 64-character lowercase hexadecimal `key`.
+  Validates an active ChatGPT account before starting a service-owned worker.
+  At most sixteen retained jobs exist, with one unfinished job per account.
+  A repeated retained key resolves to the same job; a different account using
+  that key conflicts. A new key for a busy account is refused.
+- `auth_status` / `auth_cancel`: the same account `id` and `key`. Replies contain
+  `state`, `url`, `code`, and `identity`. States are `requesting_code`,
+  `awaiting_user`, `signed_in`, `failed`, and `cancelled`. Only the public
+  verification URL/code and final display identity cross IPC. Device IDs and
+  access/refresh tokens remain in daemon memory/Keychain.
+
+Start returns before network authorization completes. The app's background
+presentation worker polls status every 250 ms while sign-in is open and sends
+cancel when dismissed. Transport failure attempts cancellation with the same
+key. Sign-out and account archival cancel jobs before removing credentials;
+credential commits serialize with cancellation so a cancelled job cannot save
+late credentials. Daemon shutdown cancels and joins authorization workers.
+Jobs are bounded, transient service state: terminal slots can be reused, restart
+forgets them, and no authorization is automatically replayed. Existing provider
+polling/HTTP deadlines bound work if the UI disappears without cancelling.

@@ -2,14 +2,11 @@
 #import "StrappyAsync.h"
 #import "StrappyAuthentication.h"
 
-#import "StrappyKeychain.h"
 #import "StrappySession.h"
 
 NSString * const StrappyAuthenticationDidChangeNotification =
   @"StrappyAuthenticationDidChangeNotification";
 
-static const long long kStrappyAuthenticationRefreshLeewayMilliseconds =
-  5LL * 60LL * 1000LL;
 static NSMutableDictionary *StrappyAuthenticationContexts = nil;
 
 @interface StrappyAuthentication ()
@@ -99,21 +96,15 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
 - (id)initWithProviderAccountIdentifier:(NSString *)providerAccountIdentifier
 {
   NSString *accountIdentifier;
-  StrappyKeychain *keychain;
   BOOL loaded;
 
   if ((self = [super init])) {
     providerAccountIdentifier_ = [providerAccountIdentifier copy];
     accountIdentifier = nil;
-    keychain = [StrappyKeychain sharedKeychain];
-    @synchronized(keychain) {
-      loaded = [keychain loadChatGPTAccessToken:NULL
-                                      refreshToken:NULL
-                                 accountIdentifier:&accountIdentifier
-                              expiresAtMilliseconds:NULL
-                         providerAccountIdentifier:
-                           providerAccountIdentifier];
-    }
+    NSDictionary *credential = [StrappySession credentialStatusForProviderAccountIdentifier:
+      providerAccountIdentifier error:NULL];
+    loaded = [[credential objectForKey:@"present"] boolValue];
+    accountIdentifier = [credential objectForKey:@"identity"];
     if (loaded) {
       state_ = StrappyAuthenticationStateSignedIn;
       accountIdentifier_ = [accountIdentifier copy];
@@ -186,25 +177,8 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
 
 - (BOOL)hasStoredCredentials
 {
-  StrappyKeychain *keychain;
-  BOOL stored;
-
-  keychain = [StrappyKeychain sharedKeychain];
-  {
-    NSString *providerAccountIdentifier;
-    NSObject *credentialLock;
-
-    providerAccountIdentifier = [self designatedProviderAccountIdentifier];
-    credentialLock = [keychain
-      credentialLockForProviderIdentifier:@"openai_chatgpt"
-      providerAccountIdentifier:providerAccountIdentifier];
-  @synchronized(credentialLock) {
-    stored = [keychain
-      hasChatGPTCredentialsForProviderAccountIdentifier:
-        providerAccountIdentifier];
-  }
-  }
-  return stored;
+  return [[[StrappySession credentialStatusForProviderAccountIdentifier:
+    [self designatedProviderAccountIdentifier] error:NULL] objectForKey:@"present"] boolValue];
 }
 
 - (void)postDidChangeNotification
@@ -368,9 +342,6 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
 - (BOOL)refreshChatGPTCredentialsIfNeeded
 {
   NSString *accountIdentifier;
-  StrappyKeychain *keychain;
-  long long expiresAtMilliseconds;
-  long long nowMilliseconds;
   NSUInteger generation;
   BOOL stateChanged;
   BOOL loaded;
@@ -380,18 +351,11 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
     return NO;
   }
   accountIdentifier = nil;
-  expiresAtMilliseconds = 0LL;
-  keychain = [StrappyKeychain sharedKeychain];
   providerAccountIdentifier = [self designatedProviderAccountIdentifier];
-  @synchronized([keychain
-    credentialLockForProviderIdentifier:@"openai_chatgpt"
-    providerAccountIdentifier:providerAccountIdentifier]) {
-    loaded = [keychain loadChatGPTAccessToken:NULL
-                                    refreshToken:NULL
-                               accountIdentifier:&accountIdentifier
-                            expiresAtMilliseconds:&expiresAtMilliseconds
-                       providerAccountIdentifier:providerAccountIdentifier];
-  }
+  NSDictionary *credential = [StrappySession credentialStatusForProviderAccountIdentifier:
+    providerAccountIdentifier error:NULL];
+  loaded = [[credential objectForKey:@"present"] boolValue];
+  accountIdentifier = [credential objectForKey:@"identity"];
   if (!loaded) {
     stateChanged = NO;
     @synchronized(self) {
@@ -411,10 +375,7 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
     return NO;
   }
 
-  nowMilliseconds = [StrappySession currentTimestampMilliseconds];
-  if ((nowMilliseconds > 0LL) &&
-      (expiresAtMilliseconds - nowMilliseconds >
-       kStrappyAuthenticationRefreshLeewayMilliseconds)) {
+  if (![[credential objectForKey:@"needs_refresh"] boolValue]) {
     stateChanged = NO;
     @synchronized(self) {
       if ((state_ != StrappyAuthenticationStateRequestingCode) &&

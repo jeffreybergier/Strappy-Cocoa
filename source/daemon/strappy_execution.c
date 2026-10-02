@@ -1,10 +1,11 @@
+#include "strappy_auth.h"
 #include "strappy_execution.h"
 #include "strappy_mutations.h"
-#include "../shared/strappy_file_scanner.h"
-#include "../shared/strappy_study.h"
+#include "strappy_file_scanner.h"
+#include "strappy_study_execution.h"
 #include "../shared/strappy_core.h"
-#include "../shared/strappy_session.h"
-#include "../shared/strappy_run.h"
+#include "strappy_session_execution.h"
+#include "strappy_run_execution.h"
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,7 @@ struct strappy_execution {
     pthread_mutex_t mutex;
     pthread_cond_t condition;
     pthread_t worker;
+    strappy_auth *auth;
     long long run, session;
     int stopping, cancel;
     unsigned int job, last_job, last_result;
@@ -261,6 +263,13 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
                 (request->operation == STRAPPY_IPC_APPROVE_MODEL && strcmp(strappy_command_text(command,"action"),"approve_model")) ||
                 (request->operation == STRAPPY_IPC_APPROVE_DATABASE && strcmp(strappy_command_text(command,"action"),"approve_database"))) goto mutation_done;
         } else if (request->length) goto mutation_done;
+        if (request->operation == STRAPPY_IPC_AUTH) {
+            reply->status = strappy_auth_command(e->auth,command,&result);
+            if (reply->status == STRAPPY_IPC_OK && result && strlen(result) <= STRAPPY_IPC_MAX_PAYLOAD) {
+                reply->length = (uint32_t)strlen(result); memcpy(reply->payload,result,reply->length);
+            }
+            goto mutation_done;
+        }
         pthread_mutex_lock(&e->mutex);
         if (e->stopping) reply->status = STRAPPY_IPC_NOT_READY;
         else if (request->operation == STRAPPY_IPC_WORK_STATUS) {
@@ -303,6 +312,8 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
             }
             /* Control mutations never reserve the prompt/maintenance worker. */
             pthread_mutex_unlock(&e->mutex);
+            if (!strcmp(action,"delete_oauth") || !strcmp(action,"archive_account"))
+                strappy_auth_cancel_account(e->auth,strappy_command_text(command,"id"));
             reply->status = strappy_mutation(e->db,e->resources,command,&result) ? STRAPPY_IPC_OK : STRAPPY_IPC_INVALID;
             pthread_mutex_lock(&e->mutex);
             if (reply->status == STRAPPY_IPC_OK) {
@@ -438,7 +449,7 @@ static void strappy_execution_command(const strappy_ipc_message *request,
 {
     strappy_execution *e = context;
     int control = request->operation != STRAPPY_IPC_WORK_STATUS &&
-        request->operation != STRAPPY_IPC_CANCEL_RUN && request->operation != STRAPPY_IPC_REFRESH_CREDENTIALS;
+        request->operation != STRAPPY_IPC_CANCEL_RUN && request->operation != STRAPPY_IPC_REFRESH_CREDENTIALS && request->operation != STRAPPY_IPC_AUTH;
     if (control) pthread_mutex_lock(&e->control);
     strappy_execution_dispatch(request,reply,context);
     if (control) pthread_mutex_unlock(&e->control);
@@ -449,6 +460,8 @@ strappy_execution *strappy_execution_open(strappy_ipc_server *server, const char
     if (!e) return NULL;
     e->db = strappy_string_duplicate(db); e->resources = strappy_string_duplicate(resources); e->server = server;
     if (!e->db || !e->resources || !strappy_run_reconcile(db)) goto fail;
+    e->auth = strappy_auth_open(db,server);
+    if (!e->auth) goto fail;
     if (pthread_mutex_init(&e->mutex, NULL) != 0) goto fail;
     if (pthread_cond_init(&e->condition, NULL) != 0) { pthread_mutex_destroy(&e->mutex); goto fail; }
     if (pthread_mutex_init(&e->control,NULL) != 0) {
@@ -465,11 +478,13 @@ strappy_execution *strappy_execution_open(strappy_ipc_server *server, const char
     strappy_ipc_server_handler(server, strappy_execution_command, e);
     return e;
 fail:
+    strappy_auth_close(e->auth);
     free(e->db); free(e->resources); free(e); return NULL;
 }
 void strappy_execution_stop(strappy_execution *e)
 {
     if (!e) return;
+    strappy_auth_stop(e->auth);
     pthread_mutex_lock(&e->mutex); e->stopping = 1;
     {
         strappy_execution *child;
@@ -484,6 +499,7 @@ void strappy_execution_close(strappy_execution *e)
 {
     if (!e) return;
     strappy_execution_stop(e); pthread_join(e->worker, NULL);
+    strappy_auth_close(e->auth);
     while (e->children) {
         strappy_execution *child = e->children;
         pthread_join(child->worker,NULL); e->children = child->next;

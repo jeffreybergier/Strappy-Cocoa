@@ -47,9 +47,9 @@ ALTIVECCOCOA_REQUIRED = 1
 SOURCE_DIRS = $(SHARED_DIR) $(SHARED_DIR)/XPFoundation
 vpath %.m $(SHARED_DIR)
 EXTRA_FLAGS = -DSTRAPPY_DB_UI=1 -I$(SHARED_DIR)
-EXTRA_SOURCES = strappy_run.c strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyAsync.m StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_config.c strappy_client.c strappy_sse.c strappy_identity.c strappy_openai_oauth.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_bundled_catalog.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_debug_capture.c strappy_responses.c strappy_webview.c
+EXTRA_SOURCES = strappy_run.c strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyAsync.m StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_study.c strappy_webview.c strappy_options.c strappy_tool_metadata.c
 PHONE_SOURCE_FLAGS = -fobjc-arc
-LIBS_IPHONE = -framework Security -framework QuartzCore -weak_framework WebKit
+LIBS_IPHONE = -framework QuartzCore -weak_framework WebKit
 PHONE_LDID_SIGN ?= 1
 PHONE_LDID_ENTITLEMENTS ?= Entitlements.plist
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
@@ -108,7 +108,7 @@ STRAPPY_DAEMON_INPUTS = ../daemon/strappyd.c daemon/Entitlements.plist daemon/co
 
 $(STRAPPY_DAEMON): ../daemon/strappyd.c daemon/Entitlements.plist $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
 	@mkdir -p "$(INT_DIR)"
-	@export PATH=$(BIN_DIR):$(PATH); $(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) -USTRAPPY_DB_UI -DSTRAPPY_DB_WRITER=1 $(ALTIVECCORE_DIR)/lib/libAltivecCore.a -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration -o $@
+	@export PATH=$(BIN_DIR):$(PATH); $(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) -I../daemon -USTRAPPY_DB_UI -DSTRAPPY_DB_WRITER=1 $(ALTIVECCORE_DIR)/lib/libAltivecCore.a -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration -o $@
 	@$(PHONE_LDID) -Sdaemon/Entitlements.plist $@
 
 $(PHONE_DEBS): $(APP_BUNDLE) $(STRAPPY_DAEMON) $(STRAPPY_DAEMON_INPUTS) Makefile

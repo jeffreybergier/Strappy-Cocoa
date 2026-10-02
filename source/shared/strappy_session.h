@@ -1,7 +1,7 @@
 #ifndef STRAPPY_SESSION_H
 #define STRAPPY_SESSION_H
 
-#include "strappy_client.h"
+#include "strappy_events.h"
 #include "strappy_assistant_sets.h"
 #include "strappy_db.h"
 #include "strappy_webview.h"
@@ -15,11 +15,8 @@ void strappy_session_free_string(char *value);
 typedef struct strappy_session_webview_render_context
   strappy_session_webview_render_context;
 
-int strappy_session_configure_process(const char *ca_cert_path,
-                                      const char *font_dir,
+int strappy_session_configure_presentation(const char *font_dir,
                                       char **error_out);
-int strappy_session_initialize_store(const char *db_path,
-                                     char **error_out);
 
 int strappy_session_list_models_matching(
   const char *db_path,
@@ -36,13 +33,6 @@ int strappy_session_list_allowed_models(const char *db_path,
 int strappy_session_get_default_model(const char *db_path,
                                       char **model_id_out,
                                       char **error_out);
-int strappy_session_set_default_model(const char *db_path,
-                                      const char *model_id,
-                                      char **error_out);
-int strappy_session_set_model_allowed(const char *db_path,
-                                      const char *model_id,
-                                      int allowed,
-                                      char **error_out);
 
 int strappy_session_list_openrouter_models_matching(
   const char *db_path,
@@ -56,24 +46,7 @@ int strappy_session_list_allowed_openrouter_models(
 int strappy_session_get_default_openrouter_model(const char *db_path,
                                                  char **model_id_out,
                                                  char **error_out);
-int strappy_session_set_default_openrouter_model(const char *db_path,
-                                                 const char *model_id,
-                                                 char **error_out);
-int strappy_session_set_openrouter_model_allowed(const char *db_path,
-                                                 const char *model_id,
-                                                 int allowed,
-                                                 char **error_out);
-int strappy_session_refresh_openrouter_user_models(
-  const char *api_endpoint,
-  const char *api_token,
-  const char *db_path,
-  char **error_out);
 
-int strappy_session_create_with_working_directory(
-  const char *db_path,
-  const char *working_directory,
-  long long *session_id_out,
-  char **error_out);
 int strappy_session_list_records(const char *db_path,
                                  strappy_session_record_list *list,
                                  char **error_out);
@@ -85,9 +58,6 @@ int strappy_session_load_list_record(const char *db_path,
                                      long long session_id,
                                      strappy_session_record *record,
                                      char **error_out);
-int strappy_session_delete(const char *db_path,
-                           long long session_id,
-                           char **error_out);
 int strappy_session_list_message_records(
   const char *db_path,
   long long session_id,
@@ -106,12 +76,6 @@ int strappy_session_load_message_record_by_key(
   const char *message_key,
   strappy_session_message_record *record,
   char **error_out);
-int strappy_session_update_model_request_include_in_context(
-  const char *db_path,
-  long long session_id,
-  long long model_request_id,
-  int include_in_context,
-  char **error_out);
 int strappy_session_load_options(
   const char *db_path,
   long long session_id,
@@ -122,68 +86,15 @@ int strappy_session_load_default_options(
   const char *fallback_working_directory,
   strappy_session_options *options,
   char **error_out);
-int strappy_session_validate_options_update(const char *resource_dir,
-  const strappy_session_options *options, strappy_session_option_mask changed_fields,
-  char **error_out);
 
-int strappy_session_update_options(
-  const char *db_path,
-  long long session_id,
-  const char *resource_dir,
-  const strappy_session_options *options,
-  strappy_session_option_mask changed_fields,
-  strappy_session_options *saved_options_out,
-  strappy_session_option_mask *actual_changed_fields_out,
-  char **error_out);
-int strappy_session_update_default_options(
-  const char *db_path,
-  const char *fallback_working_directory,
-  const char *resource_dir,
-  const strappy_session_options *options,
-  strappy_session_option_mask changed_fields,
-  strappy_session_options *saved_options_out,
-  strappy_session_option_mask *actual_changed_fields_out,
-  char **error_out);
 int strappy_session_get_working_directory(
   const char *db_path,
   long long session_id,
   char **working_directory_out,
   char **error_out);
-int strappy_session_update_working_directory(
-  const char *db_path,
-  long long session_id,
-  const char *working_directory,
-  char **error_out);
 int strappy_session_list_assistant_sets(
   const char *resource_dir,
   strappy_assistant_set_record_list *list,
-  char **error_out);
-int strappy_session_update_assistant_set(const char *db_path,
-                                         long long session_id,
-                                         const char *resource_dir,
-                                         const char *assistant_set_id,
-                                         char **error_out);
-int strappy_session_send_prompt_with_events_and_load(
-  const char *prompt,
-  const char *api_endpoint,
-  const char *api_token,
-  const char *guidance_resource_dir,
-  const char *db_path,
-  long long session_id,
-  strappy_responses_event_callback callback,
-  void *callback_data,
-  strappy_session_record *record,
-  char **error_out);
-int strappy_session_send_isolated_prompt_with_events_and_load(
-  const char *prompt,
-  const char *api_endpoint,
-  const char *api_token,
-  const char *guidance_resource_dir,
-  const char *db_path,
-  long long session_id,
-  strappy_responses_event_callback callback,
-  void *callback_data,
-  strappy_session_record *record,
   char **error_out);
 
 char *strappy_session_webview_batched_js(const char *java_script);

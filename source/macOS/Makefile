@@ -45,7 +45,7 @@ ALTIVECCOCOA_LINKAGE = static
 SOURCE_DIRS = $(SHARED_DIR) $(SHARED_DIR)/XPFoundation
 vpath %.m $(SHARED_DIR)
 EXTRA_FLAGS = -DSTRAPPY_DB_UI=1 -I$(SHARED_DIR) -I$(ALTIVECCORE_DIR)/include
-EXTRA_SOURCES = strappy_run.c strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyAsync.m StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m XPKeychain.m StrappyKeychain.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_config.c strappy_client.c strappy_sse.c strappy_identity.c strappy_openai_oauth.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_bundled_catalog.c strappy_model_catalog.c strappy_file_scanner.c strappy_file_read.c strappy_file_mutation.c strappy_file_write.c strappy_file_edit.c strappy_bash.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_skills.c strappy_study.c strappy_tools.c strappy_debug_capture.c strappy_responses.c strappy_webview.c
+EXTRA_SOURCES = strappy_run.c strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyAsync.m StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_study.c strappy_webview.c strappy_options.c strappy_tool_metadata.c
 MAC_ICON = Resources/Strappy.icns
 BUNDLE_FONT_DIRS = $(ALTIVECCOCOA_DIR)/Resources/Fonts
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
@@ -60,14 +60,13 @@ $(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
 	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
 
 MAC_FLAGS += $(EXTRA_FLAGS)
-MAC_LIBS += -framework Security
 MAC_ANALYZE_SOURCE_FLAGS += -fblocks
 $(INT_DIR)/x64/XPAppKit.o $(INT_DIR)/arm/XPAppKit.o: MAC_FLAGS += -fblocks
 VALIDATE_PATHS = . $(SHARED_DIR)
 
 # Statically link Altivec libraries; use system frameworks for the credential boundary.
 STRAPPY_DAEMON = $(INT_DIR)/strappyd
-STRAPPY_DAEMON_FLAGS = $(OPT_FLAGS) -std=c99 -Wall -Wextra -DSTRAPPY_DB_WRITER=1 -I../shared -I$(ALTIVECCORE_DIR)/include
+STRAPPY_DAEMON_FLAGS = $(OPT_FLAGS) -std=c99 -Wall -Wextra -DSTRAPPY_DB_WRITER=1 -I../shared -I../daemon -I$(ALTIVECCORE_DIR)/include
 $(BUNDLE): $(STRAPPY_DAEMON)
 # Directory mtimes alone do not track replaced files inside an existing bundle.
 $(ZIP_FILE): $(UNIVERSAL_BIN) $(STRAPPY_DAEMON)

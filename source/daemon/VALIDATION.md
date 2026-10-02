@@ -10,7 +10,7 @@ the rootless section below. No harness migration has started.
 
 - `make -C source clean release`: passed, no compiler warnings or errors;
   armv7/arm64 iOS `.deb` packages and PPC/i386/x86_64/arm64 macOS app.
-- `make -C source/linux clean test`: passed, including `daemon_harness.py`.
+- `make -C source/daemon/tests clean test`: passed, including `daemon_harness.py`.
   The daemon test checks immediate SIGTERM wakeup, startup/shutdown identity,
   replacement of the one rotated backup, 0600 log permissions, and failure
   for relative or unwritable/missing paths. It does not accelerate the real
@@ -233,7 +233,7 @@ a UI process. Reboot, jailbreak reactivation, and first-unlock behavior remain
 untested; respring survival is not reboot validation.
 
 After the path fix, `make -C source clean release` passed for all required
-Apple architectures with no warnings/errors, and `make -C source/linux
+Apple architectures with no warnings/errors, and `make -C source/daemon/tests
 daemon-test` passed. Both staged package variants passed shell syntax,
 interpreter/launchctl path, and plist checks. Full local logs were captured in
 `/tmp/strappy-rootless-build.log` and `/tmp/strappy-rootless-device.log` and are
@@ -317,7 +317,7 @@ Final checks:
 
 - `make -C source clean release`: passed for iOS armv7/arm64 and Mac
   PPC/i386/x86_64/arm64, with no warnings or errors.
-- `make -C source/linux daemon-test`: passed.
+- `make -C source/daemon/tests daemon-test`: passed.
 - Clang static analysis of `StrappyServiceController.m` and the app's
   command-line entry point: no findings.
 - All four daemon Mach-O slices are present. PPC/i386 have no `UNIX2003`
@@ -394,7 +394,7 @@ Final checks for this milestone:
 
 - `make -C source clean release`: iOS armv7/arm64 and Mac
   PPC/i386/x86_64/arm64; passed with no warnings in the full output.
-- `make -C source/linux clean test`: includes IPC client, daemon, and synthetic
+- `make -C source/daemon/tests clean test`: includes IPC client, daemon, and synthetic
   worker harnesses alongside the complete shared-core offline suite; all passed.
 - Clang static analysis of the daemon, IPC server/client, and C XPFoundation
   compatibility module: no findings.
@@ -419,7 +419,7 @@ ownership, compatibility, and reader-lifetime contract.
 
 - Clean iOS armv7/arm64 and Mac PPC/i386/x86_64/arm64 release builds passed;
   full logs contain no compiler/linker warnings.
-- Full `make -C source/linux clean test`, including existing history, renderer,
+- Full `make -C source/daemon/tests clean test`, including existing history, renderer,
   options/defaults, provider/catalog, and Responses tests. The 20,000-session,
   20,000-database, and 21,000-model paging tests retain their ordering and
   indexed-page bounds. Catalog/model tests now checkpoint with old readers open.
@@ -466,8 +466,8 @@ An independent GUI-capability reader then passed against the daemon-created
 store. While the service was alive, DB/WAL/SHM modes were all 0600 and ownership
 matched its user. SIGTERM stopped these test services cleanly.
 
-Probe sources are `source/linux/store_harness.c` and
-`source/linux/store_reader_harness.c`. Compile the writer with
+Probe sources are `source/daemon/tests/store_harness.c` and
+`source/daemon/tests/store_reader_harness.c`. Compile the writer with
 `STRAPPY_DB_WRITER=1`, the reader with `STRAPPY_DB_UI=1` and no writer capability,
 and link `source/daemon/store.mk`'s portable sources plus the target Altivec
 SQLite/cJSON libraries. Run the writer on a nonexistent fixture path, then the
@@ -494,7 +494,7 @@ paginated-reader open, so suspension cannot leave those row objects pinning WAL.
   runtime. UI submission and cancellation use background IPC clients. Reconnect
   refreshes DB-backed history/status; saved unresolved submission keys survive UI
   exit. No UI Responses-runtime callback or execution fallback remains.
-- `make -C source/linux clean test` passes, including malformed transport/input,
+- `make -C source/daemon/tests clean test` passes, including malformed transport/input,
   peer verification, slow subscribers, synthetic publication, WAL reader tests,
   the complete existing shared-core suite, and the new execution tests.
 - `execution_harness.py` uses only a loopback HTTP fixture and synthetic
@@ -554,7 +554,7 @@ probe state /private/fixture.sqlite 1
 probe history /private/fixture.sqlite 1
 ```
 
-`probe` is `source/linux/execution_device_probe.c`, compiled for the device with
+`probe` is `source/daemon/tests/execution_device_probe.c`, compiled for the device with
 writer capability for fixture seeding, the store sources, `strappy_run.c`, and
 the portable IPC client/platform sources. The iOS probe must be signed and run
 from a jailbreak executable path. The production daemon uses its dedicated
@@ -610,7 +610,7 @@ not committed. Warnings are reviewed in the full captured build output.
 
 ### Isolated native checks
 
-The same `source/linux/mutation_device_probe.c` ran against freshly created test
+The same `source/daemon/tests/mutation_device_probe.c` ran against freshly created test
 stores. The probe uses a new authenticated connection for every command. It
 creates a fixture account and manual model, approves the model, sets defaults,
 creates/deletes a session, asks the daemon to scan a real fixture SQLite file,
@@ -671,7 +671,7 @@ is ready. No newer Mac host was supplied.
 
 - Clean iOS armv7/arm64 release builds and both Debian variants passed.
 - Clean Mac PPC/i386/x86_64/arm64 app and daemon builds passed.
-- Full `make -C source/linux clean test` passed. Full captured build output was
+- Full `make -C source/daemon/tests clean test` passed. Full captured build output was
   reviewed; there were no compiler warnings.
 - Execution tests now kill a runtime during both HTTP and real Bash execution,
   recover interrupted runs and scans, verify durable tool intent and missing
@@ -693,7 +693,7 @@ build/suite output is in the `*-verified.log` files; analysis is in
 
 ### Native isolated fixtures
 
-`source/linux/recovery_device_probe.c` seeds unfinished prompt, turn, request,
+`source/daemon/tests/recovery_device_probe.c` seeds unfinished prompt, turn, request,
 HTTP, tool and scan records in a private fixture. It checks terminal recovery,
 a normalized interruption output, foreign keys and unchanged schema version.
 `recovery_device_harness.sh` starts/stops the actual daemon, checks IPC before and
@@ -784,7 +784,7 @@ mutation APIs retained their synchronous contracts at that revision; the
 following change removes those waits from UI handlers.
 
 `session_options_device_probe.m`, built with
-`make -C source/iOS -f ../linux/session_options_device_probe.mk session-options-probe`,
+`make -C source/iOS -f ../daemon/tests/session_options_device_probe.mk session-options-probe`,
 ran as `mobile` on `koolphone5` (iOS 8.4.1 / armv7). It links the production Cocoa
 bridge with only the settings and submission transport functions replaced. Its
 loaded session is an in-memory fixture; it never contacts the real daemon or
@@ -810,7 +810,7 @@ measurements. Unsent drafts are discarded at UI process exit. No application
 package was installed as part of this probe.
 
 Final clean builds passed for iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64;
-full build output contained no warnings. `make -C source/linux clean test` passed,
+full build output contained no warnings. `make -C source/daemon/tests clean test` passed,
 including new subscribed-client assertions that option mutations emit only the
 session topic and model approvals emit only the catalog topic. Generated build
 and test logs were retained locally outside the checkout and are not committed.
@@ -852,7 +852,7 @@ error presentation still need on-device acceptance testing.
 
 Final clean app builds passed for iOS armv7/arm64 and macOS
 PPC/i386/x86_64/arm64, with zero warnings in the captured logs. The complete
-`make -C source/linux clean test` offline suite passed. Both phone fixtures and
+`make -C source/daemon/tests clean test` offline suite passed. Both phone fixtures and
 the PPC dispatcher fixture also cross-built without warnings. Build/test logs
 remain outside the repository. The macOS launchctl installation/verification
 path now executes on the same background command queue; CLI maintenance
@@ -912,9 +912,9 @@ acceptance test was performed.
 Build the native fixtures after the normal platform build:
 
 ```
-make -C source/iOS -f ../linux/control_device_probe.mk control-probe
-make -C source/macOS -f ../linux/control_device_probe.mk control-probe
-make -C source/iOS -f ../linux/session_options_device_probe.mk session-options-probe
+make -C source/iOS -f ../daemon/tests/control_device_probe.mk control-probe
+make -C source/macOS -f ../daemon/tests/control_device_probe.mk control-probe
+make -C source/iOS -f ../daemon/tests/session_options_device_probe.mk session-options-probe
 ```
 
 Final clean builds passed for iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64
@@ -940,3 +940,51 @@ still cover persistent connection reuse, reply ordering, uncertain-acknowledgmen
 no-replay behavior, and reconnect. The native dispatcher fixture asserts that a
 main control method and its callback finish before the call returns even while
 the explicit background worker is blocked. Database loading labels are unchanged.
+
+
+## Daemon source boundary and authentication ownership (2026-10-02)
+
+Provider HTTP/SSE, Responses execution, tools, filesystem execution, credential
+configuration, OAuth and Keychain sources now live under `source/daemon` and are
+absent from both application source lists. Session/run/study execution was split
+from shared readers; tool metadata and option/event types remain shared. The
+portable/native harnesses moved to `source/daemon/tests`; the old Linux Makefile
+forwards commands. App startup configures presentation only, without HTTP CA
+configuration. IPC v5 owns device login and exposes only public status metadata.
+Saved tokens never return to the app. An untouched API-key editor preserves the
+saved key, and a supplied replacement is sent to the daemon.
+
+Validation completed:
+
+- `make -C source/daemon/tests clean`, then `make -C source/daemon/tests -j4 test`:
+  complete offline suite passed. Existing loopback OAuth/Responses tests remain
+  unchanged in behavior. New authorization-manager tests cover accepted starts,
+  repeated keys, account isolation, cancellation, sign-out cancellation, shutdown,
+  provider failure and secret-free replies. Socket tests cover credential status,
+  invalid accounts, and refusal of the formerly exposed `save_oauth` action.
+- `make -C source/iOS clean`, then `make -C source/iOS -j4`: armv7/arm64 and both
+  Debian package variants passed with zero warnings.
+- `make -C source/macOS clean`, then `make -C source/macOS -j4`: PPC/i386/x86_64/
+  arm64 passed with zero warnings.
+- `app-boundary-test` checks both app source manifests and transitive local
+  headers. `llvm-nm` inspection found no moved provider client/SSE, Responses
+  sender, OAuth, tool executor or Keychain implementation in either app binary.
+- Clang static analysis of the authorization manager, execution dispatcher and
+  split session/study/run execution units reported no findings.
+
+Native fixtures ran over SSH in fresh private directories, without installing an
+app, replacing a service, using provider credentials or making provider requests:
+
+| Host | Observed result |
+| --- | --- |
+| `x4-vm`, Tiger 10.4.11 / PPC, UID 501 | Authorization manager, Cocoa dispatch, IPC v5 readiness, daemon Keychain presence status for a synthetic account, and 30 committed create/delete pairs passed. Mean 36.568 ms/pair; maximum 214.270 ms. |
+| `koolphone5`, iOS 8.4.1 / armv7, mobile | Same probes passed. Mean 111.275 ms/pair; maximum 1525.890 ms. The draft fixture also passed: 1,000 local edits in 501.130 ms with zero IPC; Send returned in 4.135 ms during a deliberately delayed 300 ms acceptance. |
+
+The native authorization-manager fixture uses synthetic provider and credential
+store callbacks. The separate control probe uses the real daemon and native
+Keychain status path for a newly created account with no credential. This does
+not validate live browser sign-in, real token refresh, locked-device Keychain
+access or graphical acceptance. The timing samples include device scheduling
+and storage latency; they are not a before/after comparison. All fixture daemons
+were stopped and waited for, and their temporary directories were removed. Build,
+analyzer and device logs stay outside Git.

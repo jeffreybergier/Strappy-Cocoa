@@ -86,11 +86,11 @@ zero does not distinguish a locked Keychain, an ACL denial, or a missing item.
 
 Step 4 supplies account changes, model refresh/approvals, session
 creation/options/deletion, scanning and Database Study. Authentication
-presentation stays in the UI; see [MUTATIONS.md](MUTATIONS.md).
+networking and credentials stay in the daemon; presentation stays in the UI; see [MUTATIONS.md](MUTATIONS.md).
 
 ## Verification
 
-`make -C source/linux clean test` includes actual Unix-socket, SQLite and Responses
+`make -C source/daemon/tests clean test` includes actual Unix-socket, SQLite and Responses
 runtime tests against an offline loopback HTTP fixture. The execution harness
 covers lost acknowledgments, durable retries, input conflicts, simultaneous
 clients, parallel sessions with isolated cancellation, create/delete during blocked

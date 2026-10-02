@@ -32,6 +32,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 @property (nonatomic, strong) UITextField *nameField;
 @property (nonatomic, strong) UITextField *endpointField;
 @property (nonatomic, strong) UITextField *tokenField;
+@property (nonatomic, assign) BOOL tokenEdited;
 @property (nonatomic, strong) UITextField *maxOutputField;
 @property (nonatomic, strong) UISwitch *maxOutputSwitch;
 @property (nonatomic, assign) BOOL dirty;
@@ -125,7 +126,6 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   NSUInteger index;
   NSError *error;
   NSString *provider;
-  NSString *token;
   long long maximum;
 
   error = nil;
@@ -153,12 +153,9 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   [[self nameField] setText:StrappyAccountString(account, @"name")];
   [[self endpointField] setText:StrappyAccountString(account,
     @"responses_endpoint")];
-  token = nil;
-  if (![provider isEqualToString:@"openai_chatgpt"]) {
-    token = [StrappySession bearerTokenForProviderAccountIdentifier:
-      [self providerAccountIdentifier] error:nil];
-  }
-  [[self tokenField] setText:(token != nil) ? token : @""];
+  [[self tokenField] setText:@""];
+  [[self tokenField] setPlaceholder:NSLocalizedString(@"Leave unchanged to keep saved key", nil)];
+  [self setTokenEdited:NO];
   maximum = [[account objectForKey:@"max_output_tokens"] longLongValue];
   [[self maxOutputSwitch] setOn:(maximum > 0LL)];
   [[self maxOutputField] setText:(maximum > 0LL) ?
@@ -193,6 +190,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 
 - (void)fieldChanged:(id)sender
 {
+  if (sender == [self tokenField]) [self setTokenEdited:YES];
   (void)sender;
   [self setDirty:YES];
   [[[self navigationItem] rightBarButtonItem] setEnabled:YES];
@@ -262,7 +260,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
     [self showError:nil title:NSLocalizedString(@"Account Name Is Required", nil)];
     return;
   }
-  if ([provider isEqualToString:@"openrouter"] && ([token length] == 0U)) {
+  if ([provider isEqualToString:@"openrouter"] && ([token length] == 0U) &&
+      ([self tokenEdited] || ![[[self account] objectForKey:@"has_credential"] boolValue])) {
     [self showError:nil title:NSLocalizedString(@"API Key Is Required", nil)];
     return;
   }
@@ -275,7 +274,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   [[[self navigationItem] rightBarButtonItem] setEnabled:NO];
   [[self view] setUserInteractionEnabled:NO];
   [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save account",nil) receiver:self completion:@selector(accountSaved:) context:nil] updateProviderAccountIdentifier:identifier
-    displayName:name responsesEndpoint:endpoint maxOutputTokens:maximum bearerToken:token error:NULL];
+    displayName:name responsesEndpoint:endpoint maxOutputTokens:maximum bearerToken:[self tokenEdited] ? token : nil error:NULL];
 }
 
 - (void)accountSaved:(StrappyAsyncResult *)result

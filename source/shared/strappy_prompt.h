@@ -2,7 +2,7 @@
 #define STRAPPY_PROMPT_H
 
 #include "strappy_assistant_sets.h"
-#include "strappy_tools.h"
+#include "strappy_tool_metadata.h"
 
 #ifdef __cplusplus
 extern "C" {

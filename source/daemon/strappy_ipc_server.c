@@ -160,7 +160,7 @@ static void strappy_ipc_request(strappy_ipc_server *s, struct strappy_ipc_peer *
                 strappy_ipc_snapshot(s, &reply);
             }
         } else if (request.operation >= STRAPPY_IPC_SUBMIT_PROMPT &&
-                   request.operation <= STRAPPY_IPC_REFRESH_CREDENTIALS)
+                   request.operation <= STRAPPY_IPC_AUTH)
         {
             if (s->handler) {
                 memcpy(request.payload, p->input + STRAPPY_IPC_HEADER, request.length);

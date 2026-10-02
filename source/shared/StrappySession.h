@@ -149,7 +149,7 @@ enum {
   BOOL          promptCancellationRequested_;
 }
 
-+ (void)bootstrapProcessWithCACertPath:(NSString *)caCertPath;
++ (void)bootstrapProcess;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
 + (BOOL)prepareProviderCredentialsWithError:(NSError **)error;
@@ -187,9 +187,8 @@ enum {
                       responsesEndpoint:(NSString *)responsesEndpoint
                         maxOutputTokens:(long long)maxOutputTokens
                                   error:(NSError **)error;
-+ (NSString *)bearerTokenForProviderAccountIdentifier:
-                (NSString *)providerAccountIdentifier
-                                                  error:(NSError **)error;
++ (NSDictionary *)credentialStatusForProviderAccountIdentifier:(NSString *)identifier
+                                                         error:(NSError **)error;
 + (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier
                             displayName:(NSString *)displayName
                       responsesEndpoint:(NSString *)responsesEndpoint

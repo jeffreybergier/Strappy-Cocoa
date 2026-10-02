@@ -107,9 +107,7 @@ static NSAlert *StrappyAsyncErrorAlert;
     name:StrappyAsyncCommandFailedNotification object:nil];
   (void)notification;
   {
-    NSString *cacert = [AltivecCore certPath];
-    NSParameterAssert(cacert);
-    [StrappySession bootstrapProcessWithCACertPath:cacert];
+    [StrappySession bootstrapProcess];
   }
   [[NSNotificationCenter defaultCenter]
     addObserver:self

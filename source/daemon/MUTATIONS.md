@@ -58,11 +58,13 @@ inclusion; study-value deletion/reset; credential save, refresh and sign-out.
 The same shared validation and typed tables remain authoritative. No schema
 migration or `user_version` change was added.
 
-Interactive OAuth device authorization and user input remain in the UI. The UI
-passes completed OAuth credentials or a user-entered bearer token to the daemon
-over its owner-only, peer-authenticated socket. Keychain writes, token refresh,
-identity checks and credential deletion happen in the daemon. UI Keychain reads
-remain for authentication presentation and account editors. Daemon errors expose
+Device authorization, provider polling, token exchange, Keychain access,
+refresh and identity checks all run in the daemon. The UI displays the public
+verification URL/code and sends start/status/cancel commands. User-entered bearer
+replacements cross the private socket toward the daemon; saved bearer/OAuth
+tokens never cross back. UI credential reads are replaced by presence/identity/
+refresh-needed status. An untouched bearer editor omits the token field and
+preserves the saved credential. Daemon errors expose
 only stable statuses, never credential/provider diagnostics. Archiving commits
 first, then attempts credential removal; an inaccessible leftover Keychain item
 cannot reactivate an archived account. Metadata updates restore the previous
@@ -106,7 +108,7 @@ completion. Authentication refresh retains its background thread. See
 
 ## Verification
 
-`make -C source/linux clean test` includes `mutation_harness.py`. It creates
+`make -C source/daemon/tests clean test` includes `mutation_harness.py`. It creates
 accounts/models/defaults/sessions through IPC, verifies stored changes through a
 separate read-only connection, rejects malformed values/duplicate JSON keys,
 scans a real fixture database, checks conflicting mutations during study, cancels
@@ -123,7 +125,7 @@ validation.
 
 `session_options_device_probe.m` tests the production Cocoa edit/send bridge
 against delayed/failing transport replacements. From `source/iOS`, build with
-`make -f ../linux/session_options_device_probe.mk session-options-probe` after a
+`make -f ../daemon/tests/session_options_device_probe.mk session-options-probe` after a
 normal build. Run `build-release/session-options-probe` as mobile on a test
 phone. The probe uses an already-loaded in-memory session, private process
 preferences, and no live daemon, database writes, credentials, or provider calls.

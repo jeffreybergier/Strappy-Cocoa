@@ -2,7 +2,7 @@
 
 #include "strappy_core.h"
 #include "strappy_quality_policy.h"
-#include "strappy_tools.h"
+#include "strappy_tool_metadata.h"
 
 #include <cJSON.h>
 #include <stdio.h>

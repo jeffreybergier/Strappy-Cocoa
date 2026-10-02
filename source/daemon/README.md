@@ -1,8 +1,36 @@
 # Local service
 
+## Source and build ownership
+
+`source/daemon` contains the provider client/SSE parser, Responses runtime,
+execution tools, scanner, catalog fetcher, OAuth and Keychain implementations.
+The app targets do not compile these sources or include their private headers.
+`strappy_session_execution`, `strappy_run_execution`, and
+`strappy_study_execution` contain the write/execution halves of the shared read
+interfaces. `strappy_tool_metadata` retains descriptions, schemas and display
+metadata for UI rendering and prompt previews. Shared option/event types no
+longer require client or credential-configuration headers.
+
+The app's `StrappyAuthentication` classes display sign-in state and verification
+codes. IPC v5 delegates device authorization, polling, token exchange, storage,
+refresh decisions and cancellation to the daemon. Credential status exposes
+only presence, display identity and whether refresh is needed. Saved bearer and
+OAuth tokens are never returned to the UI. API-key editors start blank: leaving
+the field untouched preserves the saved key; entering a replacement updates it.
+Clearing an edited optional bearer field removes that credential.
+
+Portable and native harness sources now live in `source/daemon/tests`.
+`make -C source/daemon/tests clean test` runs the offline suite, including the
+app-boundary and authorization-manager regressions. The old
+`make -C source/linux ...` entry point forwards to this directory. Test targets
+may explicitly compile daemon sources; normal iOS/macOS app targets may not.
+Native `auth_device_probe.mk` runs the same authorization-manager tests with
+synthetic provider/credential callbacks; it never accesses user credentials.
+
+
 `strappyd` has a portable C runtime and a small Cocoa credential boundary, and is a service supervised by launchd. It owns store
 initialization, bundled catalog seeding, and all database writes. The app opens
-existing stores read-only after IPC v4 readiness. The service also owns scans,
+existing stores read-only after IPC v5 readiness. The service also owns scans,
 study, catalog refresh, account changes and shared mutations. See [STORAGE.md](STORAGE.md) for
 ownership, snapshot lifetimes, startup/upgrade behavior, and runtime validation;
 [PROTOCOL.md](PROTOCOL.md) describes the wire contract.
@@ -51,7 +79,7 @@ replacement/removal; configuration loads exactly one job. All runtime paths
 are absolute, and the job's working directory is `/`.
 
 Build with `make -C source clean release`. Run the offline signal/rotation
-regression check with `make -C source/linux daemon-test` (also part of `test`).
+regression check with `make -C source/daemon/tests daemon-test` (also part of `test`).
 For device acceptance, install the normal `.deb`, inspect `launchctl list
 com.altivecintelligence.strappyd`, and follow the checklist in `PLAN.md`.
 A scheduled timer does not keep iOS awake: locked-screen observations must not

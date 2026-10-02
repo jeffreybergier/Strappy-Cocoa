@@ -4,10 +4,10 @@
 #include "../shared/strappy_ipc.h"
 #include "strappy_execution.h"
 #include "../shared/strappy_cocoa.h"
-#include "../shared/strappy_client.h"
-#include "../shared/strappy_openai_oauth.h"
+#include "strappy_client.h"
+#include "strappy_openai_oauth.h"
 #include "../shared/strappy_db.h"
-#include "../shared/strappy_model_catalog.h"
+#include "strappy_model_catalog.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -96,7 +96,7 @@ static int strappy_probe(const char *path)
         }
     }
     (void)close(fd);
-    puts("IPC v4: same-user hello, snapshot, subscribe, unsubscribe passed; store ready; execution ready");
+    puts("IPC v5: same-user hello, snapshot, subscribe, unsubscribe passed; store ready; execution ready");
     return EXIT_SUCCESS;
 }
 

@@ -1,7 +1,7 @@
 #include "strappy_db_internal.h"
 
 #include "strappy_core.h"
-#include "strappy_tools.h"
+#include "strappy_tool_metadata.h"
 
 #include <cJSON.h>
 #include <ctype.h>
