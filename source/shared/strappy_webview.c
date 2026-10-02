@@ -3715,7 +3715,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "strappyRowsByPromptGroup={};strappyRowsByRound={};strappyRowsByAPICall={};",
     "strappyAPIToolRowsByCall={};strappyAPIToolRowsByGroup={};strappyToolRowsByTarget={};",
     "strappyLastAssistantId='';strappyPendingToolRows=[];",
-    "if(m){n=m.childNodes;for(i=0;i<n.length;i++){if(hasClass(n[i],'row'))indexMessageRow(n[i],null);}}",
+    "if(m){n=m.childNodes;for(i=0;i<n.length;i++){if(hasClass(n[i],'row')){n[i]._strappyCommittedHTML=n[i].outerHTML;indexMessageRow(n[i],null);}}}",
     "flushPendingToolTargets();if(p){n=p.childNodes;for(i=0;i<n.length;i++){if(isToolRow(n[i]))indexToolSourceRow(n[i]);}}",
     "strappyMessageIndexesReady=1;}",
     "function toolRowRaw(row){var b=firstByClass(row,'bubble');var raw;if(!b)return '';",
@@ -3876,9 +3876,20 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "d=nodesFromHTML(html);group=processingFinalAnswerGroup(d.childNodes);",
     "while(d.firstChild){n=d.firstChild;id=rowId(n);key=rowMessageKey(n);",
     "if((key!==''&&rowByMessageKeyAny(key))||(id!==''&&byId(id))){d.removeChild(n);continue;}",
-    "m.appendChild(n);if(hasClass(n,'row')){indexMessageRow(n,null);added[added.length]=n;}}if(!added.length)return;",
+    "n._strappyCommittedHTML=n.outerHTML;m.appendChild(n);if(hasClass(n,'row')){indexMessageRow(n,null);added[added.length]=n;}}if(!added.length)return;",
     "if(group!=='')beginProcessingFinishAfterScroll(group);",
     "flushPendingToolTargets();renderAfterMutation(added);scrollBottomAnimated();}",
+    /* Compare committed markup, never the decorated/live DOM. */
+    "function syncMessages(html){var m=byId('messages'),d,rows=[],seen={},existing,i,j,n,id,old,raw,before,group,added=[];if(!m)return;",
+    "if(!strappyMessageIndexesReady)initializeMessageIndexes();d=nodesFromHTML(html);",
+    "for(i=0;i<d.childNodes.length;i++){n=d.childNodes[i];if(hasClass(n,'row')){rows[rows.length]=n;seen[indexKey(rowId(n))]=1;}}",
+    "group=processingFinalAnswerGroup(rows);existing=messageRows().concat(toolSourceRows());beginMessageBatch();",
+    "for(i=0;i<existing.length;i++){n=existing[i];if(typeof n._strappyCommittedHTML!='undefined'&&!seen[indexKey(rowId(n))])removeMessage(rowId(n));}",
+    "for(i=0;i<rows.length;i++){n=rows[i];id=rowId(n);raw=n.outerHTML;old=byId(id);",
+    "if(old){if(old._strappyCommittedHTML!==raw){replaceMessage(id,raw);old=byId(id);if(old)old._strappyCommittedHTML=raw;}continue;}",
+    "before=null;for(j=i+1;j<rows.length;j++){old=byId(rowId(rows[j]));if(old&&old.parentNode===m){before=old;break;}}",
+    "n._strappyCommittedHTML=raw;m.insertBefore(n,before);indexMessageRow(n,before);added[added.length]=n;}",
+    "if(added.length){if(group!=='')beginProcessingFinishAfterScroll(group);flushPendingToolTargets();renderAfterMutation(added);scrollBottomAnimated();}endMessageBatch();}",
     "function rawMarkdown(n){if(!n)return '';return (typeof n._strappyMarkdown!='undefined')?n._strappyMarkdown:(n.innerHTML||'');}",
     "function setRawMarkdown(n,raw){if(!n)return;n._strappyMarkdown=raw||'';n._strappyMarkdownRendered=null;n.innerHTML=n._strappyMarkdown;}",
     "function preserveLongerMarkdown(oldNode,newNode){var oldRaw,newRaw;if(!oldNode||!newNode)return;",
@@ -3890,7 +3901,7 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "function replaceMessage(id,html){clearTimelineError();var old=byId(id);var oldId,target,wasAssistant,next,newId,before,location;",
     "if(!old){appendMessage(html);return;}var d=nodesFromHTML(html);",
     "oldId=rowId(old);target=toolTarget(old);wasAssistant=isAssistantRow(old);before=old.nextSibling;location=old._strappyIndexLocation;",
-    "if(d.firstChild){next=d.firstChild;if(target!==''&&isToolRow(next))setToolTarget(next,target);",
+    "if(d.firstChild){next=d.firstChild;next._strappyCommittedHTML=next.outerHTML;if(target!==''&&isToolRow(next))setToolTarget(next,target);",
     "if(isAssistantRow(old)&&isAssistantRow(next))preserveLiveMessageText(old,next);",
     "unindexTimelineRow(old);old.parentNode.replaceChild(next,old);",
     "if(location=='tools'&&isToolRow(next))indexToolSourceRow(next);else indexMessageRow(next,before);",
@@ -4951,9 +4962,23 @@ char *strappy_webview_messages_page_html(
        strappy_webview_buffer_append_cstring(
          &buffer,
          "renderMessageDecorations(document);scrollBottomNow();"
+         "window.location.href='strappy-action://webview-ready';"
          "</script></body></html>");
 
   if (!ok) {
+    strappy_webview_buffer_destroy(&buffer);
+    return NULL;
+  }
+  return strappy_webview_buffer_finish(&buffer);
+}
+
+char *strappy_webview_sync_messages_js(const char *messages_html)
+{
+  strappy_webview_buffer buffer;
+  strappy_webview_buffer_init(&buffer);
+  if (!strappy_webview_buffer_append_cstring(&buffer, "syncMessages(") ||
+      !strappy_webview_append_js_string(&buffer, messages_html) ||
+      !strappy_webview_buffer_append_cstring(&buffer, ");")) {
     strappy_webview_buffer_destroy(&buffer);
     return NULL;
   }

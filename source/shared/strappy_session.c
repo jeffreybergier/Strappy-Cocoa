@@ -1266,10 +1266,10 @@ static char *strappy_session_webview_delta_js_with_render_context(
   strappy_session_message_record_list_init(&list);
   strappy_response_timeline_cursor_init(&after_cursor);
   strappy_response_timeline_cursor_init(&next_cursor);
-  if (!strappy_session_parse_timeline_cursor(timeline_cursor,
+  if ((reconcile != 2 && !strappy_session_parse_timeline_cursor(timeline_cursor,
                                              session_id,
                                              &after_cursor,
-                                             error_out) ||
+                                             error_out)) ||
       !strappy_session_list_message_records_after(
         context->db_path,
         session_id,
@@ -1292,7 +1292,7 @@ static char *strappy_session_webview_delta_js_with_render_context(
       return NULL;
     }
   }
-  if (list.count == 0U) {
+  if (list.count == 0U && reconcile != 2) {
     strappy_session_message_record_list_destroy(&list);
     script = strappy_string_duplicate("");
     if (script == NULL) {
@@ -1307,7 +1307,7 @@ static char *strappy_session_webview_delta_js_with_render_context(
   }
 
   script = NULL;
-  if (reconcile) {
+  if (reconcile == 1) {
     messages = NULL;
     message_count = 0U;
     if (strappy_session_webview_messages_for_record_range(
@@ -1338,7 +1338,9 @@ static char *strappy_session_webview_delta_js_with_render_context(
       context->webview,
       error_out);
     if (messages_html != NULL) {
-      script = strappy_webview_append_message_js(messages_html);
+      script = (reconcile == 2) ?
+        strappy_webview_sync_messages_js(messages_html) :
+        strappy_webview_append_message_js(messages_html);
       free(messages_html);
     }
   }
@@ -1423,6 +1425,16 @@ static char *strappy_session_webview_delta_js_for_session(
     error_out);
   strappy_session_webview_render_context_destroy(context);
   return script;
+}
+
+/* Invalidations have no row key: refresh all committed rows, including updates
+ * behind the append cursor. The WebView preserves unchanged rows by identity. */
+char *strappy_session_webview_refresh_messages_js_for_session(
+  const char *db_path, long long session_id, const char *resource_dir,
+  char **error_out)
+{
+  return strappy_session_webview_delta_js_for_session(
+    db_path, session_id, resource_dir, NULL, NULL, NULL, 2, error_out);
 }
 
 char *strappy_session_webview_append_messages_js_for_session(

@@ -1,4 +1,5 @@
 #import "StrappyAsync.h"
+#import "XPFoundation.h"
 #import "MessageListViewController.h"
 #import "StrappySession.h"
 #import "XPAppKit.h"
@@ -143,6 +144,7 @@ static BOOL StrappyContextRoundActionValues(
 - (void)flushPendingStreamEvents;
 - (void)cancelPendingStreamEventFlush;
 - (BOOL)reconcileRenderedMessages;
+- (void)serviceRefreshDidFinish:(StrappyAsyncResult *)result;
 - (BOOL)sessionPromptIsInFlight;
 - (void)updateSendingStateFromSession;
 - (void)beginSendingPrompt:(NSString *)prompt;
@@ -234,6 +236,8 @@ static BOOL StrappyContextRoundActionValues(
 - (void)clearRequestState
 {
   [self cancelPendingStreamEventFlush];
+  /* Prompt-start/finish bookkeeping must not drop a daemon invalidation. */
+  if (serviceRefreshPending_) [self schedulePendingStreamEventFlush];
 }
 
 - (BOOL)sessionPromptIsInFlight
@@ -494,6 +498,12 @@ static BOOL StrappyContextRoundActionValues(
   NSNumber *identifier;
   BOOL includedInContext;
 
+  if ([[url host] isEqualToString:@"webview-ready"]) {
+    webViewContentLoaded_ = YES;
+    if (serviceRefreshPending_) [self flushPendingStreamEvents];
+    return;
+  }
+
   if (!StrappyContextRoundActionValues(url,
                                        &identifier,
                                        &includedInContext)) {
@@ -512,6 +522,10 @@ static BOOL StrappyContextRoundActionValues(
 {
   NSString *path;
 
+  webViewContentLoaded_ = NO;
+  serviceRefreshPending_ = NO;
+  serviceRefreshInFlight_ = NO;
+  webViewGeneration_++;
   path = [self writeCurrentHTML];
   if (path == nil) {
     return nil;
@@ -696,8 +710,8 @@ static BOOL StrappyContextRoundActionValues(
 
   [self updateSendingStateFromSession];
   if ([[event objectForKey:@"service_invalidated"] boolValue]) {
-    [self cancelPendingStreamEventFlush];
-    [self reloadContent];
+    serviceRefreshPending_ = YES;
+    [self schedulePendingStreamEventFlush];
     return;
   }
   if ([[event objectForKey:@"webview_reload_required"] boolValue]) {
@@ -850,6 +864,8 @@ static BOOL StrappyContextRoundActionValues(
 {
   NSString *batchJS;
 
+  if (serviceRefreshPending_) [self reconcileRenderedMessages];
+
   if ([pendingStreamJavaScript_ length] == 0U) {
     return;
   }
@@ -885,50 +901,35 @@ static BOOL StrappyContextRoundActionValues(
 
 - (BOOL)reconcileRenderedMessages
 {
-  NSError *error;
-  NSString *batchJS;
-  NSString *clearJS;
-  NSString *js;
-  NSString *nextCursor;
-  NSMutableString *reconciliation;
-  NSUInteger reconciledCount;
-
-  if (session_ == nil) {
-    return NO;
+  if (session_ == nil) return NO;
+  if (!webViewContentLoaded_ || serviceRefreshInFlight_) {
+    serviceRefreshPending_ = YES;
+    return YES;
   }
-  error = nil;
-  nextCursor = nil;
-  reconciledCount = 0U;
-  js = [session_
-    webViewReconcileMessagesJavaScriptAfterTimelineCursor:
-      newestRenderedTimelineCursor_
-                                    nextTimelineCursor:&nextCursor
-                                reconciledMessageCount:&reconciledCount
-                                                 error:&error];
-  if (![js isKindOfClass:[NSString class]] ||
-      ((reconciledCount > 0U) && ([js length] == 0U))) {
-    NSLog(@"StrappyResponses could not reconcile the WebView: %@",
-          ([error localizedDescription] != nil) ?
-            [error localizedDescription] : @"empty reconciliation");
-    return NO;
-  }
-  clearJS = [session_ webViewClearProcessingStatusJavaScript];
-  if ([clearJS length] == 0U) {
-    return NO;
-  }
-  reconciliation = [NSMutableString stringWithString:js];
-  [reconciliation appendString:clearJS];
-  batchJS = [StrappySession
-    webViewBatchedJavaScriptForJavaScript:reconciliation];
-  if ([batchJS length] == 0U) {
-    return NO;
-  }
-  [self pushJavaScript:batchJS];
-  if ([nextCursor isKindOfClass:[NSString class]]) {
-    [newestRenderedTimelineCursor_ release];
-    newestRenderedTimelineCursor_ = [nextCursor copy];
-  }
+  serviceRefreshPending_ = NO;
+  serviceRefreshInFlight_ = YES;
+  [[StrappyAsync queryTarget:session_ receiver:self
+    completion:@selector(serviceRefreshDidFinish:)
+    context:[NSArray arrayWithObjects:session_,
+      [NSNumber XP_numberWithUnsignedInteger:webViewGeneration_], nil]]
+    webViewRefreshMessagesJavaScriptWithError:NULL];
   return YES;
+}
+
+- (void)serviceRefreshDidFinish:(StrappyAsyncResult *)result
+{
+  NSArray *context = [result context];
+  NSString *javaScript = [result value];
+  if (([context objectAtIndex:0] != session_) ||
+      ([[context objectAtIndex:1] XP_unsignedIntegerValue] != webViewGeneration_)) return;
+  serviceRefreshInFlight_ = NO;
+  if (![javaScript isKindOfClass:[NSString class]]) {
+    NSLog(@"Strappy could not refresh the WebView: %@", [[result error] localizedDescription]);
+    serviceRefreshPending_ = YES;
+    return; /* A later invalidation retries without discarding the document. */
+  }
+  [self pushJavaScript:javaScript];
+  if (serviceRefreshPending_) [self schedulePendingStreamEventFlush];
 }
 
 - (void)dealloc

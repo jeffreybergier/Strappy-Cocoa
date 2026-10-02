@@ -1059,7 +1059,7 @@ static void StrappyStoreChanged(unsigned int topics)
         [NSNumber XP_numberWithUnsignedInteger:StrappySessionOptionAll],StrappySessionChangedOptionsKey,
         StrappySessionChangeKindOptions,StrappySessionChangeKindKey,nil]];
   }
-  if (topics & STRAPPY_STORE_LEDGER) [StrappyAsync postNotificationName:StrappySessionStreamEventNotification
+  if (topics & (STRAPPY_STORE_LEDGER | STRAPPY_STORE_RUN)) [StrappyAsync postNotificationName:StrappySessionStreamEventNotification
       object:self userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES]
       forKey:@"service_invalidated"]];
   if (active && !previous) [StrappyAsync postNotificationName:StrappySessionPromptDidStartNotification object:self];
@@ -3578,6 +3578,31 @@ static void StrappyStoreChanged(unsigned int topics)
   return [self webViewJavaScriptForStreamEvent:event
                                   renderContext:NULL
                                           error:error];
+}
+
+- (NSString *)webViewRefreshMessagesJavaScriptWithError:(NSError **)error
+{
+  char *script;
+  char *storedError = NULL;
+  NSString *messages;
+  NSString *status;
+  script = strappy_session_webview_refresh_messages_js_for_session(
+    [[StrappySession sessionsDatabasePath] fileSystemRepresentation],
+    [sessionIdentifier_ longLongValue],
+    [[[NSBundle mainBundle] resourcePath] fileSystemRepresentation],
+    &storedError);
+  if (script == NULL && error != NULL) {
+    *error = [StrappySession errorFromCString:storedError];
+  }
+  strappy_session_free_string(storedError);
+  if (script == NULL) return nil;
+  messages = StrappySessionStringFromCString(script);
+  script = strappy_session_webview_set_processing_status_js(
+    StrappySessionOptionalCString([self currentProcessingStatusJSON]));
+  if (script == NULL) return nil;
+  status = StrappySessionStringFromCString(script);
+  return [StrappySession webViewBatchedJavaScriptForJavaScript:
+    [messages stringByAppendingString:status]];
 }
 
 - (NSString *)webViewClearProcessingStatusJavaScript

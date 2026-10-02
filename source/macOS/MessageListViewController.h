@@ -22,6 +22,10 @@
   NSTimer                  *streamEventFlushTimer_;
   NSString                 *newestRenderedTimelineCursor_;
   BOOL                      webViewReloadRequired_;
+  BOOL                      webViewContentLoaded_;
+  BOOL                      serviceRefreshPending_;
+  BOOL                      serviceRefreshInFlight_;
+  NSUInteger                webViewGeneration_;
   BOOL                      sending_;
   BOOL                      cancelPromptRequested_;
 }

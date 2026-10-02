@@ -167,6 +167,8 @@ char *strappy_webview_messages_page_html(
   const char *processing_status_json,
   strappy_webview_palette palette);
 
+/* Apply an authoritative snapshot while preserving unchanged DOM rows. */
+char *strappy_webview_sync_messages_js(const char *messages_html);
 char *strappy_webview_append_message_js(const char *message_html);
 char *strappy_webview_replace_message_js(const char *element_id,
                                          const char *message_html);

@@ -243,3 +243,61 @@ expect(sandbox.processingFinalAnswerGroup([answer]) === '',
 sandbox.processingInteractionsLocked = () => 0;
 expect(sandbox.processingFinalAnswerGroup([answer]) === '',
        'An unlocked prompt was mistaken for an active terminal answer.');
+
+// Exercise the generated snapshot reconciler against a small DOM adapter.
+// Live decoration changes must never be mistaken for database edits.
+const sync = { document, window: {}, setTimeout() {}, clearTimeout() {} };
+vm.createContext(sync);
+vm.runInContext(pageScript, sync);
+const rows = [];
+let replacements = 0;
+let scrolls = 0;
+const container = {
+  insertBefore(row, before) {
+    const index = before ? rows.indexOf(before) : rows.length;
+    expect(index >= 0, 'Snapshot insertion lost its successor.');
+    rows.splice(index, 0, row);
+    row.parentNode = this;
+  }
+};
+const node = (id, text) => ({ id, outerHTML: `${id}:${text}`, className: 'row' });
+sync.byId = (id) => id === 'messages' ? container : rows.find(row => row.id === id);
+sync.strappyMessageIndexesReady = 1;
+sync.nodesFromHTML = (snapshot) => ({ childNodes: snapshot.map(([id, text]) => node(id, text)) });
+sync.hasClass = (row, name) => row.className === name;
+sync.rowId = (row) => row.id;
+sync.messageRows = () => rows.slice();
+sync.toolSourceRows = () => [];
+sync.beginMessageBatch = () => {};
+sync.endMessageBatch = () => {};
+sync.processingFinalAnswerGroup = () => '';
+sync.flushPendingToolTargets = () => {};
+sync.renderAfterMutation = () => {};
+sync.indexMessageRow = () => {};
+sync.scrollBottomAnimated = () => { scrolls++; };
+sync.replaceMessage = (id, html) => {
+  const index = rows.findIndex(row => row.id === id);
+  rows[index] = { id, outerHTML: html, className: 'row', parentNode: container };
+  replacements++;
+};
+sync.removeMessage = (id) => { rows.splice(rows.findIndex(row => row.id === id), 1); };
+sync.syncMessages([['request', 'running'], ['answer', 'hello']]);
+const requestRow = rows[0];
+const answerRow = rows[1];
+answerRow.outerHTML = 'decorated markdown with an expanded disclosure';
+sync.syncMessages([['request', 'running'], ['answer', 'hello']]);
+expect(rows[0] === requestRow && rows[1] === answerRow && replacements === 0,
+  'Duplicate invalidation replaced live DOM rows or lost disclosure state.');
+expect(scrolls === 1, 'Duplicate invalidation restarted scrolling.');
+sync.syncMessages([['request', 'complete'], ['audit', 'passed'], ['answer', 'hello']]);
+expect(replacements === 1 && rows[0]._strappyCommittedHTML === 'request:complete',
+  'An update behind the append cursor did not reach the existing row.');
+expect(rows.map(row => row.id).join(',') === 'request,audit,answer' && rows[2] === answerRow,
+  'A late inserted row lost database order or replaced the existing answer.');
+expect(scrolls === 2, 'New committed content did not use animated scrolling.');
+sync.syncMessages([['answer', 'hello']]);
+expect(rows.length === 1 && rows[0] === answerRow,
+  'Snapshot removal failed to preserve the remaining row.');
+sync.syncMessages([]);
+expect(rows.length === 0, 'An empty authoritative snapshot did not remove stored rows.');
+console.log('WebView invalidations: stable DOM, changed rows, ordered insertion, animated additions, removal passed');

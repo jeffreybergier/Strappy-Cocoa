@@ -9248,6 +9248,16 @@ static int harness_test_session_webview_rendering(void)
             (error != NULL) ? error : "unexpected output");
     goto cleanup;
   }
+  {
+    char *refresh = strappy_session_webview_refresh_messages_js_for_session(
+      path, session_id, "../shared/Resources", &error);
+    ok = refresh != NULL && strcmp(refresh, "syncMessages('');") == 0;
+    strappy_session_free_string(refresh);
+    if (!ok) {
+      fprintf(stderr, "Could not refresh an empty committed snapshot.\n");
+      goto cleanup;
+    }
+  }
   current_timeline_cursor = strappy_session_timeline_cursor_for_session(
     path,
     session_id,
@@ -9466,6 +9476,21 @@ static int harness_test_session_webview_rendering(void)
             "Could not render stored WebView append JavaScript: %s\n",
             (error != NULL) ? error : "unexpected output");
     goto cleanup;
+  }
+
+  /* A service invalidation must include updates behind the append cursor. */
+  {
+    char *refresh = strappy_session_webview_refresh_messages_js_for_session(
+      path, session_id, "../shared/Resources", &error);
+    ok = refresh != NULL && strstr(refresh, "syncMessages(") != NULL &&
+      strstr(refresh, first_text) != NULL &&
+      strstr(refresh, second_display_text) != NULL &&
+      strstr(refresh, "removeMessage(") == NULL;
+    strappy_session_free_string(refresh);
+    if (!ok) {
+      fprintf(stderr, "Could not refresh the committed WebView snapshot.\n");
+      goto cleanup;
+    }
   }
 
   reconcile_script =
