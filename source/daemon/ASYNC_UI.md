@@ -1,71 +1,62 @@
-# Responsive Cocoa command and query boundary
+# Cocoa control and query boundary
 
-The daemon remains the writer. UI event handlers must never wait for a socket
-reply. `StrappyAsync` captures a bridge invocation and runs it on a serial command
-worker; completion and notification delivery occur on the main thread. The
-`StrappySession` and `FileScanner` mutation gateways reject main-thread calls
-before connecting, so new callers cannot accidentally reintroduce the stall.
-The process-lifetime C client owns a FIFO control worker and persistent command
-connection, established when the service becomes ready. Replies use increasing
-request IDs. A separate subscribed connection receives invalidations; monitor
-status queries use their own persistent connection so they do not wait behind
-commands. Reconnect revalidates version, ABI, and readiness; mutations are never
-replayed after a lost reply. Durable prompt/cancel commands may reconnect/retry.
-The daemon also retains its per-connection command worker between requests.
-Explicit OAuth refresh uses a separate one-shot command connection and daemon
-worker because it may wait on the network; it cannot occupy the control FIFO.
-Keychain operations and large physical deletions can still take time, so the
-control worker remains asynchronous to the GUI main thread.
+The daemon remains the writer. Short control operations execute synchronously
+on the GUI main thread. `StrappyAsync commandTarget:` invokes the bridge and
+its completion inline: there is no command-worker hop and no run-loop pumping.
+The C client sends and receives on that same thread through its permanent control
+connection. UI event order supplies FIFO ordering; the next event cannot submit
+another command before the current reply returns. The main thread intentionally
+waits for the daemon acknowledgment, including bounded failure/reconnect waits.
+
+Bootstrap establishes the control socket on the GUI main thread. Each background
+thread has an independent persistent connection, closed when that thread exits.
+Prompt submission/cancellation, authentication, and the service monitor therefore
+cannot occupy the GUI's socket or a shared client-side transport mutex. The
+monitor also retains its subscribed event connection. The daemon retains a
+command worker per connection and independent per-session prompt workers.
+
+Replies use increasing request IDs. Reconnect revalidates version, ABI, and
+readiness. Ordinary mutations never replay after an uncertain acknowledgment;
+durable prompt/cancel commands retain their existing request-key retry behavior.
+Explicit OAuth refresh remains on a separate network worker/connection.
 
 ## Choosing when to wait
 
-| Operation | UI behavior | Confirmation |
+| Operation | Execution | Confirmation |
 | --- | --- | --- |
-| Active-session model, account, tools, limits | Edit a shared local draft immediately | Send captures fields and submits them atomically with prompt acceptance |
-| Future-session defaults | Show a pending edit; disable its editor while saving | Reload stored defaults on completion, including failure |
-| Model/database approval or visibility, context inclusion, study reset/delete | Enqueue and return | Service notifications refresh committed values; failure reaches the common error channel |
-| Conversation/account/model creation, account/model save, deletion | Keep the originating editor responsive; disable duplicate saves | Only select a returned identifier, dismiss, or remove selection after acknowledgment |
-| macOS daemon install/verification | Queue launchctl work during startup | Initialize the store and show the main window on completion |
-| Scan, catalog fetch, Database Study start | Enqueue acceptance request | Job status and stored run state report actual progress and completion |
-| Prompt submission/cancellation, OAuth | Keep their existing background execution | Existing request keys/run state/authentication lifecycle remain authoritative |
-| Model/database catalog search | Keep current results visible with loading status | Separate query worker delivers a fresh filtered snapshot; stale results are discarded |
+| Active-session model, account, tools, limits | Shared local draft; no IPC | Settings submit atomically with prompt acceptance |
+| Future-session defaults | Main-thread control call | Read committed defaults in inline completion |
+| Model/database approval or visibility, context inclusion, study reset/delete | Main-thread control call | Notifications refresh committed values |
+| Conversation/account/model creation, save, deletion | Main-thread control call | Completion receives committed identifier/value before handler returns |
+| macOS daemon installation/verification | Explicit `backgroundTarget:` startup work | Main window opens on completion |
+| Scan, catalog fetch, Database Study start | Main-thread acceptance call | Actual long-running job remains in the daemon worker |
+| Prompt submission/cancellation and network authentication | Independent background/session paths | Existing durable run and authentication lifecycles |
+| Catalog search, sidebar refresh, conversation refresh | Existing query worker | Latest-only results return to the main thread |
 
-No enqueue operation means that the daemon has succeeded. Even the proxy's BOOL
-return only indicates that asynchronous completion has been scheduled. Callers
-use `StrappyAsyncResult` for actual success, value, and error. Validation that
-requires only form input still runs before enqueueing. Defaults are pending UI
-control state, not persisted conversation state. Bulk approval changes capture
-identifiers as one command and stop at the first failed item; already confirmed
-items remain committed and are refreshed normally. These batches are not atomic.
+Session creation opens the committed session directly in its inline completion;
+it does not wait for the asynchronous sidebar refresh before navigation. Catalog
+loading labels and query-worker behavior are unchanged.
 
 ## Ordering, ownership, and failure
 
-Commands execute FIFO in this process. Queue locks protect only bookkeeping;
-no IPC or database query runs under them. The bounded queue allows 128 waiting
-operations. Rejection still schedules a completion, so controls are restored and
-exactly one error is delivered. Ordinary commands are never implicitly retried.
-A lost acknowledgment has an unknown outcome: reload stored state before retrying.
-Prompt submission retains its existing durable request-key recovery behavior.
-The queue is process-local and is not a durable outbox. iOS includes pending
-commands in its existing background-task bookkeeping, but process termination
-can still lose commands that have not reached the daemon.
+The command proxy is single-use and captures invocation arguments, including
+64-bit scalars and copied NSCopying objects. Pass NULL for NSError**; the proxy
+provides invocation-local error storage. `StrappyAsyncResult` holds actual success,
+value, and error. The immediate BOOL return means the invocation was handled,
+including failure already delivered through completion/the error channel; it is
+not the bridge's success value. Object returns are intentionally ignored.
 
-The proxy is single-use. It owns a separate NSInvocation, copies NSCopying input
-objects, and captures scalar arguments without narrowing. Mutable children of
-collections must not be edited after submission. It installs a worker-local
-NSError pointer rather than keeping a pointer to a UI stack variable. Context
-and callback receivers live through delivery; callbacks must check screen and
-selection relevance before navigation. It is for bridge/service calls, never
-for moving a view/controller method to another thread.
+Short command completions run before the proxy returns. Callers must initialize
+completion state before invoking it. Receivers remain retained through delivery.
+A completion can handle an error locally; otherwise the common command-error
+notification reports it exactly once. No provisional conversation rows are made.
+Bulk approval operations stop on first failure; earlier committed items remain.
 
-Unhandled command errors publish `StrappyAsyncCommandFailedNotification` on the
-main thread. Both app delegates queue their presentation, independent of the
-original screen. A completion can explicitly consume an error when presenting it
-locally. The payload contains an operation title and sanitized NSError, never
-captured arguments, credentials, or exception details. Observed terminal scan
-and catalog-fetch failures also use this channel. Prompt/Study execution errors
-remain in their existing durable run/timeline state. This is not a persistent
-cross-launch error inbox; reconnection reconstructs authoritative service state.
+`backgroundTarget:` is reserved for slow local work such as launchctl startup.
+Its bounded FIFO, pending-count/background-task bookkeeping, asynchronous errors,
+and argument ownership remain unchanged. It is independent of the synchronous
+control path and the latest-only query worker. Background queries and startup
+work cannot prevent a short control invocation from executing on the main thread.
 
 ## Search and remaining local work
 
@@ -100,8 +91,8 @@ executable is `source/macOS/build-release/async-ui-probe-ppc`. Run as the normal
 user on a test device. The fixture blocks the command worker while pumping the
 main loop and completing an independent search. It checks FIFO execution,
 copied mutable input, 64-bit scalar/BOOL transport, latest-only search delivery,
-main-thread callbacks, handled/unhandled/detached errors, queue overflow, and production
-main-thread IPC guards. It performs no database mutation or provider request.
+main-thread callbacks, handled/unhandled/detached errors, queue overflow, and
+inline main-thread control execution while the background command worker is blocked. It performs no database mutation or provider request.
 Cold Foundation/NSProxy startup on an emulator is reported separately from the
 fact that enqueue returns while command execution remains deliberately blocked.
 

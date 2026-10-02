@@ -121,7 +121,7 @@ static NSAlert *StrappyAsyncErrorAlert;
        selector:@selector(strappySessionPromptDidFinish:)
            name:StrappySessionPromptDidFinishNotification
          object:nil];
-  [[StrappyAsync commandTarget:[StrappyServiceController class]
+  [[StrappyAsync backgroundTarget:[StrappyServiceController class]
     title:NSLocalizedString(@"Start background service",nil) receiver:self
     completion:@selector(backgroundServicePrepared:) context:nil] prepareForApplicationWithError:NULL];
 }

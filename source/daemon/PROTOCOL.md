@@ -198,14 +198,17 @@ thread. Retained paginated readers hold private temporary-table snapshots, not
 live WAL read transactions. See [STORAGE.md](STORAGE.md).
 
 Do not cancel accepted work when a client disconnects. The client API is
-synchronous, has bounded monotonic deadlines, and belongs on a background thread.
+synchronous and has bounded monotonic deadlines. Short control operations run
+on the GUI main thread; prompt/authentication work uses separate threads.
 After any I/O/protocol error, close it and resynchronize on a fresh connection.
 The current store monitor handles control-request correlation, reconnection
 backoff, and UI refresh hints. The `StrappySession` adapter sends prompts and cancels on background threads.
 It renders fresh DB state on service invalidation. `FileScanner` sends commands
 and reads catalog snapshots; it no longer performs scanning in the UI.
-Short metadata/acceptance commands run on the serial Cocoa command worker;
-the UI mutation gateways reject main-thread calls. OAuth refresh is called by
+Short metadata/acceptance commands and their completions run inline on the GUI
+main thread, including the socket send/receive. A permanent caller-owned control
+connection preserves their FIFO order. Background callers have independent
+connections and cannot hold a client-side control lock. OAuth refresh is called by
 the authentication background thread. No metadata command is automatically
 retried after a lost reply. See [ASYNC_UI.md](ASYNC_UI.md) for completion and
 app-wide asynchronous error delivery.

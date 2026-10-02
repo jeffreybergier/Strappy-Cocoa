@@ -53,12 +53,33 @@ static NSString *lastQuery;
 }
 @end
 
+static BOOL controlEntered;
+static unsigned int controlDelivered;
+@interface ControlFixture : NSObject
++ (BOOL)control:(NSError **)error;
+@end
+@implementation ControlFixture
++ (BOOL)control:(NSError **)error
+{
+  (void)error;
+  assert([NSThread XP_isMainThread]);
+  controlEntered = YES;
+  return YES;
+}
+@end
+
 @interface AsyncObserver : NSObject
 - (void)done:(StrappyAsyncResult *)result;
 - (void)queryDone:(StrappyAsyncResult *)result;
+- (void)controlDone:(StrappyAsyncResult *)result;
 - (void)failed:(NSNotification *)notification;
 @end
 @implementation AsyncObserver
+- (void)controlDone:(StrappyAsyncResult *)result
+{
+  assert([NSThread XP_isMainThread] && controlEntered && [result succeeded]);
+  ++controlDelivered;
+}
 - (void)done:(StrappyAsyncResult *)result
 {
   assert([NSThread XP_isMainThread]);
@@ -102,22 +123,26 @@ int main(void)
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   AsyncObserver *observer = [[[AsyncObserver alloc] init] autorelease];
   NSMutableString *text = [NSMutableString stringWithString:@"first"];
-  NSError *error = nil;
   NSTimeInterval start, elapsed;
   order = [[NSMutableArray alloc] init];
   [[NSNotificationCenter defaultCenter] addObserver:observer selector:@selector(failed:)
     name:StrappyAsyncCommandFailedNotification object:nil];
   start = [NSDate timeIntervalSinceReferenceDate];
-  [[StrappyAsync commandTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
+  [[StrappyAsync backgroundTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
     command:text big:1099511627776LL flag:YES error:NULL];
   elapsed = [NSDate timeIntervalSinceReferenceDate]-start;
   /* The first NSProxy invocation has cold-start cost on emulated Tiger.
    * Returning while the fixture stays blocked proves the caller does not wait. */
   [text setString:@"MUTATED AFTER ENQUEUE"];
-  [[StrappyAsync commandTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
+  [[StrappyAsync backgroundTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
     command:@"second" big:1099511627776LL flag:YES error:NULL];
   waitFor(&commandEntered,1);
   assert(delivered == 0 && [StrappyAsync pendingCommandCount] == 2);
+  /* Control executes and completes inline despite a deliberately blocked worker. */
+  [[StrappyAsync commandTarget:[ControlFixture class] title:@"Control" receiver:observer
+    completion:@selector(controlDone:) context:nil] control:NULL];
+  assert(controlEntered && controlDelivered == 1 && delivered == 0);
+  assert([StrappyAsync pendingCommandCount] == 2);
   /* Queries must complete even while the command worker is blocked. */
   [[StrappyAsync queryTarget:[AsyncFixture class] receiver:observer completion:@selector(queryDone:) context:nil] query:@"independent" error:NULL];
   waitFor(&queryResults,1);
@@ -134,22 +159,22 @@ int main(void)
   waitFor(&delivered,2);
   assert(([order isEqual:[NSArray arrayWithObjects:@"first",@"second",nil]]));
   assert([StrappyAsync pendingCommandCount] == 0);
-  [[StrappyAsync commandTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil] fail:NULL];
-  [[StrappyAsync commandTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:@"handled"] fail:NULL];
+  [[StrappyAsync backgroundTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil] fail:NULL];
+  [[StrappyAsync backgroundTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:@"handled"] fail:NULL];
   /* A failure without an originating view still reaches the common channel. */
-  [[StrappyAsync commandTarget:[AsyncFixture class] title:@"Fixture" receiver:nil completion:NULL context:nil] fail:NULL];
+  [[StrappyAsync backgroundTarget:[AsyncFixture class] title:@"Fixture" receiver:nil completion:NULL context:nil] fail:NULL];
   waitFor(&errors,2); waitFor(&delivered,4);
   assert(errors == 2 && [StrappyAsync pendingCommandCount] == 0);
   /* Queue overflow must complete asynchronously and release pending UI state. */
   pthread_mutex_lock(&lock); releaseCommands = NO; pthread_mutex_unlock(&lock);
-  [[StrappyAsync commandTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
+  [[StrappyAsync backgroundTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
     command:@"blocking" big:1099511627776LL flag:YES error:NULL];
   waitFor(&commandEntered,3);
   unsigned int index;
   for (index = 0; index < 128; ++index)
-    [[StrappyAsync commandTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
+    [[StrappyAsync backgroundTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
       command:@"queued" big:1099511627776LL flag:YES error:NULL];
-  [[StrappyAsync commandTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
+  [[StrappyAsync backgroundTarget:[AsyncFixture class] title:@"Fixture" receiver:observer completion:@selector(done:) context:nil]
     command:@"rejected" big:1099511627776LL flag:YES error:NULL];
   waitFor(&errors,3);
   assert([StrappyAsync pendingCommandCount] == 129);
@@ -157,13 +182,7 @@ int main(void)
   waitFor(&delivered,134);
   assert([StrappyAsync pendingCommandCount] == 0);
   assert(commandEntered == 131 && errors == 3);
-  /* Both production bridges reject main-thread transport before connecting. */
-  assert(![StrappySession setModelAllowed:YES forModelIdentifier:@"offline-fixture" error:&error]);
-  assert(error && [error code] == 1001);
-  error = nil;
-  assert(![[FileScanner sharedScanner] setCatalogedDatabaseAllowed:YES forCatalogIdentifier:[NSNumber numberWithInt:1] error:&error]);
-  assert(error != nil);
-  printf("PASS async UI: enqueue %.3f ms; FIFO, immutable arguments, 64-bit scalars, independent query worker, latest-only results, main-thread completions, exactly-once errors, detached errors, queue overflow, IPC guards\n",elapsed*1000);
+  printf("PASS async UI: enqueue %.3f ms; FIFO, immutable arguments, 64-bit scalars, independent query worker, latest-only results, main-thread completions, exactly-once errors, detached errors, queue overflow, synchronous main-thread control\n",elapsed*1000);
   [[NSNotificationCenter defaultCenter] removeObserver:observer];
   [order release]; [lastQuery release];
   [pool release];

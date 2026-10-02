@@ -6,6 +6,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+static pthread_t main_thread;
+int __real_strappy_ipc_send(int fd, const strappy_ipc_message *message, int timeout);
+int __wrap_strappy_ipc_send(int fd, const strappy_ipc_message *message, int timeout)
+{
+    if (message->operation == STRAPPY_IPC_MUTATE &&
+        strstr((const char *)message->payload,"\"fixture\""))
+        assert(pthread_equal(pthread_self(),main_thread));
+    return __real_strappy_ipc_send(fd,message,timeout);
+}
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t condition = PTHREAD_COND_INITIALIZER;
 static int ready;
@@ -26,18 +35,31 @@ static void *refresh(void *unused)
     assert(result && status == STRAPPY_IPC_OK);
     free(result); cJSON_Delete(command); return NULL;
 }
+static void *background(void *unused)
+{
+    unsigned int status;
+    cJSON *command = cJSON_CreateObject();
+    char *result;
+    (void)unused;
+    cJSON_AddStringToObject(command,"action","background_fixture");
+    result = strappy_store_client_mutation(STRAPPY_IPC_MUTATE,command,&status);
+    assert(result && status == STRAPPY_IPC_OK);
+    free(result); cJSON_Delete(command); return NULL;
+}
 int main(int argc, char **argv)
 {
     unsigned int status, i;
-    pthread_t refresher;
+    pthread_t refresher, background_worker;
     cJSON *command;
     char *result;
+    main_thread = pthread_self();
     assert(argc == 3);
     assert(strappy_store_client_start(argv[1],argv[2],changed));
     pthread_mutex_lock(&mutex);
     while (!ready) pthread_cond_wait(&condition,&mutex);
     pthread_mutex_unlock(&mutex);
     assert(pthread_create(&refresher,NULL,refresh,NULL) == 0);
+    assert(pthread_create(&background_worker,NULL,background,NULL) == 0);
     command = cJSON_CreateObject();
     cJSON_AddStringToObject(command,"action","fixture");
     for (i = 0; i < 32; ++i) {
@@ -51,6 +73,7 @@ int main(int argc, char **argv)
     assert(result && status == STRAPPY_IPC_OK); free(result);
     cJSON_Delete(command);
     pthread_join(refresher,NULL);
-    puts("control client: persistent connection, ordered replies, no mutation replay, reconnect, independent OAuth lane passed");
+    pthread_join(background_worker,NULL);
+    puts("control client: caller-thread transport, independent background connection, persistent connection, ordered replies, no mutation replay, reconnect, independent OAuth lane passed");
     return 0;
 }

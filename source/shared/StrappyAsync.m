@@ -37,6 +37,7 @@ NSString * const StrappyAsyncActivityChangedNotification = @"StrappyAsyncActivit
   id context;
   NSString *title;
   BOOL query;
+  BOOL synchronous;
   BOOL superseded;
   StrappyAsyncResult *result;
 }
@@ -104,12 +105,12 @@ static NSUInteger StrappyCommandCount;
   @synchronized([StrappyAsync class]) {
     discard = superseded;
     if (query) [StrappyQueries removeObjectIdenticalTo:self];
-    else --StrappyCommandCount;
+    else if (!synchronous) --StrappyCommandCount;
   }
   if (!discard && receiver && completion) [receiver performSelector:completion withObject:result];
   if (!query) {
     [result publishUnhandledError];
-    [StrappyAsync postNotificationName:StrappyAsyncActivityChangedNotification object:nil];
+    if (!synchronous) [StrappyAsync postNotificationName:StrappyAsyncActivityChangedNotification object:nil];
   }
 }
 @end
@@ -151,7 +152,14 @@ static NSUInteger StrappyCommandCount;
   }
   [captured retainArguments];
   request_->invocation = [captured retain];
-  queued = [StrappyAsync enqueue:request_];
+  if (request_->synchronous) {
+    NSAssert([NSThread XP_isMainThread], @"Control commands require the GUI main thread");
+    [request_ execute];
+    [request_ deliver];
+    queued = YES;
+  } else {
+    queued = [StrappyAsync enqueue:request_];
+  }
   if ([signature methodReturnLength]) {
     if (!strcmp([signature methodReturnType],@encode(BOOL))) [call setReturnValue:&queued];
     else { id empty = nil; NSAssert(!strcmp([signature methodReturnType],"@"), @"Unsupported async return type"); [call setReturnValue:&empty]; }
@@ -169,6 +177,15 @@ static NSUInteger StrappyCommandCount;
   return [[[StrappyAsyncProxy alloc] initWithTarget:target request:request] autorelease];
 }
 + (id)commandTarget:(id)target title:(NSString *)title receiver:(id)receiver completion:(SEL)completion context:(id)context
+{
+  NSAssert([NSThread XP_isMainThread], @"Control commands require the GUI main thread");
+  StrappyAsyncRequest *request = [[[StrappyAsyncRequest alloc] init] autorelease];
+  request->receiver = [receiver retain]; request->completion = completion;
+  request->context = [context retain]; request->title = [title copy];
+  request->synchronous = YES;
+  return [[[StrappyAsyncProxy alloc] initWithTarget:target request:request] autorelease];
+}
++ (id)backgroundTarget:(id)target title:(NSString *)title receiver:(id)receiver completion:(SEL)completion context:(id)context
 { return [self target:target title:title receiver:receiver completion:completion context:context query:NO]; }
 + (id)queryTarget:(id)target receiver:(id)receiver completion:(SEL)completion context:(id)context
 { return [self target:target title:nil receiver:receiver completion:completion context:context query:YES]; }

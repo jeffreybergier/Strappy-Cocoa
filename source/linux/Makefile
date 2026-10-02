@@ -483,7 +483,7 @@ mutation-test: $(BUILD_DIR)/strappyd
 test: mutation-test
 
 $(BUILD_DIR)/control_client_harness: control_client_harness.c $(STRAPPY_STORE_SOURCES) ../shared/strappy_store_client.c ../shared/strappy_ipc.c ../shared/strappy_ipc.h | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../shared/strappy_store_client.c ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../shared/strappy_store_client.c ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -Wl,--wrap=strappy_ipc_send -o $@
 .PHONY: control-client-test
 control-client-test: $(BUILD_DIR)/control_client_harness
 	python3 control_client_harness.py $(BUILD_DIR)/control_client_harness

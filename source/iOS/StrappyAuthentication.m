@@ -519,10 +519,6 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
     verificationURL_ = nil;
     userCode_ = nil;
   }
-  if ([NSThread XP_isMainThread]) {
-    [[StrappyAsync commandTarget:self title:NSLocalizedString(@"Sign out of ChatGPT",nil) receiver:nil completion:NULL context:nil] signOutChatGPT];
-    return YES;
-  }
   providerAccountIdentifier = [self designatedProviderAccountIdentifier];
   deleted = [StrappySession deleteChatGPTCredentialsForProviderAccountIdentifier:providerAccountIdentifier error:NULL];
   @synchronized(self) {

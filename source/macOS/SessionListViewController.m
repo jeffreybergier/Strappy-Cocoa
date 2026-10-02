@@ -979,7 +979,11 @@ static void StrappyDrawTintedImage(NSImage *image,
   identifier = [session sessionIdentifier];
   if (![result succeeded] || ![identifier isKindOfClass:[NSNumber class]]) return;
 
-  [self reloadSessionIdentifier:identifier select:YES];
+  [selectedSessionId_ release];
+  selectedSessionId_ = [identifier retain];
+  pendingSelectionNotification_ = NO;
+  if (delegate_ != nil) [delegate_ sessionListViewController:self didSelectSession:session];
+  [self reloadData];
 }
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView

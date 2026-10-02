@@ -11,8 +11,9 @@ enum {
  * is a refresh hint; consumers schedule reads of committed data and publish UI updates. */
 int strappy_store_client_start(const char *socket_path, const char *database_path,
                                void (*changed)(unsigned int topics));
-/* Process-lifetime FIFO control worker and persistent connection. Blocking
- * completion for background callers only. Durable commands may reconnect/retry;
+/* Synchronous caller-thread transport. The start/bootstrap caller (GUI main)
+ * owns the permanent FIFO control connection. Other threads use independent
+ * persistent connections, closed at thread exit. Durable commands may reconnect/retry;
  * ordinary mutations never replay after an uncertain acknowledgement. */
 int strappy_store_client_command(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status);

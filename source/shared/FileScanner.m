@@ -35,12 +35,6 @@ static BOOL FileScannerDatabaseCatalogScanInFlight = NO;
 
 static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError **error)
 {
-  if ([NSThread XP_isMainThread]) {
-    cJSON_Delete(command);
-    if (error) *error = [FileScanner errorFromCString:"The action could not be started."];
-    return NO;
-  }
-
   unsigned int status;
   char *reply = strappy_store_client_mutation(operation,command,&status);
   BOOL ok = reply != NULL;

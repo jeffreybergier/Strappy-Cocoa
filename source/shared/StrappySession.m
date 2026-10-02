@@ -677,12 +677,6 @@ static BOOL StrappySessionRecordFromOptions(
 
 static NSString *StrappyServiceCommand(unsigned int operation, NSDictionary *values, NSError **error)
 {
-  if ([NSThread XP_isMainThread]) {
-    if (error) *error = [NSError errorWithDomain:@"StrappyServiceErrorDomain" code:1001
-      userInfo:[NSDictionary dictionaryWithObject:@"The action could not be started." forKey:NSLocalizedDescriptionKey]];
-    return nil;
-  }
-
   cJSON *command = cJSON_CreateObject();
   NSEnumerator *keys = [values keyEnumerator];
   NSString *key;

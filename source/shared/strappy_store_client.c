@@ -14,21 +14,28 @@ static pthread_mutex_t strappy_status_mutex = PTHREAD_MUTEX_INITIALIZER;
 static unsigned int strappy_active_job, strappy_last_job, strappy_job_result;
 static int strappy_store_exchange(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status, char **response, int attempts, int timeout);
-/* The process-lifetime control worker owns its socket. Callers wait on their
- * own completion, never on the GUI thread; insertion order is execution order. */
-typedef struct strappy_control_request {
-    unsigned int operation, length, status;
-    const unsigned char *payload;
-    char *response;
-    int attempts, timeout, done, ok;
-    pthread_cond_t completed;
-    struct strappy_control_request *next;
-} strappy_control_request;
-static pthread_mutex_t strappy_control_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t strappy_control_changed = PTHREAD_COND_INITIALIZER;
-static strappy_control_request *strappy_control_head, *strappy_control_tail;
-static int strappy_control_started;
-static void *strappy_control_run(void *unused);
+/* The bootstrap caller is the GUI main thread. It owns the permanent control
+ * socket and performs send/receive itself. Other threads own independent lanes. */
+typedef struct strappy_client_connection {
+    int fd;
+    uint32_t sequence;
+} strappy_client_connection;
+static pthread_t strappy_control_owner;
+static strappy_client_connection strappy_control_connection = { -1, 0 };
+static pthread_key_t strappy_connection_key;
+static pthread_once_t strappy_connection_once = PTHREAD_ONCE_INIT;
+static int strappy_connection_key_ready;
+static void strappy_connection_destroy(void *context)
+{
+    strappy_client_connection *connection = context;
+    if (connection->fd >= 0) close(connection->fd);
+    free(connection);
+}
+static void strappy_connection_key_create(void)
+{
+    strappy_connection_key_ready = pthread_key_create(&strappy_connection_key,
+        strappy_connection_destroy) == 0;
+}
 static void strappy_store_refresh_work(void)
 {
     unsigned int status = 0;
@@ -85,9 +92,6 @@ static void *strappy_store_monitor_run(void *context)
         }
         ready = fd >= 0 && operation > STRAPPY_IPC_SUBSCRIBE;
         if (ready) {
-            unsigned int status;
-            /* Establish/recover the control connection before exposing readiness. */
-            (void)strappy_store_exchange(STRAPPY_IPC_SNAPSHOT,NULL,0,&status,NULL,2,2000);
             strappy_db_set_service_ready(monitor->database_path, 1);
             strappy_store_refresh_work();
             monitor->changed(STRAPPY_STORE_ALL);
@@ -136,9 +140,14 @@ int strappy_store_client_start(const char *socket_path, const char *database_pat
     if (monitor->socket_path == NULL || monitor->database_path == NULL) goto fail;
     strcpy(monitor->socket_path, socket_path);
     strcpy(monitor->database_path, database_path);
+    strappy_control_owner = pthread_self();
     strappy_command_socket = monitor->socket_path;
     if (pthread_create(&thread, NULL, strappy_store_monitor_run, monitor) != 0) { strappy_command_socket = NULL; goto fail; }
     pthread_detach(thread);
+    {
+        unsigned int status;
+        (void)strappy_store_exchange(STRAPPY_IPC_SNAPSHOT,NULL,0,&status,NULL,1,2000);
+    }
     return 1;
 fail:
     free(monitor->socket_path); free(monitor->database_path); free(monitor);
@@ -210,71 +219,28 @@ static int strappy_store_exchange_once(unsigned int operation, const unsigned ch
     return 0;
 }
 
-static void *strappy_control_run(void *unused)
-{
-    int fd = -1;
-    uint32_t sequence = 0;
-    (void)unused;
-    for (;;) {
-        strappy_control_request *request;
-        pthread_mutex_lock(&strappy_control_mutex);
-        while (!strappy_control_head) pthread_cond_wait(&strappy_control_changed, &strappy_control_mutex);
-        request = strappy_control_head;
-        strappy_control_head = request->next;
-        if (!strappy_control_head) strappy_control_tail = NULL;
-        pthread_mutex_unlock(&strappy_control_mutex);
-        request->ok = strappy_store_exchange_once(request->operation, request->payload,
-            request->length, &request->status, &request->response, request->attempts,
-            request->timeout, &fd, &sequence);
-        pthread_mutex_lock(&strappy_control_mutex);
-        request->done = 1;
-        pthread_cond_signal(&request->completed);
-        pthread_mutex_unlock(&strappy_control_mutex);
-    }
-    return NULL;
-}
 static int strappy_store_exchange(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status, char **response, int attempts, int timeout)
 {
-    strappy_control_request *request;
-    int ok;
-    /* Monitor status must not wait behind control work. It owns a second,
-     * persistent command socket in addition to its subscription. */
-    if (operation == STRAPPY_IPC_WORK_STATUS) {
-        static int monitor_fd = -1;
-        static uint32_t monitor_sequence;
-        static pthread_mutex_t monitor_mutex = PTHREAD_MUTEX_INITIALIZER;
-        int ok;
-        pthread_mutex_lock(&monitor_mutex);
-        ok = strappy_store_exchange_once(operation,payload,length,status,response,
-            attempts,timeout,&monitor_fd,&monitor_sequence);
-        pthread_mutex_unlock(&monitor_mutex);
-        return ok;
-    }
-    request = calloc(1,sizeof(*request));
-    if (!request) return 0;
-    request->operation = operation; request->payload = payload; request->length = length;
-    request->attempts = attempts; request->timeout = timeout;
-    if (pthread_cond_init(&request->completed,NULL) != 0) { free(request); return 0; }
-    pthread_mutex_lock(&strappy_control_mutex);
-    if (!strappy_control_started) {
-        pthread_t worker;
-        if (pthread_create(&worker,NULL,strappy_control_run,NULL) != 0) {
-            pthread_mutex_unlock(&strappy_control_mutex);
-            pthread_cond_destroy(&request->completed); free(request); return 0;
+    strappy_client_connection *connection;
+    if (!strappy_command_socket) return 0;
+    if (pthread_equal(pthread_self(), strappy_control_owner)) {
+        connection = &strappy_control_connection;
+    } else {
+        pthread_once(&strappy_connection_once, strappy_connection_key_create);
+        if (!strappy_connection_key_ready) return 0;
+        connection = pthread_getspecific(strappy_connection_key);
+        if (!connection) {
+            connection = calloc(1,sizeof(*connection));
+            if (!connection) return 0;
+            connection->fd = -1;
+            if (pthread_setspecific(strappy_connection_key,connection) != 0) {
+                free(connection); return 0;
+            }
         }
-        pthread_detach(worker); strappy_control_started = 1;
     }
-    if (strappy_control_tail) strappy_control_tail->next = request;
-    else strappy_control_head = request;
-    strappy_control_tail = request;
-    pthread_cond_signal(&strappy_control_changed);
-    while (!request->done) pthread_cond_wait(&request->completed,&strappy_control_mutex);
-    pthread_mutex_unlock(&strappy_control_mutex);
-    pthread_cond_destroy(&request->completed);
-    *status = request->status;
-    if (response) *response = request->response; else free(request->response);
-    ok = request->ok; free(request); return ok;
+    return strappy_store_exchange_once(operation,payload,length,status,response,
+        attempts,timeout,&connection->fd,&connection->sequence);
 }
 
 int strappy_store_client_command(unsigned int operation, const unsigned char *payload,

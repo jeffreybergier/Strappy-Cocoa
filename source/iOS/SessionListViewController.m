@@ -324,7 +324,11 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   identifier = [session sessionIdentifier];
   if (![result succeeded] || ![identifier isKindOfClass:[NSNumber class]]) return;
 
-  [self reloadSessionIdentifier:identifier select:YES];
+  [self setSelectedSessionId:identifier];
+  pendingSelectionNotification_ = NO;
+  if ([[self delegate] respondsToSelector:@selector(sessionListViewController:didSelectSession:)])
+    [[self delegate] sessionListViewController:self didSelectSession:session];
+  [self reloadData];
 }
 
 - (void)strappySessionDidUpdate:(NSNotification *)notification

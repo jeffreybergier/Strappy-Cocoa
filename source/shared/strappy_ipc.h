@@ -70,8 +70,9 @@ int strappy_ipc_server_committed(strappy_ipc_server *server, uint32_t event);
 void strappy_ipc_server_drain(strappy_ipc_server *server);
 void strappy_ipc_server_close(strappy_ipc_server *server);
 
-/* Blocking client primitives for a UI-owned background thread; each complete
- * send/read has a bounded timeout. Never use these on the UI thread.
+/* Blocking caller-thread primitives; each complete send/read has a bounded
+ * timeout. Short UI control calls intentionally wait on the GUI main thread;
+ * prompt, monitor, and network-authentication work uses independent threads.
  * expected_uid authenticates the server (normally the client's own euid).
  * Close/reconnect after ANY I/O failure, then hello + subscribe/snapshot. */
 int strappy_ipc_connect(const char *path, uid_t expected_uid, int timeout_ms);

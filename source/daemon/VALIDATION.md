@@ -921,3 +921,22 @@ Final clean builds passed for iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64
 with no compiler warnings. The complete offline Linux suite passed, including
 the final heap-owned control-request implementation and independent OAuth lane.
 Build and analysis logs remain outside the checkout and are not committed.
+
+
+## Main-thread control correction
+
+The earlier background-control validation above describes the superseded design.
+Short Cocoa commands now invoke their bridge and completion synchronously on the
+GUI main thread. The C transport performs socket I/O on the caller thread, with
+no control worker, request queue, or cross-thread completion wait. Background
+callers have independent connections. Add Session navigates using the committed
+returned session before the separate sidebar query finishes.
+
+`control_client_harness` wraps the actual send primitive and asserts that control
+mutations reach it on the bootstrap/main thread. Its synthetic peer simultaneously
+holds an ordinary background mutation and OAuth refresh until a main-thread
+command arrives, proving neither owns the main control lane. The existing checks
+still cover persistent connection reuse, reply ordering, uncertain-acknowledgment
+no-replay behavior, and reconnect. The native dispatcher fixture asserts that a
+main control method and its callback finish before the call returns even while
+the explicit background worker is blocked. Database loading labels are unchanged.

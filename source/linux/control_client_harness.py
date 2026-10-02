@@ -1,4 +1,5 @@
 """Count connections/handshakes, enforce monotonically ordered requests, lose a reply."""
+import json
 import socket
 import struct
 import subprocess
@@ -10,7 +11,7 @@ header = struct.Struct('!4sHHIIII')
 errors, mutation_connections = [], []
 count = 0
 lock = threading.Lock()
-refresh_entered, control_seen = threading.Event(), threading.Event()
+refresh_entered, control_seen, background_entered = threading.Event(), threading.Event(), threading.Event()
 def exact(s, n):
     data = b''
     while len(data) < n:
@@ -40,7 +41,12 @@ with tempfile.TemporaryDirectory(prefix='strappy-control-',dir='/tmp') as tmp:
                         refresh_entered.set()
                         assert control_seen.wait(3), 'refresh blocked the control FIFO'
                         response = b'ok'
+                    elif op == 25 and json.loads(payload)['action'] == 'background_fixture':
+                        background_entered.set()
+                        assert control_seen.wait(3), 'background request blocked main control'
+                        response = b'ok'
                     elif op == 25:
+                        assert background_entered.wait(3), 'missing background lane'
                         assert refresh_entered.wait(3), 'missing independent refresh'
                         control_seen.set()
                         with lock:

@@ -3,9 +3,8 @@
 extern NSString * const StrappyAsyncCommandFailedNotification;
 extern NSString * const StrappyAsyncActivityChangedNotification;
 
-/* A request owns its captured arguments until execution and delivers its result
- * on the main thread. Commands are FIFO and never automatically retried. Query
- * requests are superseded by a newer query for the same receiver/selector. */
+/* Results carry the actual method value/error. Short command completions run
+ * inline on the main thread; background/query completions return to it later. */
 @interface StrappyAsyncResult : NSObject {
  @private
   id value_;
@@ -22,14 +21,18 @@ extern NSString * const StrappyAsyncActivityChangedNotification;
 @end
 
 @interface StrappyAsync : NSObject
-/* Send exactly one ordinary Objective-C message to the returned proxy. Its
- * arguments are captured, not executed on the caller. Pass NULL for NSError**.
- * Ignore the immediate object result; BOOL only means a completion was scheduled, including queue rejection. Use completion
- * whenever later UI work depends on the actual result. The receiver is retained
- * through completion; callbacks must check whether their view is still relevant.
- * Only bridge/service methods, never view/controller methods, belong here. */
+/* Short control command: invoke and deliver completion synchronously on the
+ * GUI main thread. No worker hop or run-loop pumping. Send one message to each
+ * proxy and pass NULL for NSError**; inspect StrappyAsyncResult in completion.
+ * The immediate object result is nil; BOOL means the invocation was handled,
+ * including failures already delivered through completion/the error channel. */
 + (id)commandTarget:(id)target title:(NSString *)title
   receiver:(id)receiver completion:(SEL)completion context:(id)context;
+/* Explicitly slow local work (e.g. launchctl startup), separate from control.
+ * Captures arguments and queues them; completion is asynchronous. */
++ (id)backgroundTarget:(id)target title:(NSString *)title
+  receiver:(id)receiver completion:(SEL)completion context:(id)context;
+/* Read-only database queries remain asynchronous and latest-only per callback. */
 + (id)queryTarget:(id)target receiver:(id)receiver completion:(SEL)completion
   context:(id)context;
 + (NSUInteger)pendingCommandCount;
