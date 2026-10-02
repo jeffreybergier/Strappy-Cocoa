@@ -10019,12 +10019,148 @@ static int harness_test_raw_json_debug_capture(void)
 }
 #endif
 
+static int harness_test_reused_tool_ids(void)
+{
+  static const char *call_response =
+    "{\"status\":\"completed\",\"output\":[{\"type\":\"function_call\","
+    "\"call_id\":\"call_0\",\"name\":\"memory_save\",\"arguments\":\"{}\"}]}";
+  static const char *output_request =
+    "{\"input\":[{\"type\":\"function_call_output\",\"call_id\":\"call_0\","
+    "\"output\":\"saved\"}]}";
+  char path[] = "/tmp/strappy-reused-tool-ids-XXXXXX";
+  char *error = NULL;
+  sqlite3 *db = NULL;
+  long long sessions[2], call = 0, value;
+  int fd = mkstemp(path), ok, session_index, turn, round;
+  if (fd < 0) return 0;
+  close(fd);
+  ok = harness_create_session_database(path, &sessions[0], &error) &&
+    strappy_db_create_session(path, &sessions[1], &error);
+  for (turn = 0; ok && turn < 2; ++turn) {
+    for (session_index = 0; ok && session_index < 2; ++session_index) {
+      char group[32];
+      snprintf(group, sizeof(group), "reused-%d", turn);
+      call = 0;
+      for (round = 0; ok && round < 3; ++round) {
+        strappy_response_call_begin_input begin;
+        strappy_response_call_finish_input finish;
+        memset(&begin, 0, sizeof(begin));
+        begin.session_id = sessions[session_index];
+        begin.previous_call_id = call;
+        begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+        begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
+        begin.prompt_group_key = group;
+        begin.request_kind = round ? "tool_continuation" : "user";
+        begin.round_index = round;
+        begin.new_input_start_index = 0;
+        begin.request_method = "POST";
+        begin.request_url = "http://localhost/responses";
+        begin.request_json = round ? output_request : "{\"input\":[]}";
+        ok = strappy_db_begin_response_call(path, &begin, &call, &error);
+        memset(&finish, 0, sizeof(finish));
+        finish.call_id = call;
+        finish.state = "completed";
+        finish.http_status = 200;
+        finish.output_is_canonical = 1;
+        finish.response_json = round < 2 ? call_response : "{\"output\":[]}";
+        if (ok) ok = strappy_db_finish_response_call(path, &finish, &error);
+        if (ok && round < 2) {
+          strappy_response_tool_execution_input execution;
+          char arguments[100];
+          char *result;
+          memset(&execution, 0, sizeof(execution));
+          execution.session_id = sessions[session_index];
+          execution.response_call_id = call;
+          execution.call_id = "call_0";
+          execution.tool_name = "memory_save";
+          execution.status = "completed";
+          ok = strappy_db_save_response_tool_execution(path, &execution, &error);
+          snprintf(arguments, sizeof(arguments),
+            "{\"fact\":\"Fixture preference %d %d %d\"}", turn, session_index, round);
+          result = ok ? strappy_tools_execute_for_function_call(path,
+            sessions[session_index], "../shared/Resources", "call_0", "memory_save",
+            arguments, &error) : NULL;
+          ok = ok && result != NULL;
+          free(result);
+        }
+      }
+    }
+  }
+  if (ok) ok = sqlite3_open(path, &db) == SQLITE_OK;
+  if (ok) ok =
+    harness_query_int(db, "SELECT COUNT(*) FROM function_calls WHERE provider_call_id='call_0'", &value) && value == 8 &&
+    harness_query_int(db, "SELECT COUNT(DISTINCT function_call_item_id) FROM function_outputs", &value) && value == 8 &&
+    harness_query_int(db, "SELECT COUNT(*) FROM function_outputs o JOIN conversation_items oi ON oi.id=o.item_id JOIN conversation_items ci ON ci.id=o.function_call_item_id WHERE oi.session_id<>ci.session_id OR oi.turn_id<>ci.turn_id", &value) && value == 0 &&
+    harness_query_int(db, "SELECT COUNT(DISTINCT source_item_id) FROM user_facts", &value) && value == 8 &&
+    harness_query_int(db, "SELECT COUNT(DISTINCT function_call_item_id) FROM tool_executions", &value) && value == 8;
+  if (db) sqlite3_close(db);
+  if (!ok) fprintf(stderr, "Reused tool IDs failed: %s\n", error ? error : "wrong association");
+  free(error);
+  unlink(path);
+  return ok;
+}
+
+static int harness_test_response_persistence_failure(void)
+{
+  char path[] = "/tmp/strappy-response-save-error-XXXXXX";
+  char endpoint[128];
+  char *error = NULL, *result = NULL, *html = NULL;
+  sqlite3 *db = NULL;
+  long long session = 0, value;
+  pid_t server = -1;
+  int fd = mkstemp(path), ok;
+  if (fd < 0) return 0;
+  close(fd);
+  ok = harness_create_session_database(path, &session, &error) &&
+    strappy_db_update_session_web_search_enabled(path, session, 0, &error) &&
+    sqlite3_open(path, &db) == SQLITE_OK;
+  if (ok) ok = sqlite3_exec(db,
+    "CREATE TRIGGER reject_response_item BEFORE INSERT ON conversation_items "
+    "WHEN NEW.source_attempt_id IS NOT NULL AND "
+    "(SELECT r.round_index FROM http_attempts a JOIN model_requests r "
+    "ON r.id=a.request_id WHERE a.id=NEW.source_attempt_id)=1 "
+    "BEGIN SELECT RAISE(ABORT,'fixture response storage rejected'); END;",
+    NULL, NULL, NULL) == SQLITE_OK;
+  if (db) { sqlite3_close(db); db = NULL; }
+  if (ok) ok = harness_start_server(HARNESS_RESPONSES_SERVER_FUNCTION_TOOL,
+    endpoint, sizeof(endpoint), &server);
+  if (ok) {
+    result = strappy_responses_send_prompt_for_session_and_store_with_events(
+      "Run a local function", "/dev/null", endpoint, "test-token",
+      "../shared/Resources", path, session, NULL, NULL, &error);
+    ok = harness_wait_for_server(server, 0) && result == NULL && error &&
+      strstr(error, "fixture response storage rejected") != NULL;
+    server = -1;
+    if (!ok) fprintf(stderr, "Failure runtime stage: %s\n", error ? error : "unexpected result");
+  }
+  free(error); error = NULL;
+  if (ok) ok = sqlite3_open(path, &db) == SQLITE_OK;
+  if (ok) ok =
+    harness_query_int(db, "SELECT COUNT(*) FROM http_attempts WHERE state IN ('pending','running')", &value) && value == 0 &&
+    harness_query_int(db, "SELECT COUNT(*) FROM api_results WHERE error_code='response_persistence_failed' AND error_message LIKE '%fixture response storage rejected%'", &value) && value == 1 &&
+    harness_query_int(db, "SELECT COUNT(*) FROM http_attempts WHERE state='response_error' AND http_status=200", &value) && value == 1;
+  if (db) sqlite3_close(db);
+  if (ok) {
+    html = strappy_session_webview_messages_page_html_for_session(path, session,
+      "../shared/Resources", NULL, NULL, STRAPPY_WEBVIEW_PALETTE_APPLICATION_TINTED,
+      NULL, NULL, &error);
+    ok = html && strstr(html, "fixture response storage rejected");
+  }
+  if (!ok) fprintf(stderr, "Persistence failure timeline test failed: %s\n", error ? error : "missing terminal error");
+  if (server > 0) (void)harness_wait_for_server(server, 1);
+  free(result); free(html); free(error);
+  unlink(path);
+  return ok;
+}
+
 int main(void)
 {
   if (
 #if STRAPPY_RAW_JSON_DEBUG_CAPTURE
       harness_test_raw_json_debug_capture() &&
 #endif
+      harness_test_reused_tool_ids() &&
+      harness_test_response_persistence_failure() &&
       harness_test_unicode_emoji_scan() &&
       harness_test_working_directory_selection() &&
       harness_test_request_surfaces() &&

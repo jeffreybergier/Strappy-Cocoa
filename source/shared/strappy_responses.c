@@ -2466,7 +2466,35 @@ static int strappy_responses_finish_call(
       (http != NULL) ? http->raw_response_body_length : 0U);
   }
   free(debug_error);
-  return strappy_db_finish_response_call(session_db_path, &input, error_out);
+  if (!strappy_db_finish_response_call(session_db_path, &input, error_out)) {
+    cJSON *failure = cJSON_CreateObject();
+    cJSON *detail = cJSON_AddObjectToObject(failure, "error");
+    char *failure_json = NULL;
+    /* The result transaction may have rolled back on an unsupported item or
+     * constraint failure. Persist that failure without the rejected output so
+     * the existing DB-backed API-error timeline can render it after reconnect.
+     * Keep the original diagnostic capture and error returned to the caller. */
+    if (detail &&
+        cJSON_AddStringToObject(detail, "type", "harness_error") &&
+        cJSON_AddStringToObject(detail, "code", "response_persistence_failed") &&
+        cJSON_AddStringToObject(detail, "message",
+          (error_out && *error_out) ? *error_out :
+            "Could not store the provider response.")) {
+      failure_json = cJSON_PrintUnformatted(failure);
+    }
+    if (failure_json) {
+      input.state = "response_error";
+      input.is_error = 1;
+      input.output_is_canonical = 0;
+      input.answer_quality_audit = NULL;
+      input.response_json = failure_json;
+      (void)strappy_db_finish_response_call(session_db_path, &input, NULL);
+    }
+    free(failure_json);
+    cJSON_Delete(failure);
+    return 0;
+  }
+  return 1;
 }
 
 static void strappy_responses_log_call_started(

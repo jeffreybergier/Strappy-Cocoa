@@ -3549,7 +3549,8 @@ static int strappy_tools_resolve_source_item_id(sqlite3 *db,
   static const char *sql =
     "SELECT f.item_id FROM function_calls f "
     "JOIN conversation_items i ON i.id = f.item_id "
-    "WHERE f.provider_call_id = ? AND i.session_id = ?;";
+    "WHERE f.provider_call_id = ? AND i.session_id = ? "
+    "AND i.include_in_context=1 ORDER BY i.sequence DESC LIMIT 1;";
   sqlite3_stmt *stmt;
   int rc;
 

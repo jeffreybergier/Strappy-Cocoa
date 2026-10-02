@@ -103,3 +103,24 @@ executable, retaining logs, the installation lock file, and all user app data.
 Deleting the app alone leaves the installed service; launching Strappy again
 installs it again. The maintenance command-line options do not initialize the UI or provider
 credentials. Installing starts the service, which initializes its store. Provider and scanner workers remain unavailable; store ownership has moved.
+
+## Response diagnostics during the refactor
+
+`STRAPPY_RAW_JSON_DEBUG_CAPTURE` currently defaults to `1` in
+`strappy_debug_capture.h`. The existing capture mechanism writes request JSON
+and the unprocessed response body beneath the store's `debug/sessions` directory,
+keyed by session, turn, request and attempt. Authorization headers are not
+captured; JSON remains outside SQLite. Define the macro as `0` to disable it.
+
+Provider tool-call IDs are scoped to their response rather than globally unique.
+Tool outputs and memory provenance resolve the corresponding call within the
+active session; calls repeated in later rounds or sessions retain distinct
+internal item IDs. Duplicate IDs within one response are rejected as ambiguous.
+If response normalization/storage fails, the runtime saves a terminal
+`response_persistence_failed` API result without the rejected output. The
+existing API-error timeline renders that diagnostic in the WebView, including
+when the conversation is reopened.
+
+This changes the creation schema only. `user_version` remains `1`, and no
+migration is provided. Existing stores retain their old global unique constraint;
+installing a new build does not remove it or reset user data.

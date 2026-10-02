@@ -6,7 +6,8 @@
 #include <stddef.h>
 
 #ifndef STRAPPY_RAW_JSON_DEBUG_CAPTURE
-#define STRAPPY_RAW_JSON_DEBUG_CAPTURE 0
+/* Temporary refactor diagnostics; override with 0 to disable capture. */
+#define STRAPPY_RAW_JSON_DEBUG_CAPTURE 1
 #endif
 
 #ifdef __cplusplus

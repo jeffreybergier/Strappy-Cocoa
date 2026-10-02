@@ -1217,9 +1217,23 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
   static const char *call_sql =
     "INSERT INTO function_calls "
     "(item_id, provider_call_id, tool_name, tool_namespace) "
-    "VALUES (?, ?, ?, ?);";
+    "SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS ("
+    "SELECT 1 FROM function_calls f "
+    "JOIN conversation_items old ON old.id=f.item_id "
+    "JOIN conversation_items current ON current.id=?1 "
+    "WHERE f.provider_call_id=?2 AND old.session_id=current.session_id "
+    "AND old.source_attempt_id IS current.source_attempt_id "
+    "AND old.introduced_request_id IS current.introduced_request_id);";
+  /* Provider IDs are local to a response. A continuation's new output belongs
+   * to the latest canonical, unmatched call in this turn, not an older round
+   * or another session that happened to use the same provider ID. */
   static const char *find_call_sql =
-    "SELECT item_id FROM function_calls WHERE provider_call_id = ?;";
+    "SELECT f.item_id FROM function_calls f "
+    "JOIN conversation_items i ON i.id=f.item_id "
+    "WHERE f.provider_call_id=? AND i.session_id=? AND i.turn_id=? "
+    "AND i.include_in_context=1 AND NOT EXISTS ("
+    "SELECT 1 FROM function_outputs o WHERE o.function_call_item_id=f.item_id) "
+    "ORDER BY i.sequence DESC LIMIT 1;";
   static const char *output_sql =
     "INSERT INTO function_outputs "
     "(item_id, function_call_item_id, execution_state, started_at_ms, "
@@ -1443,6 +1457,11 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
       return 0;
     }
     sqlite3_finalize(stmt);
+    if (sqlite3_changes(db) != 1) {
+      cJSON_Delete(document);
+      strappy_set_error(error_out, "Duplicate function call ID within one response.");
+      return 0;
+    }
     ok = strappy_db_semantic_insert_document(db,
                                               item_id,
                                               "arguments",
@@ -1471,6 +1490,8 @@ static int strappy_db_semantic_insert_item(sqlite3 *db,
     if ((rc != SQLITE_OK) ||
         (sqlite3_bind_text(stmt, 1, call_id->valuestring, -1,
                            SQLITE_TRANSIENT) != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)turn_id) != SQLITE_OK) ||
         (sqlite3_step(stmt) != SQLITE_ROW)) {
       strappy_set_formatted_error(error_out,
                                   "Function output call was not found: %s",
