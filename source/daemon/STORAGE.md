@@ -39,9 +39,18 @@ The service rejects symlink or foreign-owned store files. Normal ownership is
 UID 501/mobile on iOS and the logged-in user on Mac. This is an ownership rule,
 not isolation from other unsandboxed programs with the same identity.
 
-A background client monitor negotiates IPC v3, subscribes, and checks reader
+A background client monitor negotiates IPC v8, subscribes, and checks reader
 ABI 2 before allowing GUI readers. The reader independently verifies the stored
-schema identity and `user_version = 1`. A missing store is an error, never an
+schema identity, `user_version = 1`, and the function-call uniqueness constraints.
+Both daemon initialization and GUI readers inspect `main` index metadata, not
+index names or `CREATE TABLE` text. The legacy global `UNIQUE(provider_call_id)`
+and other unique indexes lacking `item_id` are incompatible: provider IDs can
+repeat across responses and sessions. Nonunique lookup indexes and redundant
+unique indexes containing the item primary key remain valid. Missing/unreadable
+function-call metadata fails closed. Rejection reports the incompatible constraint
+and recommends the previous compatible app/service or a compatible backup; it
+does not drop constraints, migrate, reset, or change `user_version`.
+Duplicate IDs within one response remain rejected by the semantic item writer. A missing store is an error, never an
 invitation for a reader to create it. Startup races, service loss, old transport
 versions, and mismatched reader ABI fail closed. The monitor retries once per
 second and invalidates views on readiness changes, reconnect, and events.

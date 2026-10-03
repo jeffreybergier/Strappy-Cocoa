@@ -18,7 +18,14 @@ int main(int argc, char **argv)
     strappy_discovered_database_record_list catalog;
     long long id = 0;
     size_t i;
-    assert(argc == 2);
+    assert(argc == 2 || (argc == 3 && !strcmp(argv[2], "--incompatible")));
+    if (argc == 3) {
+        strappy_db_set_service_ready(argv[1], 1);
+        assert(!strappy_db_check_reader(argv[1], &error));
+        assert(error && strstr(error, "incompatible UNIQUE"));
+        puts("store_reader_harness: UI rejects incompatible function-call uniqueness without writes");
+        free(error); return 0;
+    }
     assert(!strappy_db_writer_available(&error)); free(error); error = NULL;
     assert(!strappy_db_check_reader(argv[1], &error)); free(error); error = NULL;
     strappy_db_set_service_ready(argv[1], 1);

@@ -10128,6 +10128,32 @@ static int harness_test_reused_tool_ids(void)
       }
     }
   }
+  /* Reuse is valid across responses/sessions, but ambiguous inside one response. */
+  if (ok) {
+    strappy_response_call_begin_input begin;
+    strappy_response_call_finish_input finish;
+    cJSON *response = cJSON_Parse(call_response);
+    cJSON *output = cJSON_GetObjectItem(response, "output");
+    char *duplicate;
+    cJSON_AddItemToArray(output, cJSON_Duplicate(cJSON_GetArrayItem(output, 0), 1));
+    duplicate = cJSON_PrintUnformatted(response);
+    memset(&begin, 0, sizeof(begin));
+    begin.session_id = sessions[0];
+    begin.provider_account_id = STRAPPY_PROVIDER_ACCOUNT_OPENROUTER;
+    begin.model_id = STRAPPY_CONFIG_DEFAULT_MODEL_IDENTIFIER;
+    begin.prompt_group_key = "ambiguous";
+    begin.request_kind = "user";
+    begin.request_method = "POST";
+    begin.request_url = "http://localhost/responses";
+    begin.request_json = "{\"input\":[]}";
+    ok = duplicate && strappy_db_begin_response_call(path, &begin, &call, &error);
+    memset(&finish, 0, sizeof(finish));
+    finish.call_id = call; finish.state = "completed"; finish.http_status = 200;
+    finish.output_is_canonical = 1; finish.response_json = duplicate;
+    if (ok) ok = !strappy_db_finish_response_call(path, &finish, &error) &&
+      error && strstr(error, "Duplicate function call ID within one response");
+    free(error); error = NULL; free(duplicate); cJSON_Delete(response);
+  }
   if (ok) ok = sqlite3_open(path, &db) == SQLITE_OK;
   if (ok) ok =
     harness_query_int(db, "SELECT COUNT(*) FROM function_calls WHERE provider_call_id='call_0'", &value) && value == 8 &&

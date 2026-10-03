@@ -520,3 +520,10 @@ $(BUILD_DIR)/store_changes_harness: store_changes_harness.c $(STRAPPY_STORE_SOUR
 store-changes-test: $(BUILD_DIR)/store_changes_harness
 	$(BUILD_DIR)/store_changes_harness
 test: store-changes-test
+
+$(BUILD_DIR)/schema_harness: schema_harness.c $(STRAPPY_STORE_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(STRAPPY_STORE_SOURCES) $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+.PHONY: schema-test
+schema-test: $(BUILD_DIR)/schema_harness $(BUILD_DIR)/store_reader_harness $(BUILD_DIR)/strappyd
+	python3 schema_harness.py $(BUILD_DIR)/schema_harness $(BUILD_DIR)/store_reader_harness $(BUILD_DIR)/strappyd
+test: schema-test

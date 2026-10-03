@@ -1167,3 +1167,45 @@ Copy the probe, synthetic SQLite file, shared JSON resources, and
 x4-vm. Run `incremental-probe-ppc SOCKET_DIRECTORY DATABASE RESOURCE_DIRECTORY
 WEBVIEW_TEST_JS` as the logged-in user. The native WebView fixture intercepts
 `strappy-action://webview-ready`, matching the application's navigation policy.
+
+## Existing function-call schema constraints (2026-10-03)
+
+Daemon startup and GUI readers now inspect `main.function_calls` index metadata
+before accepting a store. Main's inline global `UNIQUE(provider_call_id)` and
+unsupported named/composite/partial uniqueness are rejected with an actionable
+compatibility error. Quoted index names work; nonunique lookup indexes and
+redundant unique indexes containing `item_id` remain supported. No migration,
+constraint removal, database reset, `user_version` change, reader ABI change, or
+IPC version change was introduced.
+
+Validation:
+
+- `make -C source/daemon/tests clean test` passed, including fresh/legacy schema
+  fixtures, GUI-reader rejection, daemon refusal before readiness, preservation
+  of existing schema/rows, repeated provider IDs across responses/sessions, and
+  rejection/rollback of duplicate IDs within a single response.
+- Clean iOS armv7/arm64 and macOS PPC/x86/x64/arm64 release builds passed with
+  no compiler warnings or errors. The native schema probes also compiled cleanly.
+- `pinkphone-rsa`, iOS 15 / arm64, UID 501 (`mobile`), SQLite 3.43.2: fresh-store
+  IPC v8 readiness, inline/named/composite/partial constraint detection, quoted
+  names, redundant-index acceptance, writer and UI-reader rejection, legacy
+  daemon refusal, absent service socket after refusal, and byte-for-byte
+  preservation of the rejected SQLite file all passed. Tests ran in a private
+  directory under `/var/jb/tmp`; installed stores and services were untouched.
+  No reboot or respring was performed.
+- `koolphone5`: SSH to 192.168.0.93 refused connections. Native armv7 validation
+  remains pending SSH availability; the armv7 release and probe builds passed.
+
+Reproduce native probes after the platform build:
+
+```sh
+make -C source/iOS -f ../daemon/tests/schema_device_probe.mk ALTIVECCORE_LINKAGE=static schema-probes
+```
+
+Copy `schema-probe`, `schema-reader-probe`, the built daemon as `strappyd`, and
+`schema_device_harness.sh` into a fresh private directory; include the shared
+JSON resources, platform `Info.plist`, and CA bundle in its `resources` directory.
+Run `sh schema_device_harness.sh ABSOLUTE_FIXTURE_DIRECTORY` as mobile. On a
+rootless phone use the jailbreak prefix for the signed executables. The script
+refuses to reuse fixture stores and starts/stops only its own daemon. An
+uncompressed archive avoids depending on `gzip` in the phone's shell environment.

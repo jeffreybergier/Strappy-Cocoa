@@ -434,23 +434,23 @@ Relevant code: `source/daemon/strappy_ipc_server.c`,
 
 ### Detect incompatible existing schema shapes (medium priority)
 
-Fresh stores no longer enforce global uniqueness of provider tool-call IDs,
-but existing stores retain that constraint because `CREATE TABLE IF NOT EXISTS`
-does not alter it. Both shapes currently pass the same schema identity/version
-checks, so an upgraded store can reject valid repeated IDs while a fresh store
-works.
+Daemon initialization and GUI readers now inspect the actual function-call index
+constraints. Legacy inline/global provider-ID uniqueness and other unsupported
+unique indexes fail before readiness, with guidance to use the previous
+compatible app/service or restore a compatible backup. Rejected stores keep
+their data and schema. Nonunique indexes and redundant uniqueness including
+`item_id` remain supported.
 
-- [ ] Validate the relevant schema constraints before advertising readiness and
-  report an actionable incompatibility for unsupported existing stores. Do not
-  silently reset user data or claim that initialization removed old constraints.
-- [ ] Test fresh stores and stores created with `main`'s unique constraint,
+- [x] Validate the relevant schema constraints before advertising readiness and
+  report an actionable incompatibility for unsupported existing stores.
+- [x] Test fresh stores and stores created with `main`'s unique constraint,
   including repeated provider IDs across responses and sessions. Keep rejecting
   ambiguous duplicate IDs within one response.
 
 Relevant code: `source/shared/strappy_db.c` and
-`source/shared/strappy_db_responses.c`. Keep `PRAGMA user_version` pinned at 1.
-This step authorizes planning detection, not a migration or version increase;
-either still requires explicit user permission under `AGENTS.md`.
+`source/shared/strappy_db_responses.c`. `PRAGMA user_version` stays at 1; no
+migration or version increase was introduced. Native outcomes are recorded in
+`source/daemon/VALIDATION.md`.
 
 The review's targeted Linux app-boundary, authentication, control-client,
 execution, and mutation checks passed. They do not establish completion of

@@ -363,6 +363,61 @@ static int strappy_db_validate_existing_schema(sqlite3 *db, char **error_out)
   return 1;
 }
 
+/* CREATE TABLE IF NOT EXISTS cannot remove main's old global provider-ID
+ * constraint. Inspect semantic index metadata rather than its SQL spelling or
+ * generated name. Unique indexes containing item_id are redundant but safe;
+ * other uniqueness constraints can reject valid repeated provider IDs. */
+static int strappy_db_validate_function_call_constraints(sqlite3 *db, char **error_out)
+{
+  sqlite3_stmt *indexes = NULL, *columns = NULL;
+  int rc, column_rc, has_item_id;
+  char *sql;
+
+  rc = sqlite3_prepare_v2(db,
+    "SELECT item_id, provider_call_id, tool_name, tool_namespace "
+    "FROM main.function_calls LIMIT 0", -1, &columns, NULL);
+  sqlite3_finalize(columns); columns = NULL;
+  if (rc != SQLITE_OK) goto inspection_failed;
+  rc = sqlite3_prepare_v2(db, "PRAGMA main.index_list('function_calls')",
+    -1, &indexes, NULL);
+  if (rc != SQLITE_OK) goto inspection_failed;
+  while ((rc = sqlite3_step(indexes)) == SQLITE_ROW) {
+    const char *name = (const char *)sqlite3_column_text(indexes, 1);
+    if (!sqlite3_column_int(indexes, 2)) continue;
+    if (!name) goto inspection_failed;
+    sql = sqlite3_mprintf("PRAGMA main.index_info(%Q)", name);
+    if (!sql) goto inspection_failed;
+    column_rc = sqlite3_prepare_v2(db, sql, -1, &columns, NULL);
+    sqlite3_free(sql);
+    if (column_rc != SQLITE_OK) goto inspection_failed;
+    has_item_id = 0;
+    while ((column_rc = sqlite3_step(columns)) == SQLITE_ROW) {
+      const char *column = (const char *)sqlite3_column_text(columns, 2);
+      if (column && sqlite3_stricmp(column, "item_id") == 0) has_item_id = 1;
+    }
+    sqlite3_finalize(columns); columns = NULL;
+    if (column_rc != SQLITE_DONE) goto inspection_failed;
+    if (!has_item_id) {
+      sqlite3_finalize(indexes);
+      strappy_set_error(error_out,
+        "This store has an incompatible UNIQUE constraint on function_calls. "
+        "Provider tool-call IDs must be allowed to repeat across responses and "
+        "sessions. Use the previous compatible app/service for this store, or "
+        "restore a compatible backup. No migration was performed.");
+      return 0;
+    }
+  }
+  sqlite3_finalize(indexes); indexes = NULL;
+  if (rc == SQLITE_DONE) return 1;
+inspection_failed:
+  sqlite3_finalize(columns);
+  sqlite3_finalize(indexes);
+  strappy_set_error(error_out,
+    "Could not validate the function_calls schema. Use a compatible store or "
+    "restore a compatible backup. No migration was performed.");
+  return 0;
+}
+
 int strappy_db_validate_reader(sqlite3 *db, char **error_out)
 {
   sqlite3_stmt *stmt = NULL;
@@ -372,7 +427,7 @@ int strappy_db_validate_reader(sqlite3 *db, char **error_out)
        sqlite3_step(stmt) == SQLITE_ROW && sqlite3_column_int(stmt, 0) == 1;
   sqlite3_finalize(stmt);
   if (!ok) strappy_set_error(error_out, "The store schema is incompatible with this app.");
-  return ok;
+  return ok && strappy_db_validate_function_call_constraints(db, error_out);
 }
 
 static pthread_mutex_t strappy_db_readiness_mutex = PTHREAD_MUTEX_INITIALIZER;
