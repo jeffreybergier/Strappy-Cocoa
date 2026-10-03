@@ -513,3 +513,10 @@ $(BUILD_DIR)/auth_harness: auth_harness.c ../strappy_auth.c $(STRAPPY_STORE_SOUR
 auth-test: $(BUILD_DIR)/auth_harness
 	$(BUILD_DIR)/auth_harness
 test: auth-test
+
+$(BUILD_DIR)/store_changes_harness: store_changes_harness.c $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+.PHONY: store-changes-test
+store-changes-test: $(BUILD_DIR)/store_changes_harness
+	$(BUILD_DIR)/store_changes_harness
+test: store-changes-test

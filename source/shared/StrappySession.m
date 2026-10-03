@@ -744,13 +744,22 @@ static void StrappyMergeOptions(StrappySessionOptions *target,
 }
 
 static unsigned int StrappyPendingStoreTopics;
-static void StrappyStoreChanged(unsigned int topics)
+static unsigned int StrappyPendingGlobalTopics;
+static NSMutableDictionary *StrappyPendingStoreScopes;
+static void StrappyStoreChanged(unsigned int topics, long long session)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   BOOL schedule;
   @synchronized([StrappySession class]) {
     schedule = StrappyPendingStoreTopics == 0;
     StrappyPendingStoreTopics |= topics;
+    if (!session) StrappyPendingGlobalTopics |= topics;
+    else {
+      NSNumber *key = [NSNumber numberWithLongLong:session];
+      if (!StrappyPendingStoreScopes) StrappyPendingStoreScopes = [[NSMutableDictionary alloc] init];
+      [StrappyPendingStoreScopes setObject:[NSNumber numberWithUnsignedInt:
+        topics | [[StrappyPendingStoreScopes objectForKey:key] unsignedIntValue]] forKey:key];
+    }
   }
   if (schedule) [StrappySession performSelectorOnMainThread:@selector(serviceStoreChanged:)
                                  withObject:nil waitUntilDone:NO];
@@ -761,9 +770,15 @@ static void StrappyStoreChanged(unsigned int topics)
 
 + (void)serviceStoreChanged:(id)ignored
 {
-  unsigned int topics;
+  unsigned int topics, globalTopics;
+  NSDictionary *scopes;
   (void)ignored;
-  @synchronized(self) { topics = StrappyPendingStoreTopics; StrappyPendingStoreTopics = 0; }
+  @synchronized(self) {
+    topics = StrappyPendingStoreTopics; StrappyPendingStoreTopics = 0;
+    globalTopics = StrappyPendingGlobalTopics; StrappyPendingGlobalTopics = 0;
+    scopes = [[StrappyPendingStoreScopes copy] autorelease];
+    [StrappyPendingStoreScopes removeAllObjects];
+  }
   if (topics & (STRAPPY_STORE_CATALOG | STRAPPY_STORE_RUN)) {
     unsigned int active, last, result;
     strappy_store_client_work_status(&active,&last,&result);
@@ -778,7 +793,10 @@ static void StrappyStoreChanged(unsigned int topics)
   }
   if (topics & (STRAPPY_STORE_SESSION | STRAPPY_STORE_LEDGER | STRAPPY_STORE_RUN)) {
     [StrappyAsync postNotificationName:@"StrappyServiceChanged" object:nil
-      userInfo:[NSDictionary dictionaryWithObject:[NSNumber numberWithUnsignedInt:topics] forKey:@"topics"]];
+      userInfo:[NSDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithUnsignedInt:topics], @"topics",
+        [NSNumber numberWithUnsignedInt:globalTopics], @"globalTopics",
+        scopes ? scopes : [NSDictionary dictionary], @"scopes", nil]];
     [StrappyAsync postNotificationName:StrappySessionDidUpdateNotification object:nil];
   }
   if (topics & STRAPPY_STORE_CATALOG) {
@@ -999,7 +1017,12 @@ static void StrappyStoreChanged(unsigned int topics)
   NSString *terminalError = nil;
   BOOL terminalChanged = NO;
   unsigned int topics = ignored ? [[[ignored userInfo] objectForKey:@"topics"] unsignedIntValue] : STRAPPY_STORE_ALL;
-  (void)ignored;
+  if (ignored) {
+    NSDictionary *info = [ignored userInfo];
+    topics = [[info objectForKey:@"globalTopics"] unsignedIntValue] |
+      [[[info objectForKey:@"scopes"] objectForKey:sessionIdentifier_] unsignedIntValue];
+    if (!(topics & (STRAPPY_STORE_SESSION | STRAPPY_STORE_LEDGER | STRAPPY_STORE_RUN))) return;
+  }
   @synchronized(self) { optionsLoaded_ = NO; if (promptSubmissionPending_) return; }
   active = [self isPromptInFlight];
   if (topics & (STRAPPY_STORE_RUN | STRAPPY_STORE_LEDGER)) {
@@ -3536,18 +3559,31 @@ static void StrappyStoreChanged(unsigned int topics)
 
 - (NSString *)webViewRefreshMessagesJavaScriptWithError:(NSError **)error
 {
+  return [[self webViewRefreshMessagesAfterRevision:[NSNumber numberWithUnsignedLongLong:0]
+    error:error] objectForKey:@"javaScript"];
+}
+
+- (NSDictionary *)webViewRefreshMessagesAfterRevision:(NSNumber *)revision error:(NSError **)error
+{
   char *script;
   char *storedError = NULL;
   NSString *messages;
   NSString *status;
-  script = strappy_session_webview_refresh_messages_js_for_session(
+  long long requests[STRAPPY_STORE_MAX_CHANGES], minimum = 0;
+  uint64_t next;
+  int i, count = strappy_store_client_changes([sessionIdentifier_ longLongValue],
+    [revision unsignedLongLongValue], &next, requests);
+  for (i = 0; i < count; ++i) if (!minimum || requests[i] < minimum) minimum = requests[i];
+  if (count < 0) script = strappy_session_webview_refresh_messages_js_for_session(
     [[StrappySession sessionsDatabasePath] fileSystemRepresentation],
     [sessionIdentifier_ longLongValue],
-    [[[NSBundle mainBundle] resourcePath] fileSystemRepresentation],
-    &storedError);
-  if (script == NULL && error != NULL) {
-    *error = [StrappySession errorFromCString:storedError];
-  }
+    [[[NSBundle mainBundle] resourcePath] fileSystemRepresentation], &storedError);
+  else if (minimum) script = strappy_session_webview_refresh_from_request_js_for_session(
+    [[StrappySession sessionsDatabasePath] fileSystemRepresentation],
+    [sessionIdentifier_ longLongValue],
+    [[[NSBundle mainBundle] resourcePath] fileSystemRepresentation], minimum, &storedError);
+  else script = strappy_string_duplicate("");
+  if (script == NULL && error != NULL) *error = [StrappySession errorFromCString:storedError];
   strappy_session_free_string(storedError);
   if (script == NULL) return nil;
   messages = StrappySessionStringFromCString(script);
@@ -3555,8 +3591,9 @@ static void StrappyStoreChanged(unsigned int topics)
     StrappySessionOptionalCString([self currentProcessingStatusJSON]));
   if (script == NULL) return nil;
   status = StrappySessionStringFromCString(script);
-  return [StrappySession webViewBatchedJavaScriptForJavaScript:
-    [messages stringByAppendingString:status]];
+  return [NSDictionary dictionaryWithObjectsAndKeys:
+    [StrappySession webViewBatchedJavaScriptForJavaScript:[messages stringByAppendingString:status]], @"javaScript",
+    [NSNumber numberWithUnsignedLongLong:next], @"revision", nil];
 }
 
 - (NSString *)webViewClearProcessingStatusJavaScript

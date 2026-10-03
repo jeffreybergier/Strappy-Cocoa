@@ -8266,6 +8266,23 @@ static int harness_test_cumulative_session_metrics(void)
   }
 
   if (ok) {
+    size_t i;
+    ok = strappy_db_list_response_timeline_from_request(path, session_id,
+      timeline.records[1].model_request_id, &ranged_timeline, &error) &&
+      ranged_timeline.count == 5U;
+    for (i = 0; ok && i < ranged_timeline.count; ++i) {
+      ok = !strcmp(ranged_timeline.records[i].message_key, timeline.records[i+1].message_key) &&
+        ranged_timeline.records[i].cumulative_wait_ms == timeline.records[i+1].cumulative_wait_ms &&
+        harness_double_matches(ranged_timeline.records[i].cumulative_usage_cost,
+                               timeline.records[i+1].cumulative_usage_cost);
+    }
+    strappy_session_message_record_list_destroy(&ranged_timeline);
+    if (ok) ok = strappy_db_list_response_timeline_from_request(path, session_id,
+      timeline.records[5].model_request_id + 1, &ranged_timeline, &error) && ranged_timeline.count == 0;
+    strappy_session_message_record_list_destroy(&ranged_timeline);
+  }
+
+  if (ok) {
     pending_cursor = timeline.records[5].timeline_cursor;
     range_cursor = timeline.records[1].timeline_cursor;
     ok = strappy_db_list_response_timeline_after(path,
@@ -10178,8 +10195,39 @@ static int harness_test_response_persistence_failure(void)
   return ok;
 }
 
-int main(void)
+/* Export only synthetic normalized history for native reader/render probes. */
+static int harness_incremental_fixture(const char *path)
 {
+  char *error = NULL;
+  char response[4608], group[64], text[4097];
+  long long session = 0, call = 0;
+  int conversation, round, ok = 1;
+  memset(text, 'x', sizeof(text)-1); text[sizeof(text)-1] = '\0';
+  for (conversation = 0; ok && conversation < 2; ++conversation) {
+    ok = conversation == 0 ? harness_create_session_database(path, &session, &error) :
+      strappy_db_create_session(path, &session, &error);
+    call = 0;
+    for (round = 0; ok && round < 300; ++round) {
+      snprintf(group, sizeof(group), "fixture-%d-%d", conversation, round);
+      snprintf(response, sizeof(response),
+        "{\"id\":\"r-%d-%d\",\"status\":\"completed\",\"model\":\"test/model\","
+        "\"output\":[{\"id\":\"m-%d-%d\",\"type\":\"message\",\"role\":\"assistant\","
+        "\"content\":[{\"type\":\"output_text\",\"text\":\"%s\"}]}],\"usage\":{\"cost\":0.001}}",
+        conversation, round, conversation, round, text);
+      ok = harness_append_usage_metrics_call(path, session, call, group, "user", 0, 0,
+        "completed", 0, response, 100, 200, &call, &error);
+    }
+  }
+  if (!ok) fprintf(stderr, "Fixture: %s\n", error ? error : "failed");
+  free(error);
+  return ok;
+}
+
+int main(int argc, char **argv)
+{
+  if (argc == 3 && !strcmp(argv[1], "--incremental-fixture"))
+    return harness_incremental_fixture(argv[2]) ? 0 : 1;
+
   if (
 #if STRAPPY_RAW_JSON_DEBUG_CAPTURE
       harness_test_raw_json_debug_capture() &&

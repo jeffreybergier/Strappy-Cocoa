@@ -112,6 +112,9 @@ char *strappy_session_webview_messages_page_html_for_session(
   size_t *message_count_out,
   char **timeline_cursor_out,
   char **error_out);
+char *strappy_session_webview_refresh_from_request_js_for_session(
+  const char *db_path, long long session_id, const char *resource_dir,
+  long long minimum_request, char **error_out);
 char *strappy_session_webview_refresh_messages_js_for_session(
   const char *db_path, long long session_id, const char *resource_dir,
   char **error_out);

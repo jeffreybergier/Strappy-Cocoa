@@ -1,5 +1,11 @@
 # Recovery and lifecycle
 
+IPC v8 adds scoped conversation hints. Each WebView falls back to a full
+snapshot after reconnect or loss of bounded in-memory change detail. Ordinary
+updates reconstruct the affected request suffix and reconcile changed/deleted
+rows; status-only events do not read conversation history. Matching app and
+daemon protocol versions are required; SQLite version 1 / reader ABI 2 remain.
+
 IPC v7 adds transient per-account credential jobs with query-only recovery after
 an uncertain acknowledgment. Restarted or evicted jobs report unknown; no
 credential mutation is automatically replayed. The larger bounded prompt

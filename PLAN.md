@@ -404,19 +404,30 @@ Update `source/daemon/ASYNC_UI.md` and step 4 notes to match this command policy
 
 ### Scoped, incremental conversation invalidation (medium priority)
 
-Current events identify only a topic. Every live `StrappySession` observes the
-same notification, and run/ledger changes trigger full-history regeneration
-even for unaffected conversations. DOM identity preservation avoids replacing
-unchanged elements but does not avoid the database, rendering, and transfer cost.
+IPC v8 includes the affected session and model-request identity. A bounded
+process-local journal gives each WebView its own revision cursor; unrelated
+sessions skip reads and status-only changes skip history rendering. The reader
+reconstructs the changed request and its suffix so later cumulative totals stay
+correct. DOM reconciliation replaces changed rows and removes missing rows only
+inside that range, retaining earlier history and unchanged UI state.
 
-- [ ] Include affected session identities in normal invalidations so unrelated
+- [x] Include affected session identities in normal invalidations so unrelated
   conversations do not refresh. Preserve complete refresh on reconnect or when
   event detail is unavailable.
-- [ ] Add revision-based row updates that cover changed and deleted rows behind
+- [x] Add revision-based row updates that cover changed and deleted rows behind
   the append cursor, including tool outputs and context-inclusion changes.
-- [ ] Measure long-history updates with multiple open conversations on legacy
-  targets. Verify isolated refreshes, bounded incremental work, coalescing,
-  reconnect recovery, and preserved WebView disclosure/scroll state.
+- [x] Measure long-history updates on the available legacy target, x4-vm. Verify
+  two session instances remain isolated, incremental content is bounded to the
+  request suffix, events coalesce, reconnect recovers, and unchanged native
+  WebView rows retain their state. Phone runtime validation is unavailable for
+  this change; both iOS architectures receive clean build validation.
+
+The native fixture contains two conversations with 600 timeline rows each.
+Latest-request refresh reconstructs two rows and transfers 6,977 bytes, compared
+with 2,084,917 bytes for the full conversation. Prefix numeric aggregation still
+visits earlier requests for cumulative totals, and an older edit can require a
+longer suffix. No schema migration or persistent revision table was introduced.
+See `source/daemon/VALIDATION.md` for measurements and reproducible commands.
 
 Relevant code: `source/daemon/strappy_ipc_server.c`,
 `source/shared/StrappySession.m`, and `source/shared/strappy_session.c`.

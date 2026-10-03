@@ -20,6 +20,7 @@ struct strappy_execution {
     pthread_t worker;
     strappy_auth *auth;
     long long run, session;
+    long long ledger_turn, ledger_first_request;
     int stopping, cancel;
     unsigned int job, last_job, last_result;
     cJSON *command;
@@ -73,12 +74,27 @@ static int strappy_execution_event(const strappy_responses_event *event, void *c
     strappy_execution *e = context;
     if (event->type == STRAPPY_RESPONSES_EVENT_PROCESSING_STATUS) {
         if (strappy_run_progress(e->db, e->run, event))
-            strappy_ipc_server_committed(e->server, STRAPPY_IPC_RUN_CHANGED);
+            strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_RUN_CHANGED, e->session, 0);
     } else if (event->type == STRAPPY_RESPONSES_EVENT_SESSION_UPDATED)
-        strappy_ipc_server_committed(e->server, STRAPPY_IPC_SESSION_CHANGED);
+        strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_SESSION_CHANGED, e->session, 0);
     else if (event->type == STRAPPY_RESPONSES_EVENT_LEDGER_CHANGED ||
-             event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED)
-        strappy_ipc_server_committed(e->server, STRAPPY_IPC_LEDGER_CHANGED);
+             event->type == STRAPPY_RESPONSES_EVENT_LEDGER_UPDATED) {
+        long long call = 0, request = 0;
+        strappy_response_call_identity identity;
+        if (event->message_key && sscanf(event->message_key, "response-call-%lld", &call) == 1 &&
+            strappy_db_get_response_call_identity(e->db, call, &identity, NULL) &&
+            identity.session_id == e->session) {
+            request = identity.model_request_id;
+            if (e->ledger_turn != identity.turn_id) {
+                e->ledger_turn = identity.turn_id;
+                e->ledger_first_request = request;
+            } else if (request < e->ledger_first_request) e->ledger_first_request = request;
+            /* Isolated study batches exclude the whole prompt group on finish.
+             * Their final wall-time event must reconcile those earlier rows too. */
+            if (e->job == STRAPPY_IPC_START_STUDY) request = e->ledger_first_request;
+        }
+        strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_LEDGER_CHANGED, e->session, request);
+    }
     return strappy_service_should_cancel() ? 0 : 1;
 }
 static int strappy_scan_progress(const strappy_file_scanner_progress *progress, void *context)
@@ -200,7 +216,7 @@ static void *strappy_execution_work(void *context)
             ok = strappy_service_refresh_catalog(e->db,strappy_command_text(e->command,"id"));
         else if (!strappy_service_should_cancel() &&
             strappy_run_update(e->db, e->run, STRAPPY_RUN_RUNNING, 0, "request", "", 0, 0)) {
-            strappy_ipc_server_committed(e->server, STRAPPY_IPC_RUN_CHANGED);
+            strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_RUN_CHANGED, e->session, 0);
             ok = e->job == STRAPPY_IPC_START_STUDY ? strappy_execute_study(e) :
                 strappy_session_send_prompt_with_events_and_load(e->prompt, NULL, NULL,
                 e->resources, e->db, e->session, strappy_execution_event, e, &record, &error);
@@ -212,7 +228,7 @@ static void *strappy_execution_work(void *context)
         state = e->stopping ? STRAPPY_RUN_INTERRUPTED :
             (e->cancel ? STRAPPY_RUN_CANCELLED : (ok ? STRAPPY_RUN_COMPLETED : STRAPPY_RUN_FAILED));
         if (e->run && strappy_run_update(e->db, e->run, state, e->cancel, "", "", 0, 0))
-            strappy_ipc_server_committed(e->server, STRAPPY_IPC_RUN_CHANGED);
+            strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_RUN_CHANGED, e->session, 0);
         free(e->prompt); e->prompt = NULL; if (!e->session_worker) e->run = 0; e->cancel = 0;
         e->last_job = e->job; e->last_result = (unsigned int)state; e->job = 0;
         cJSON_Delete(e->command); e->command = NULL;
@@ -304,7 +320,7 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
                 if (e->job == STRAPPY_IPC_START_STUDY) {
                     snprintf(number,sizeof(number),"%lld",e->session);
                     reply->length = (uint32_t)strlen(number); memcpy(reply->payload,number,reply->length);
-                    strappy_ipc_server_committed(e->server,STRAPPY_IPC_SESSION_CHANGED);
+                    strappy_ipc_server_committed_scope(e->server,STRAPPY_IPC_SESSION_CHANGED, e->session, 0);
                 }
                 reply->status = STRAPPY_IPC_OK;
                 pthread_cond_signal(&e->condition);
@@ -327,7 +343,9 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
                 }
                 unsigned int topics = strappy_mutation_topics(command), topic;
                 for (topic = 0; topic < 4; ++topic) if (topics & (1U << topic))
-                    strappy_ipc_server_committed(e->server, STRAPPY_IPC_SESSION_CHANGED + topic);
+                    strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_SESSION_CHANGED + topic,
+                        strappy_command_number(command,"session") > 0 ? strappy_command_number(command,"session") : 0,
+                        !strcmp(action,"include_context") ? strappy_command_number(command,"id") : 0);
             }
         }
 mutation_unlock:
@@ -358,7 +376,7 @@ mutation_done:
             if (active != e) pthread_mutex_lock(&active->mutex);
             active->cancel = 1;
             if (active != e) pthread_mutex_unlock(&active->mutex);
-            strappy_ipc_server_committed(e->server, STRAPPY_IPC_RUN_CHANGED);
+            strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_RUN_CHANGED, session, 0);
         }
     } else {
         unsigned int i;
@@ -431,12 +449,12 @@ mutation_done:
                 free(child->prompt); free(child); goto launch_failed;
             }
             child->next = e->children; e->children = child;
-            strappy_ipc_server_committed(e->server,STRAPPY_IPC_RUN_CHANGED);
+            strappy_ipc_server_committed_scope(e->server,STRAPPY_IPC_RUN_CHANGED, session, 0);
             goto accepted;
 launch_failed:
             strappy_run_update(e->db,r.id,STRAPPY_RUN_FAILED,0,"","allocation_failed",0,0);
             reply->status = STRAPPY_IPC_STORAGE_ERROR;
-            strappy_ipc_server_committed(e->server,STRAPPY_IPC_RUN_CHANGED);
+            strappy_ipc_server_committed_scope(e->server,STRAPPY_IPC_RUN_CHANGED, session, 0);
             goto done;
         }
 accepted:;

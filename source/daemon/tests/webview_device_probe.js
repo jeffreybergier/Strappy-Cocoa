@@ -22,5 +22,15 @@ if(byId('probe-late').nextSibling!==byId('probe-new'))return 'late insertion ord
 syncMessages(html);
 if(byId('probe-new')||byId('probe-late'))return 'deleted rows retained';
 for(i=0;i<refs.length;i++)if(byId(rowId(refs[i]))!==refs[i])return 'updates replaced history';
+var scoped='<div class="row user" id="probe-scoped" data-message-key="probe-scoped" data-round-id="999999"><div class="bubble">Scoped</div></div>';
+syncMessages(scoped,'999999');
+if(!byId('probe-scoped'))return 'scoped row missing';
+for(i=0;i<refs.length;i++)if(byId(rowId(refs[i]))!==refs[i])return 'scoped update replaced earlier history';
+var scopedRow=byId('probe-scoped');
+syncMessages(scoped,'999999');
+if(byId('probe-scoped')!==scopedRow)return 'scoped replay replaced row';
+syncMessages('','999999');
+if(byId('probe-scoped'))return 'scoped tombstone missing';
+for(i=0;i<refs.length;i++)if(byId(rowId(refs[i]))!==refs[i])return 'scoped deletion removed earlier history';
 return 'PASS';
 }catch(e){return String(e);}})()

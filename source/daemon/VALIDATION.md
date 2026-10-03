@@ -1111,3 +1111,59 @@ the fixtures directly as UID 501 passed.
 Job status is transient: restart or completed-slot eviction can make a committed
 operation's result unknown. Clients report that condition and do not resubmit.
 A UI polling deadline likewise does not cancel already accepted daemon work.
+
+## Scoped conversation invalidations / IPC v8 (2026-10-03)
+
+Normal events carry the affected session ID and, for ledger changes, the model
+request ID. The UI keeps independent per-document revisions in a bounded local
+journal. Latest-request changes reconstruct only that request's rows; earlier
+edits reconcile the affected suffix to keep cumulative metrics correct. DOM
+updates retain unchanged rows and delete absent rows only in the supplied range.
+Study batches invalidate their whole prompt group because completion excludes
+all of its requests from context. Status-only events skip history. Reconnect, missing detail, and journal overflow
+fall back to complete snapshots. SQLite version 1 and reader ABI 2 are unchanged;
+IPC v8 requires matching app/daemon builds.
+
+Validation:
+
+- `make -C source/daemon/tests clean test`: complete offline suite, including new
+  scope wire fields with IDs above JavaScript's exact numeric range, production
+  mutation scopes (including whole-group study exclusions), per-session journal
+  isolation/deduplication, independent
+  cursors, missing-detail/overflow recovery, request-range cumulative metrics,
+  late tool insertion, scoped tombstones and preservation of unchanged DOM rows.
+- Clean iOS release build: armv7 and arm64; clean macOS release build: PPC, x86,
+  x64 and arm64. Build logs checked for compiler warnings and errors.
+- Native x4-vm (Tiger 10.4.11, PPC, UID 501): production server/monitor scoped
+  events; two real `StrappySession` instances verify unrelated notifications
+  skip status/history reads; independent revisions; global detail-loss recovery;
+  socket disconnect/reconnect; production daemon IPC v8 readiness probe;
+  read-only normalized history; native WebKit
+  unchanged-row identity, disclosure-state retention, late insertion and scoped
+  deletion. Fixtures use private `/tmp` paths and synthetic history only.
+- The native fixture has two sessions with 300 completed requests / 600 rows
+  each and 4 KiB answer text per request. In a representative run, full refresh
+  took 946.7 ms and produced 2,084,917 bytes; latest-request refresh took 100.6 ms
+  and produced 6,977 bytes (two rows). The unrelated session had zero dirty
+  requests and generated no history JavaScript. Timing includes reader setup,
+  resource loading and rendering; it is not an end-to-end UI latency benchmark.
+- No phone runtime test was run: only x4-vm was available for this change.
+
+Remaining cost: prefix numeric aggregation for cumulative totals still visits
+prior requests, and a change to an older request can require a longer suffix.
+This removes full-history message reconstruction/HTML transfer for ordinary
+latest-request updates; it does not claim constant-time total database work.
+
+Native fixture reproduction (after the platform build):
+
+```sh
+make -C source/daemon/tests build-linux/responses_harness
+source/daemon/tests/build-linux/responses_harness --incremental-fixture /tmp/incremental.sqlite
+make -C source/macOS -f ../daemon/tests/incremental_device_probe.mk ALTIVECCORE_LINKAGE=static incremental-probe
+```
+
+Copy the probe, synthetic SQLite file, shared JSON resources, and
+`source/daemon/tests/webview_device_probe.js` to a private mode-0700 directory on
+x4-vm. Run `incremental-probe-ppc SOCKET_DIRECTORY DATABASE RESOURCE_DIRECTORY
+WEBVIEW_TEST_JS` as the logged-in user. The native WebView fixture intercepts
+`strappy-action://webview-ready`, matching the application's navigation policy.

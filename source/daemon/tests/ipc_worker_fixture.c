@@ -12,6 +12,9 @@ static void *worker(void *unused)
     unsigned char topic;
     (void)unused;
     while (read(STDIN_FILENO, &topic, 1) == 1) {
+        if (topic >= 4 && topic < 8)
+            (void)strappy_ipc_server_committed_scope(server, STRAPPY_IPC_LEDGER_CHANGED,
+                (long long)topic, 9007199254740993LL);
         if (topic < 4) (void)strappy_ipc_server_committed(server, STRAPPY_IPC_SESSION_CHANGED + topic);
     }
     return NULL;

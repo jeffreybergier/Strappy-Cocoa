@@ -14,6 +14,8 @@
 #include <unistd.h>
 
 #define STRAPPY_IPC_QUEUE 8192U
+#define STRAPPY_IPC_SCOPES 64
+struct strappy_ipc_scope { uint32_t topic; long long session, request; };
 struct strappy_ipc_peer {
     int fd, negotiated, subscribed, closing;
     uint32_t last_id;
@@ -39,6 +41,8 @@ struct strappy_ipc_server {
     pthread_mutex_t mutex;
     uint64_t revision;
     unsigned int pending;
+    unsigned int scope_count;
+    struct strappy_ipc_scope scopes[STRAPPY_IPC_SCOPES];
     int store_ready;
     void (*handler)(const strappy_ipc_message *, strappy_ipc_message *, void *);
     void *context;
@@ -269,26 +273,48 @@ strappy_ipc_server *strappy_ipc_server_open(const char *directory)
 fail:
     strappy_ipc_server_close(s); return NULL;
 }
-int strappy_ipc_server_committed(strappy_ipc_server *s, uint32_t event)
+int strappy_ipc_server_committed_scope(strappy_ipc_server *s, uint32_t event,
+    long long session, long long request)
 {
     char byte = 1;
-    if (!s || event < STRAPPY_IPC_SESSION_CHANGED || event > STRAPPY_IPC_RUN_CHANGED)
-        return -1;
-    (void)pthread_mutex_lock(&s->mutex);
-    if (s->revision == UINT64_MAX) { (void)pthread_mutex_unlock(&s->mutex); return -1; }
-    ++s->revision; s->pending |= 1U << (event - STRAPPY_IPC_SESSION_CHANGED);
-    (void)pthread_mutex_unlock(&s->mutex);
-    /* Atomic pending bits retain all topics if the wake pipe is full. */
+    unsigned int i, bit;
+    if (!s || event < STRAPPY_IPC_SESSION_CHANGED || event > STRAPPY_IPC_RUN_CHANGED ||
+        session<0 || request<0) return -1;
+    bit=1U << (event-STRAPPY_IPC_SESSION_CHANGED);
+    pthread_mutex_lock(&s->mutex);
+    if (s->revision == UINT64_MAX) { pthread_mutex_unlock(&s->mutex); return -1; }
+    ++s->revision;
+    if (!session) s->pending |= bit;
+    else if (!(s->pending & bit)) {
+        for (i=0; i<s->scope_count; ++i)
+            if (s->scopes[i].topic==event && s->scopes[i].session==session &&
+                s->scopes[i].request==request) break;
+        if (i==s->scope_count) {
+            if (i==STRAPPY_IPC_SCOPES) {
+                /* Explicit loss of detail, never a silently dropped update. */
+                for (i=0; i<s->scope_count; ++i)
+                    s->pending |= 1U << (s->scopes[i].topic-STRAPPY_IPC_SESSION_CHANGED);
+                s->pending |= bit; s->scope_count=0;
+            } else {
+                s->scopes[i].topic=event; s->scopes[i].session=session;
+                s->scopes[i].request=request; ++s->scope_count;
+            }
+        }
+    }
+    pthread_mutex_unlock(&s->mutex);
     while (write(s->wake[1], &byte, 1) < 0 && errno == EINTR) {}
     return 0;
 }
+int strappy_ipc_server_committed(strappy_ipc_server *s, uint32_t event)
+{ return strappy_ipc_server_committed_scope(s,event,0,0); }
 int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
 {
     fd_set readers, writers;
     struct timeval timeout;
     int wait_ms = timeout_ms;
     int maximum, i, ready;
-    unsigned int pending;
+    unsigned int pending, count, index;
+    struct strappy_ipc_scope scopes[STRAPPY_IPC_SCOPES];
     char bytes[128];
     if (!s || timeout_ms < -1 || wake_fd >= FD_SETSIZE) return -1;
     FD_ZERO(&readers); FD_ZERO(&writers);
@@ -382,6 +408,7 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
     /* Bounded drain: a busy producer must not starve client I/O. */
     if (FD_ISSET(s->wake[0], &readers)) (void)read(s->wake[0], bytes, sizeof(bytes));
     (void)pthread_mutex_lock(&s->mutex); pending = s->pending; s->pending = 0;
+    count=s->scope_count; memcpy(scopes,s->scopes,count*sizeof(*scopes)); s->scope_count=0;
     (void)pthread_mutex_unlock(&s->mutex);
     for (i = 0; i < 4; ++i) if (pending & (1U << i)) {
         strappy_ipc_message event;
@@ -391,6 +418,20 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
         strappy_ipc_snapshot(s, &event);
         for (j = 0; j < STRAPPY_IPC_MAX_CLIENTS; ++j)
             if (s->peers[j].subscribed) strappy_ipc_queue(&s->peers[j], &event);
+    }
+    for (index=0; index<count; ++index) {
+        struct strappy_ipc_scope *scope=&scopes[index];
+        strappy_ipc_message event;
+        int j;
+        if (pending & (1U << (scope->topic-STRAPPY_IPC_SESSION_CHANGED))) continue;
+        memset(&event,0,sizeof(event)); event.kind=STRAPPY_IPC_EVENT; event.operation=scope->topic;
+        strappy_ipc_snapshot(s,&event); event.length=52;
+        strappy_ipc_put32(event.payload+36,(uint32_t)((uint64_t)scope->session>>32));
+        strappy_ipc_put32(event.payload+40,(uint32_t)scope->session);
+        strappy_ipc_put32(event.payload+44,(uint32_t)((uint64_t)scope->request>>32));
+        strappy_ipc_put32(event.payload+48,(uint32_t)scope->request);
+        for (j=0; j<STRAPPY_IPC_MAX_CLIENTS; ++j)
+            if (s->peers[j].subscribed) strappy_ipc_queue(&s->peers[j],&event);
     }
     return 0;
 }

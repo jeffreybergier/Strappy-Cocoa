@@ -3880,11 +3880,12 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "if(group!=='')beginProcessingFinishAfterScroll(group);",
     "flushPendingToolTargets();renderAfterMutation(added);scrollBottomAnimated();}",
     /* Compare committed markup, never the decorated/live DOM. */
-    "function syncMessages(html){var m=byId('messages'),d,rows=[],seen={},existing,i,j,n,id,old,raw,before,group,added=[];if(!m)return;",
+    "function requestAtOrAfter(id,minimum){return !minimum||(id.length>minimum.length||(id.length===minimum.length&&id>=minimum));}",
+    "function syncMessages(html,minimum){var m=byId('messages'),d,rows=[],seen={},existing,i,j,n,id,old,raw,before,group,added=[];if(!m)return;",
     "if(!strappyMessageIndexesReady)initializeMessageIndexes();d=nodesFromHTML(html);",
     "for(i=0;i<d.childNodes.length;i++){n=d.childNodes[i];if(hasClass(n,'row')){rows[rows.length]=n;seen[indexKey(rowId(n))]=1;}}",
     "group=processingFinalAnswerGroup(rows);existing=messageRows().concat(toolSourceRows());beginMessageBatch();",
-    "for(i=0;i<existing.length;i++){n=existing[i];if(typeof n._strappyCommittedHTML!='undefined'&&!seen[indexKey(rowId(n))])removeMessage(rowId(n));}",
+    "for(i=0;i<existing.length;i++){n=existing[i];if((!minimum||requestAtOrAfter(apiRoundId(n),minimum))&&typeof n._strappyCommittedHTML!='undefined'&&!seen[indexKey(rowId(n))])removeMessage(rowId(n));}",
     "for(i=0;i<rows.length;i++){n=rows[i];id=rowId(n);raw=n.outerHTML;old=byId(id);",
     "if(old){if(old._strappyCommittedHTML!==raw){replaceMessage(id,raw);old=byId(id);if(old)old._strappyCommittedHTML=raw;}continue;}",
     "before=null;for(j=i+1;j<rows.length;j++){old=byId(rowId(rows[j]));if(old&&old.parentNode===m){before=old;break;}}",
@@ -4974,10 +4975,19 @@ char *strappy_webview_messages_page_html(
 
 char *strappy_webview_sync_messages_js(const char *messages_html)
 {
+  return strappy_webview_sync_messages_from_request_js(messages_html, 0);
+}
+
+char *strappy_webview_sync_messages_from_request_js(const char *messages_html, long long minimum_request)
+{
+  char identifier[32];
+  snprintf(identifier, sizeof(identifier), "%lld", minimum_request);
   strappy_webview_buffer buffer;
   strappy_webview_buffer_init(&buffer);
   if (!strappy_webview_buffer_append_cstring(&buffer, "syncMessages(") ||
       !strappy_webview_append_js_string(&buffer, messages_html) ||
+      (minimum_request > 0 && (!strappy_webview_buffer_append_cstring(&buffer, ",") ||
+      !strappy_webview_append_js_string(&buffer, identifier))) ||
       !strappy_webview_buffer_append_cstring(&buffer, ");")) {
     strappy_webview_buffer_destroy(&buffer);
     return NULL;

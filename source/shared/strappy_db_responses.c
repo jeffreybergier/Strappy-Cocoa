@@ -5391,6 +5391,7 @@ static int strappy_db_semantic_list_response_timeline(
   const char *db_path,
   long long session_id,
   const strappy_response_timeline_cursor *after_cursor,
+  long long minimum_request,
   strappy_session_message_record_list *list,
   strappy_response_timeline_cursor *next_cursor_out,
   char **error_out)
@@ -5424,7 +5425,7 @@ static int strappy_db_semantic_list_response_timeline(
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
     "LEFT JOIN api_usage u ON u.attempt_id = a.id "
     "WHERE t.session_id = ?1 AND a.state NOT IN ('pending','running') "
-    "AND (?5 = 0 OR r.id >= ?6) "
+    "AND r.id >= ?13 AND (?5 = 0 OR r.id >= ?6) "
     "UNION ALL "
     "SELECT 2, i.id, t.id, r.id, NULL, i.id, 'request', "
     "t.prompt_group_key, r.request_kind, r.round_index, -1, NULL, 0, "
@@ -5437,7 +5438,7 @@ static int strappy_db_semantic_list_response_timeline(
     "JOIN model_requests r ON r.id = i.introduced_request_id "
     "JOIN turns t ON t.id = r.turn_id "
     "WHERE i.session_id = ?2 AND i.timeline_visible = 1 "
-    "AND (?5 = 0 OR r.id >= ?6) ";
+    "AND r.id >= ?13 AND (?5 = 0 OR r.id >= ?6) ";
   static const char *sql_part_two =
     "UNION ALL "
     "SELECT 1, q.id, t.id, r.id, a.id, "
@@ -5464,7 +5465,7 @@ static int strappy_db_semantic_list_response_timeline(
     "JOIN turns t ON t.id = r.turn_id "
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
     "WHERE t.session_id = ?3 AND a.state NOT IN ('pending','running') "
-    "AND (?5 = 0 OR r.id >= ?6) "
+    "AND r.id >= ?13 AND (?5 = 0 OR r.id >= ?6) "
     "UNION ALL "
     "SELECT 2, i.id, t.id, r.id, a.id, i.id, 'response', "
     "t.prompt_group_key, r.request_kind, r.round_index, a.attempt_index, a.state, "
@@ -5485,7 +5486,7 @@ static int strappy_db_semantic_list_response_timeline(
     "LEFT JOIN api_results ar ON ar.attempt_id = a.id "
     "WHERE i.session_id = ?4 AND i.timeline_visible = 1 "
     "AND a.state NOT IN ('pending','running') "
-    "AND (?5 = 0 OR r.id >= ?6)"
+    "AND r.id >= ?13 AND (?5 = 0 OR r.id >= ?6)"
     ") AS timeline "
     "WHERE ?5 = 0 "
     "OR request_id > ?6 "
@@ -5562,6 +5563,7 @@ static int strappy_db_semantic_list_response_timeline(
   rc = sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   sqlite3_free(sql);
   if ((rc != SQLITE_OK) ||
+      (sqlite3_bind_int64(stmt, 13, (sqlite3_int64)minimum_request) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 2, (sqlite3_int64)session_id) != SQLITE_OK) ||
       (sqlite3_bind_int64(stmt, 3, (sqlite3_int64)session_id) != SQLITE_OK) ||
@@ -5733,7 +5735,7 @@ static int strappy_db_semantic_list_response_timeline(
     strappy_set_error(error_out, "Could not read semantic Responses timeline.");
     return 0;
   }
-  if (after_cursor == NULL) {
+  if (after_cursor == NULL && minimum_request == 0) {
     strappy_db_semantic_finalize_timeline_totals(list);
   } else if (!strappy_db_semantic_finalize_ranged_timeline_totals(db,
                                                                   session_id,
@@ -5757,10 +5759,24 @@ int strappy_db_list_response_timeline_after(
 {
   return strappy_db_semantic_list_response_timeline(db_path,
                                                     session_id,
-                                                    after_cursor,
+                                                    after_cursor, 0,
                                                     list,
                                                     next_cursor_out,
                                                     error_out);
+}
+
+/* Include the whole changed request and the suffix whose cumulative totals may
+ * depend on it. Earlier message bodies are never reconstructed. */
+int strappy_db_list_response_timeline_from_request(
+  const char *db_path, long long session_id, long long minimum_request,
+  strappy_session_message_record_list *list, char **error_out)
+{
+  if (minimum_request <= 0) {
+    strappy_set_error(error_out, "Changed request id is not valid.");
+    return 0;
+  }
+  return strappy_db_semantic_list_response_timeline(db_path, session_id, NULL,
+    minimum_request, list, NULL, error_out);
 }
 
 int strappy_db_load_response_timeline_cursor(

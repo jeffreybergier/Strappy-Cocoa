@@ -1010,14 +1010,37 @@ static char *strappy_session_webview_delta_js_for_session(
   return script;
 }
 
-/* Invalidations have no row key: refresh all committed rows, including updates
- * behind the append cursor. The WebView preserves unchanged rows by identity. */
+/* Initial load and recovery reconcile all committed rows. Normal scoped
+ * invalidations use the request-range renderer below. */
 char *strappy_session_webview_refresh_messages_js_for_session(
   const char *db_path, long long session_id, const char *resource_dir,
   char **error_out)
 {
   return strappy_session_webview_delta_js_for_session(
     db_path, session_id, resource_dir, NULL, NULL, NULL, 2, error_out);
+}
+
+char *strappy_session_webview_refresh_from_request_js_for_session(
+  const char *db_path, long long session_id, const char *resource_dir,
+  long long minimum_request, char **error_out)
+{
+  strappy_session_webview_render_context *context;
+  strappy_session_message_record_list list;
+  char *html = NULL, *script = NULL;
+  context = strappy_session_webview_render_context_create(db_path, resource_dir, error_out);
+  if (!context) return NULL;
+  strappy_session_message_record_list_init(&list);
+  if (strappy_db_list_response_timeline_from_request(db_path, session_id,
+      minimum_request, &list, error_out)) {
+    html = strappy_session_webview_messages_html_for_record_range(&list, 0U,
+      list.count, context->database_display.names, context->database_display.count,
+      NULL, context->webview, error_out);
+    if (html) script = strappy_webview_sync_messages_from_request_js(html, minimum_request);
+  }
+  free(html);
+  strappy_session_message_record_list_destroy(&list);
+  strappy_session_webview_render_context_destroy(context);
+  return script;
 }
 
 char *strappy_session_webview_append_messages_js_for_session(

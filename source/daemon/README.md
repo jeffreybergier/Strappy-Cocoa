@@ -30,7 +30,7 @@ synthetic provider/credential callbacks; it never accesses user credentials.
 
 `strappyd` has a portable C runtime and a small Cocoa credential boundary, and is a service supervised by launchd. It owns store
 initialization, bundled catalog seeding, and all database writes. The app opens
-existing stores read-only after IPC v7 readiness. The service also owns scans,
+existing stores read-only after IPC v8 readiness. The service also owns scans,
 study, catalog refresh, account changes and shared mutations. See [STORAGE.md](STORAGE.md) for
 ownership, snapshot lifetimes, startup/upgrade behavior, and runtime validation;
 [PROTOCOL.md](PROTOCOL.md) describes the wire contract.

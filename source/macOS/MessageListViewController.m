@@ -526,6 +526,7 @@ static BOOL StrappyContextRoundActionValues(
   serviceRefreshPending_ = NO;
   serviceRefreshInFlight_ = NO;
   webViewGeneration_++;
+  serviceRevision_ = 0;
   path = [self writeCurrentHTML];
   if (path == nil) {
     return nil;
@@ -912,14 +913,15 @@ static BOOL StrappyContextRoundActionValues(
     completion:@selector(serviceRefreshDidFinish:)
     context:[NSArray arrayWithObjects:session_,
       [NSNumber XP_numberWithUnsignedInteger:webViewGeneration_], nil]]
-    webViewRefreshMessagesJavaScriptWithError:NULL];
+    webViewRefreshMessagesAfterRevision:[NSNumber numberWithUnsignedLongLong:serviceRevision_] error:NULL];
   return YES;
 }
 
 - (void)serviceRefreshDidFinish:(StrappyAsyncResult *)result
 {
   NSArray *context = [result context];
-  NSString *javaScript = [result value];
+  NSDictionary *update = [result value];
+  NSString *javaScript = [update isKindOfClass:[NSDictionary class]] ? [update objectForKey:@"javaScript"] : nil;
   if (([context objectAtIndex:0] != session_) ||
       ([[context objectAtIndex:1] XP_unsignedIntegerValue] != webViewGeneration_)) return;
   serviceRefreshInFlight_ = NO;
@@ -929,6 +931,7 @@ static BOOL StrappyContextRoundActionValues(
     return; /* A later invalidation retries without discarding the document. */
   }
   [self pushJavaScript:javaScript];
+  serviceRevision_ = [[update objectForKey:@"revision"] unsignedLongLongValue];
   if (serviceRefreshPending_) [self schedulePendingStreamEventFlush];
 }
 

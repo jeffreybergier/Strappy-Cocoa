@@ -821,6 +821,10 @@ int strappy_db_list_response_timeline(
   long long session_id,
   strappy_session_message_record_list *list,
   char **error_out);
+int strappy_db_list_response_timeline_from_request(
+  const char *db_path, long long session_id, long long minimum_request,
+  strappy_session_message_record_list *list, char **error_out);
+
 int strappy_db_list_response_timeline_after(
   const char *db_path,
   long long session_id,

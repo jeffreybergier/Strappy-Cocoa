@@ -26,6 +26,7 @@
   BOOL                      serviceRefreshPending_;
   BOOL                      serviceRefreshInFlight_;
   NSUInteger                webViewGeneration_;
+  unsigned long long        serviceRevision_;
   BOOL                      sending_;
   BOOL                      cancelPromptRequested_;
 }

@@ -1,4 +1,4 @@
-# Strappy local service protocol v7
+# Strappy local service protocol v8
 
 The daemon runs the C Responses runtime, scans, study, catalog refresh and
 shared mutations. GUI clients read history, run state and catalogs from SQLite.
@@ -35,7 +35,7 @@ A frame is a 24-byte header followed by exactly `length` payload bytes:
 | Offset | Width | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `STPY` |
-| 4 | 2 | Protocol version, currently 7 |
+| 4 | 2 | Protocol version, currently 8 |
 | 6 | 2 | Kind: request 1, reply 2, event 3 |
 | 8 | 4 | Operation |
 | 12 | 4 | Request ID; zero only for unsolicited events |
@@ -174,20 +174,31 @@ connection never cancels work.
 ## Events, workers, and reconnect
 
 Event IDs 32–35 mean session, ledger, catalog, and run-state changed, respectively.
-They have request ID/status zero and the same 36-byte identity/revision/readiness
-payload as a snapshot. They invalidate the entire named topic. No events are
-emitted for rejected commands or heartbeat ticks.
+Request ID/status are zero. A global invalidation contains the 36-byte snapshot.
+A scoped invalidation contains that snapshot plus two big-endian u64 fields:
 
-`strappy_ipc_server_committed` is the worker-to-event-loop boundary. Call it only
-after the corresponding transaction commits. It increments the revision under a
-mutex, records pending topic bits, and wakes the loop through a nonblocking pipe.
-A full pipe cannot lose pending topic bits. Multiple changes may coalesce into
-one refresh hint. Workers own database/provider work; the loop owns
-all client descriptors. Stop and join workers before destroying the server.
-The offline fixture simulates commits without touching an application database.
-Prompt acceptance, run transitions and runtime ledger/session callbacks publish
-after their associated commits. While a subscribed peer has a command in
-progress, topic bits retain every pending invalidation until its reply is queued.
+| Offset | Width | Field |
+| --- | --- | --- |
+| 36 | 8 | Positive affected session ID |
+| 44 | 8 | Model-request ID for ledger changes; zero when row detail is unavailable |
+
+IDs must fit positive signed 64-bit integers. A scoped ledger event invalidates
+the affected request and its suffix: later cumulative cost/time totals can depend
+on earlier requests. Isolated study batches identify the first request in their
+prompt group because completion changes context inclusion for the entire group.
+Run-only events update status without reading history.
+No events are emitted for rejected commands or heartbeat ticks.
+
+`strappy_ipc_server_committed_scope` is the worker-to-event-loop boundary, called
+only after the transaction commits. It increments the revision under a mutex,
+deduplicates up to 64 topic/session/request hints, and wakes the loop through a
+nonblocking pipe. Overflow explicitly widens retained hints to global topic bits;
+a full wake pipe cannot lose those hints. `strappy_ipc_server_committed` publishes
+an unscoped hint for global changes. A subscribed peer executing a command retains
+topic bits and receives global recovery hints after its reply. Slow subscribers
+are disconnected rather than silently losing events. Workers own database/provider
+work; the loop owns client descriptors. Stop and join workers before destroying
+the server. The offline fixture simulates commits without an application database.
 
 Connect, authenticate, send `hello`, then send `subscribe`. Subscription and its
 snapshot watermark are established in one event-loop operation, so a concurrent
@@ -196,7 +207,7 @@ events share one ordered stream; dispatch by kind and correlate replies by ID.
 Events already queued before `unsubscribe` can arrive before its reply.
 
 Notifications are refresh hints. On first subscription, reconnect, changed
-instance identity, or a revision gap, refresh **all** daemon-owned state from its
+instance identity, or lost change detail, refresh **all** affected state from its
 authoritative read layer. An event can represent coalesced changes; never
 interpret it as an ordered transaction log. Events for different topics may
 share a revision. Only discard events at/below a watermark after refreshing all
@@ -204,7 +215,7 @@ state through that watermark; do not discard a second topic just because the
 first topic carried the same revision. GUI clients open read-only connections only while their service monitor has
 negotiated store readiness and the matching ABI. Disconnect revokes readiness;
 reconnect causes a full committed-state refresh. Ordinary events preserve their
-topic bits, coalesce on the main loop, and refresh only the affected views. Session
+topic and session scopes, coalesce on the main loop, and refresh only affected views. Session
 option changes do not invalidate the ledger or reload conversation HTML. Unsent
 UI option drafts survive refreshes. The monitor uses a background
 thread with bounded I/O and one-second retry delay, never socket I/O on the UI
@@ -217,7 +228,17 @@ on the GUI main thread; prompt/authentication work uses separate threads.
 After any I/O/protocol error, close it and resynchronize on a fresh connection.
 The current store monitor handles control-request correlation, reconnection
 backoff, and UI refresh hints. The `StrappySession` adapter sends prompts and cancels on background threads.
-It renders fresh DB state on service invalidation. `FileScanner` sends commands
+The monitor keeps a bounded 256-entry process-local change journal. Each WebView
+owns its own cursor, advanced only after a successful refresh for its current
+session/document generation. First use, reconnect, journal overflow, more than
+64 dirty requests, or missing ledger detail requests a full snapshot. Otherwise
+the reader reconstructs message content only from the earliest dirty request
+forward, including deletions and late tool outputs behind the append cursor.
+The renderer replaces only changed DOM rows and removes absent rows in that
+range. Earlier content and unchanged disclosures remain intact. Prefix numeric
+aggregation for cumulative totals still visits earlier requests; older edits
+may require a longer suffix. No schema change or persistent revision log is used.
+ `FileScanner` sends commands
 and reads catalog snapshots; it no longer performs scanning in the UI.
 Short metadata/acceptance commands and their completions run inline on the GUI
 main thread, including the socket send/receive. A permanent caller-owned control
@@ -240,7 +261,7 @@ strappyd --ipc-probe /absolute/private/directory/service.sock
 See `VALIDATION.md` for observed platforms and limitations. The probe does not
 connect to providers or access application data.
 
-## Step 4 command payloads (IPC v7, reader ABI 2)
+## Step 4 command payloads (IPC v8, reader ABI 2)
 
 Operations 18–25 and 27 accept bounded UTF-8 JSON objects with string values only.
 JSON is transient wire serialization, never a database document. Integer fields

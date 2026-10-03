@@ -301,3 +301,20 @@ expect(rows.length === 1 && rows[0] === answerRow,
 sync.syncMessages([]);
 expect(rows.length === 0, 'An empty authoritative snapshot did not remove stored rows.');
 console.log('WebView invalidations: stable DOM, changed rows, ordered insertion, animated additions, removal passed');
+
+// Scoped reconciliation leaves earlier requests and their UI state untouched.
+sync.apiRoundId = row => row.id.split('-')[0];
+sync.syncMessages([['9-old', 'earlier'], ['10-call', 'pending'], ['10-answer', 'old']]);
+const earlier = rows[0];
+earlier.expanded = true;
+const oldAnswer = rows[2];
+sync.syncMessages([['10-call', 'complete'], ['10-tool', 'late output'], ['10-answer', 'old']], '10');
+expect(rows[0] === earlier && earlier.expanded && rows[3] === oldAnswer,
+  'Scoped update replaced unaffected history or unchanged suffix rows.');
+expect(rows.map(row => row.id).join(',') === '9-old,10-call,10-tool,10-answer',
+  'Scoped late tool output lost request ordering.');
+sync.syncMessages([], '10');
+expect(rows.length === 1 && rows[0] === earlier, 'Scoped empty snapshot missed tombstones or deleted earlier history.');
+expect(sync.requestAtOrAfter('9007199254740993', '9007199254740992') &&
+  !sync.requestAtOrAfter('9007199254740992', '9007199254740993'), 'Request comparison lost 64-bit precision.');
+console.log('WebView scoped updates: unchanged history, late output, suffix tombstones, 64-bit identities passed');

@@ -200,6 +200,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 @property (nonatomic, assign) BOOL serviceRefreshPending;
 @property (nonatomic, assign) BOOL serviceRefreshInFlight;
 @property (nonatomic, assign) NSUInteger webViewGeneration;
+@property (nonatomic, assign) unsigned long long serviceRevision;
 @property (nonatomic, assign) BOOL webViewReloadRequired;
 @property (nonatomic, assign) BOOL sending;
 @property (nonatomic, assign) BOOL cancelPromptRequested;
@@ -940,6 +941,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   [self setServiceRefreshPending:NO];
   [self setServiceRefreshInFlight:NO];
   [self setWebViewGeneration:[self webViewGeneration] + 1U];
+  [self setServiceRevision:0];
   [[self webView] loadFileURL:[NSURL fileURLWithPath:path]];
 }
 
@@ -1362,14 +1364,15 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     completion:@selector(serviceRefreshDidFinish:)
     context:[NSArray arrayWithObjects:[self session],
       [NSNumber XP_numberWithUnsignedInteger:[self webViewGeneration]], nil]]
-    webViewRefreshMessagesJavaScriptWithError:NULL];
+    webViewRefreshMessagesAfterRevision:[NSNumber numberWithUnsignedLongLong:[self serviceRevision]] error:NULL];
   return YES;
 }
 
 - (void)serviceRefreshDidFinish:(StrappyAsyncResult *)result
 {
   NSArray *context = [result context];
-  NSString *javaScript = [result value];
+  NSDictionary *update = [result value];
+  NSString *javaScript = [update isKindOfClass:[NSDictionary class]] ? [update objectForKey:@"javaScript"] : nil;
   if (([self tearingDown]) || ([context objectAtIndex:0] != [self session]) ||
       ([[context objectAtIndex:1] XP_unsignedIntegerValue] != [self webViewGeneration])) return;
   [self setServiceRefreshInFlight:NO];
@@ -1379,6 +1382,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     return; /* A later invalidation retries without discarding the document. */
   }
   [[self webView] evaluateJavaScript:javaScript];
+  [self setServiceRevision:[[update objectForKey:@"revision"] unsignedLongLongValue]];
   if ([self serviceRefreshPending]) [self schedulePendingStreamEventFlush];
 }
 

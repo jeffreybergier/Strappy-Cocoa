@@ -62,18 +62,18 @@ def exact(sock, n):
     return data
 
 def send(sock, op, ident, payload=b''):
-    sock.sendall(header.pack(b'STPY', 7, 1, op, ident, len(payload), 0)+payload)
+    sock.sendall(header.pack(b'STPY', 8, 1, op, ident, len(payload), 0)+payload)
 
 def receive(sock):
     magic, version, kind, op, ident, size, status = header.unpack(exact(sock, 24))
-    assert (magic, version, kind) == (b'STPY', 7, 2)
+    assert (magic, version, kind) == (b'STPY', 8, 2)
     return status, exact(sock, size)
 
 def connect(directory):
     sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(12)
     sock.connect(str(directory/'service.sock'))
-    send(sock, 1, 1, struct.pack('!II', 7, 7))
+    send(sock, 1, 1, struct.pack('!II', 8, 8))
     status, snapshot = receive(sock)
     assert status == 0 and struct.unpack('!I', snapshot[24:28])[0] == 7
     return sock
@@ -324,7 +324,7 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
         # commit settings or a run. Keep the first peer open while probing.
         for cut in (80, len(payload)-1):
             with connect(directory) as sock:
-                sock.sendall(header.pack(b'STPY',7,1,28,2,len(payload),0)+payload[:cut])
+                sock.sendall(header.pack(b'STPY',8,1,28,2,len(payload),0)+payload[:cut])
                 assert command(directory,26,b'')[0] == 0
                 assert no_large_run()
                 with sqlite3.connect(dbpath) as db:
@@ -342,14 +342,14 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
         # ordinary control messages that still have their 4 KiB cap.
         for op, size in ((16,maximum+73),(28,maximum+4096+77),(25,4097),(28,0xffffffff)):
             with connect(directory) as sock:
-                sock.sendall(header.pack(b'STPY',7,1,op,2,size,0))
+                sock.sendall(header.pack(b'STPY',8,1,op,2,size,0))
                 assert sock.recv(1) == b''
         assert no_large_run()
         # Split a maximum-sized options-bearing submission across many writes,
         # including multibyte characters. Lose its acknowledgment and retry.
         before = len(requests)
         with connect(directory) as sock:
-            sock.sendall(header.pack(b'STPY',7,1,28,2,len(payload),0))
+            sock.sendall(header.pack(b'STPY',8,1,28,2,len(payload),0))
             for offset in range(0,len(payload),8191):
                 sock.sendall(payload[offset:offset+8191])
         wait_for(lambda: state(large_key) == 3)

@@ -18,9 +18,9 @@ int __wrap_strappy_ipc_send(int fd, const strappy_ipc_message *message, int time
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t condition = PTHREAD_COND_INITIALIZER;
 static int ready;
-static void changed(unsigned int topics)
+static void changed(unsigned int topics, long long session)
 {
-    (void)topics;
+    (void)session; (void)topics;
     pthread_mutex_lock(&mutex); ready = 1;
     pthread_cond_signal(&condition); pthread_mutex_unlock(&mutex);
 }

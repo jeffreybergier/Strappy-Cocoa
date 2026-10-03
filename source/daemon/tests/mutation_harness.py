@@ -66,16 +66,16 @@ def exact(sock, n):
     return data
 
 def exchange(sock, op, ident, payload=b''):
-    sock.sendall(header.pack(b'STPY', 7, 1, op, ident, len(payload), 0)+payload)
+    sock.sendall(header.pack(b'STPY', 8, 1, op, ident, len(payload), 0)+payload)
     magic, version, kind, reply_op, reply_id, size, status = header.unpack(exact(sock, 24))
-    assert (magic, version, kind, reply_op, reply_id) == (b'STPY', 7, 2, op, ident)
+    assert (magic, version, kind, reply_op, reply_id) == (b'STPY', 8, 2, op, ident)
     return status, exact(sock, size)
 
 def command(directory, op, payload=b''):
     with socket.socket(socket.AF_UNIX) as sock:
         sock.settimeout(5)
         sock.connect(str(directory/'service.sock'))
-        status, _ = exchange(sock, 1, 1, struct.pack('!II', 7, 7))
+        status, _ = exchange(sock, 1, 1, struct.pack('!II', 8, 8))
         assert status == 0
         return exchange(sock, op, 2, payload)
 
@@ -146,12 +146,13 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         with socket.socket(socket.AF_UNIX) as subscriber:
             subscriber.settimeout(2)
             subscriber.connect(str(directory/'service.sock'))
-            assert exchange(subscriber, 1, 1, struct.pack('!II', 7, 7))[0] == 0
+            assert exchange(subscriber, 1, 1, struct.pack('!II', 8, 8))[0] == 0
             assert exchange(subscriber, 3, 2)[0] == 0
             rpc('options',session=session,**options)
             magic, version, kind, topic, ident, size, status = header.unpack(exact(subscriber, 24))
-            assert (magic, version, kind, topic, status) == (b'STPY', 7, 3, 32, 0)
-            exact(subscriber, size)
+            assert (magic, version, kind, topic, status) == (b'STPY', 8, 3, 32, 0)
+            event = exact(subscriber, size)
+            assert size == 52 and struct.unpack('!QQ', event[36:]) == (session, 0)
             subscriber.settimeout(.15)
             try:
                 extra = subscriber.recv(1)
@@ -206,9 +207,33 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         wait(idle)
         assert scalar('SELECT state FROM prompt_runs WHERE session_id=?',(study,)) == 4
         study_database = scalar('SELECT assistant_database_id FROM databases WHERE id=?',(catalog,))
-        study = int(rpc(op=24,directory=directory,key='c'*64))
-        wait(idle)
-        assert scalar('SELECT state FROM prompt_runs WHERE session_id=?',(study,)) == 3
+        with socket.socket(socket.AF_UNIX) as subscriber:
+            subscriber.settimeout(2)
+            subscriber.connect(str(directory/'service.sock'))
+            assert exchange(subscriber, 1, 1, struct.pack('!II', 8, 8))[0] == 0
+            assert exchange(subscriber, 3, 2)[0] == 0
+            study = int(rpc(op=24,directory=directory,key='c'*64))
+            wait(idle)
+            assert scalar('SELECT state FROM prompt_runs WHERE session_id=?',(study,)) == 3
+            with sqlite3.connect(dbpath) as db:
+                groups = db.execute('SELECT min(r.id),count(*) FROM model_requests r JOIN turns t ON t.id=r.turn_id WHERE t.session_id=? GROUP BY t.id', (study,)).fetchall()
+            assert groups and max(count for _, count in groups) > 1
+            first_requests = {first for first, _ in groups}
+            ledger_events = []
+            subscriber.settimeout(.2)
+            while True:
+                try:
+                    _, _, kind, topic, _, size, _ = header.unpack(exact(subscriber, 24))
+                    payload = exact(subscriber, size)
+                except socket.timeout:
+                    break
+                if kind == 3 and topic == 33 and size == 52:
+                    affected, request = struct.unpack('!QQ', payload[36:])
+                    if affected == study:
+                        ledger_events.append(request)
+            assert ledger_events and all(request in first_requests for request in ledger_events), ledger_events
+            # Completion excludes the whole batch, not just its last request.
+            assert scalar('SELECT count(*) FROM conversation_items WHERE session_id=? AND include_in_context=1', (study,)) == 0
         rpc('delete_study',id=study_database)
         rpc('reset_study')
         router = rpc('create_account',id='openrouter',name='Offline catalog')

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define STRAPPY_IPC_VERSION 7U
+#define STRAPPY_IPC_VERSION 8U
 #define STRAPPY_IPC_STORE_ABI 2U
 #define STRAPPY_IPC_HEADER 24U
 /* Ordinary control requests, every reply, and every event stay small. */
@@ -75,8 +75,12 @@ void strappy_ipc_server_store_ready(strappy_ipc_server *server);
 /* timeout_ms=-1 sleeps until I/O, worker completion, signal or peer deadline. */
 int strappy_ipc_server_step(strappy_ipc_server *server, int wake_fd, int timeout_ms);
 /* Thread-safe worker boundary: call ONLY AFTER the state transaction commits.
- * Coalesced invalidations cover an entire topic, never individual ledger rows.
+ * Scoped hints identify a session and earliest changed model request.
+ * Missing detail is explicitly widened to a full-topic invalidation.
  * No callbacks, provider work, or database operations run on the IPC loop. */
+/* Session/request are semantic IDs; zero means unavailable detail/full scope. */
+int strappy_ipc_server_committed_scope(strappy_ipc_server *server, uint32_t event,
+    long long session, long long request);
 int strappy_ipc_server_committed(strappy_ipc_server *server, uint32_t event);
 /* Stop/join workers before close. */
 void strappy_ipc_server_drain(strappy_ipc_server *server);

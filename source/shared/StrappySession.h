@@ -351,6 +351,7 @@ enum {
                                   reconciledMessageCount:
                 (NSUInteger *)reconciledMessageCount
                                                    error:(NSError **)error;
+- (NSDictionary *)webViewRefreshMessagesAfterRevision:(NSNumber *)revision error:(NSError **)error;
 - (NSString *)webViewRefreshMessagesJavaScriptWithError:(NSError **)error;
 - (NSString *)webViewClearProcessingStatusJavaScript;
 - (NSString *)webViewJavaScriptForStreamEvent:(NSDictionary *)event

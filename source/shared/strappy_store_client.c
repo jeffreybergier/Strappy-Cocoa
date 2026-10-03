@@ -60,10 +60,47 @@ void strappy_store_client_work_status(unsigned int *active, unsigned int *last, 
     pthread_mutex_unlock(&strappy_status_mutex);
 }
 
+#define STRAPPY_STORE_JOURNAL 256U
+static struct { uint64_t revision; unsigned int topics; long long session, request; }
+    strappy_changes[STRAPPY_STORE_JOURNAL];
+static uint64_t strappy_change_revision;
+static void strappy_store_record_change(unsigned int topics, long long session, long long request)
+{
+    unsigned int index;
+    pthread_mutex_lock(&strappy_status_mutex);
+    ++strappy_change_revision;
+    index=(unsigned int)(strappy_change_revision % STRAPPY_STORE_JOURNAL);
+    strappy_changes[index].revision=strappy_change_revision;
+    strappy_changes[index].topics=topics;
+    strappy_changes[index].session=session; strappy_changes[index].request=request;
+    pthread_mutex_unlock(&strappy_status_mutex);
+}
+int strappy_store_client_changes(long long session, uint64_t after,
+    uint64_t *next, long long requests[STRAPPY_STORE_MAX_CHANGES])
+{
+    uint64_t revision;
+    int count=0, i;
+    pthread_mutex_lock(&strappy_status_mutex);
+    *next=strappy_change_revision;
+    if (!after || after>*next || *next-after>STRAPPY_STORE_JOURNAL) count=-1;
+    else for (revision=after+1; revision<=*next; ++revision) {
+        unsigned int index=(unsigned int)(revision % STRAPPY_STORE_JOURNAL);
+        if (!(strappy_changes[index].topics & STRAPPY_STORE_LEDGER) ||
+            (strappy_changes[index].session && strappy_changes[index].session!=session)) continue;
+        if (!strappy_changes[index].request) { count=-1; break; }
+        for (i=0;i<count;++i) if (requests[i]==strappy_changes[index].request) break;
+        if (i==count) {
+            if (count==STRAPPY_STORE_MAX_CHANGES) { count=-1; break; }
+            requests[count++]=strappy_changes[index].request;
+        }
+    }
+    pthread_mutex_unlock(&strappy_status_mutex);
+    return count;
+}
 typedef struct strappy_store_monitor {
     char *socket_path;
     char *database_path;
-    void (*changed)(unsigned int topics);
+    void (*changed)(unsigned int topics, long long session);
 } strappy_store_monitor;
 
 static void *strappy_store_monitor_run(void *context)
@@ -95,7 +132,7 @@ static void *strappy_store_monitor_run(void *context)
         if (ready) {
             strappy_db_set_service_ready(monitor->database_path, 1);
             strappy_store_refresh_work();
-            monitor->changed(STRAPPY_STORE_ALL);
+            strappy_store_record_change(STRAPPY_STORE_ALL,0,0); monitor->changed(STRAPPY_STORE_ALL,0);
         }
         while (ready) {
             struct pollfd item;
@@ -109,13 +146,25 @@ static void *strappy_store_monitor_run(void *context)
              * subscribers instead of dropping events. Reconnect always performs
              * a full refresh; a topic hint never requires unrelated UI work. */
             if (message.operation < STRAPPY_IPC_SESSION_CHANGED ||
-                message.operation > STRAPPY_IPC_RUN_CHANGED || message.length != 36) break;
+                message.operation > STRAPPY_IPC_RUN_CHANGED || (message.length != 36 && message.length != 52)) break;
             if (message.operation == STRAPPY_IPC_RUN_CHANGED ||
                 message.operation == STRAPPY_IPC_CATALOG_CHANGED) strappy_store_refresh_work();
-            monitor->changed(1U << (message.operation - STRAPPY_IPC_SESSION_CHANGED));
+            {
+                unsigned int topics=1U << (message.operation-STRAPPY_IPC_SESSION_CHANGED);
+                long long session=0, request=0;
+                if (message.length==52) {
+                    if (strappy_ipc_get32(message.payload+36)>0x7fffffffU ||
+                        strappy_ipc_get32(message.payload+44)>0x7fffffffU) break;
+                    session=(long long)(((uint64_t)strappy_ipc_get32(message.payload+36)<<32)|strappy_ipc_get32(message.payload+40));
+                    request=(long long)(((uint64_t)strappy_ipc_get32(message.payload+44)<<32)|strappy_ipc_get32(message.payload+48));
+                    if (!session) break;
+                }
+                strappy_store_record_change(topics,session,request);
+                monitor->changed(topics,session);
+            }
         }
         strappy_db_set_service_ready(monitor->database_path, 0);
-        if (ready) { strappy_store_refresh_work(); monitor->changed(STRAPPY_STORE_ALL); }
+        if (ready) { strappy_store_refresh_work(); strappy_store_record_change(STRAPPY_STORE_ALL,0,0); monitor->changed(STRAPPY_STORE_ALL,0); }
         if (fd >= 0) close(fd);
         {
             struct timeval delay;
@@ -127,7 +176,7 @@ static void *strappy_store_monitor_run(void *context)
 }
 
 int strappy_store_client_start(const char *socket_path, const char *database_path,
-                               void (*changed)(unsigned int topics))
+                               void (*changed)(unsigned int topics, long long session))
 {
     pthread_t thread;
     strappy_store_monitor *monitor;
