@@ -5,6 +5,8 @@ Database Study, catalog refresh, shared settings, and account mutations. Step 4
 has offline coverage and isolated native command/storage validation on Tiger/PPC,
 iOS 8/armv7, and iOS 15/arm64. Full graphical lifecycle and remaining recovery
 validation are step 5; iOS 6 device compatibility remains unverified.
+Step 6 tracks the architectural follow-ups from the refactor review against
+`main`; those items remain unimplemented.
 
 See `source/daemon/README.md` for operation and `source/daemon/VALIDATION.md`
 for device evidence. This plan supersedes the earlier iOS 5 acceptance gate
@@ -342,6 +344,96 @@ stop owned groups after runtime death. Native recovery checks passed on Tiger,
 iOS 8 and iOS 15. Platform coverage and remaining physical-device scenarios are
 recorded separately in `source/daemon/VALIDATION.md`; unchecked items above are
 not implied complete by implementation or build success.
+
+## Step 6: address architectural review findings
+
+The review of `exp/daemon` against `main` identified the following follow-ups.
+Preserve daemon-owned execution and credentials, durable submission retries,
+read-only UI storage, and conservative recovery while addressing them.
+
+### Prompt capacity (high priority)
+
+The 4,096-byte IPC payload currently limits prompt text to at most 4,020 UTF-8
+bytes, with less space when session options accompany it. This introduces a
+restriction absent from `main` and rejects ordinary pasted code, logs, and
+documents before provider execution.
+
+- [ ] Define an explicit supported prompt-size limit and adapt IPC framing or
+  bounded chunked submission to carry it, independently of control-message size.
+  Keep prompt/options acceptance atomic and preserve retry-key deduplication.
+- [ ] Test prompts above 4 KB, multibyte UTF-8, option-bearing submissions, exact
+  size boundaries, oversized-input rejection, and lost acknowledgments. Partial
+  transfer must never start execution.
+
+Relevant code: `source/shared/strappy_ipc.h`,
+`source/shared/StrappySession.m`, and `source/daemon/strappy_execution.c`.
+
+### GUI responsiveness during control commands (high priority)
+
+`StrappyAsync commandTarget:` currently executes synchronously on the GUI
+thread, including socket send/receive. Ordinary reply waits can take two
+seconds, with additional reconnect overhead. Account operations can also wait
+behind the account credential lock held during a network refresh; a client
+timeout does not mean the server-side mutation was cancelled.
+
+- [ ] Restore asynchronous, ordered control commands with main-thread
+  completions. Audit callers that currently depend on inline completion and
+  preserve committed-state rendering and explicit pending UI state.
+- [ ] Keep credential serialization without allowing a blocked account command
+  to stall unrelated control work. Preserve unknown-acknowledgment handling and
+  never automatically replay ordinary mutations.
+- [ ] Verify main-loop responsiveness during delayed replies, reconnects,
+  database contention, and an account save/delete concurrent with credential
+  refresh. Check completion ordering and late server-side commits after timeout.
+
+Relevant code: `source/shared/StrappyAsync.m`,
+`source/shared/strappy_store_client.c`, and `source/daemon/StrappySession.m`.
+Update `source/daemon/ASYNC_UI.md` and the step 4 status notes to match the final
+command policy.
+
+### Scoped, incremental conversation invalidation (medium priority)
+
+Current events identify only a topic. Every live `StrappySession` observes the
+same notification, and run/ledger changes trigger full-history regeneration
+even for unaffected conversations. DOM identity preservation avoids replacing
+unchanged elements but does not avoid the database, rendering, and transfer cost.
+
+- [ ] Include affected session identities in normal invalidations so unrelated
+  conversations do not refresh. Preserve complete refresh on reconnect or when
+  event detail is unavailable.
+- [ ] Add revision-based row updates that cover changed and deleted rows behind
+  the append cursor, including tool outputs and context-inclusion changes.
+- [ ] Measure long-history updates with multiple open conversations on legacy
+  targets. Verify isolated refreshes, bounded incremental work, coalescing,
+  reconnect recovery, and preserved WebView disclosure/scroll state.
+
+Relevant code: `source/daemon/strappy_ipc_server.c`,
+`source/shared/StrappySession.m`, and `source/shared/strappy_session.c`.
+
+### Detect incompatible existing schema shapes (medium priority)
+
+Fresh stores no longer enforce global uniqueness of provider tool-call IDs,
+but existing stores retain that constraint because `CREATE TABLE IF NOT EXISTS`
+does not alter it. Both shapes currently pass the same schema identity/version
+checks, so an upgraded store can reject valid repeated IDs while a fresh store
+works.
+
+- [ ] Validate the relevant schema constraints before advertising readiness and
+  report an actionable incompatibility for unsupported existing stores. Do not
+  silently reset user data or claim that initialization removed old constraints.
+- [ ] Test fresh stores and stores created with `main`'s unique constraint,
+  including repeated provider IDs across responses and sessions. Keep rejecting
+  ambiguous duplicate IDs within one response.
+
+Relevant code: `source/shared/strappy_db.c` and
+`source/shared/strappy_db_responses.c`. Keep `PRAGMA user_version` pinned at 1.
+This step authorizes planning detection, not a migration or version increase;
+either still requires explicit user permission under `AGENTS.md`.
+
+The review's targeted Linux app-boundary, authentication, control-client,
+execution, and mutation checks passed. They do not establish completion of
+these follow-ups or native GUI/device validation. Apply the implementation
+validation requirements below when carrying out this step.
 
 ## Validation and completion
 
