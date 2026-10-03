@@ -6,7 +6,7 @@ has offline coverage and isolated native command/storage validation on Tiger/PPC
 iOS 8/armv7, and iOS 15/arm64. Full graphical lifecycle and remaining recovery
 validation are step 5; iOS 6 device compatibility remains unverified.
 Step 6 tracks the architectural follow-ups from the refactor review against
-`main`; those items remain unimplemented.
+`main`; prompt capacity is addressed, with the remaining items still open.
 
 See `source/daemon/README.md` for operation and `source/daemon/VALIDATION.md`
 for device evidence. This plan supersedes the earlier iOS 5 acceptance gate
@@ -353,17 +353,23 @@ read-only UI storage, and conservative recovery while addressing them.
 
 ### Prompt capacity (high priority)
 
-The 4,096-byte IPC payload currently limits prompt text to at most 4,020 UTF-8
-bytes, with less space when session options accompany it. This introduces a
-restriction absent from `main` and rejects ordinary pasted code, logs, and
+The review found that the 4,096-byte IPC payload limited prompt text to at most
+4,020 UTF-8 bytes, with less space when session options accompanied it. This
+restriction was absent from `main` and rejected ordinary pasted code, logs, and
 documents before provider execution.
 
-- [ ] Define an explicit supported prompt-size limit and adapt IPC framing or
+- [x] Define an explicit supported prompt-size limit and adapt IPC framing or
   bounded chunked submission to carry it, independently of control-message size.
   Keep prompt/options acceptance atomic and preserve retry-key deduplication.
-- [ ] Test prompts above 4 KB, multibyte UTF-8, option-bearing submissions, exact
+- [x] Test prompts above 4 KB, multibyte UTF-8, option-bearing submissions, exact
   size boundaries, oversized-input rejection, and lost acknowledgments. Partial
   transfer must never start execution.
+
+Implemented in IPC v6: 1 MiB of UTF-8 prompt text plus an independent 4 KiB
+options allowance. Large submissions use heap buffers; control requests, replies,
+and events remain capped at 4 KiB. Offline regressions cover exact limits,
+partial transfers without acceptance, provider delivery, and durable retries.
+Native runtime validation of large prompts remains unverified.
 
 Relevant code: `source/shared/strappy_ipc.h`,
 `source/shared/StrappySession.m`, and `source/daemon/strappy_execution.c`.

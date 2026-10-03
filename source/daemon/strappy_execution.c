@@ -230,7 +230,8 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
     strappy_execution *e = context;
     long long session;
     strappy_run_record r;
-    char key[65], prompt[STRAPPY_IPC_MAX_PAYLOAD];
+    char key[65], *prompt = NULL;
+    const unsigned char *payload = strappy_ipc_payload(request);
     uint32_t size, offset = 72;
     cJSON *settings = NULL;
     strappy_session_options options;
@@ -244,9 +245,9 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
             char json[STRAPPY_IPC_MAX_PAYLOAD + 1];
             const char *end = NULL;
             unsigned int i;
-            if (!request->length || memchr(request->payload,0,request->length) ||
-                !strappy_utf8_validate((const char *)request->payload,request->length)) goto mutation_done;
-            memcpy(json,request->payload,request->length); json[request->length] = 0;
+            if (!request->length || memchr(payload,0,request->length) ||
+                !strappy_utf8_validate((const char *)payload,request->length)) goto mutation_done;
+            memcpy(json,payload,request->length); json[request->length] = 0;
             if (strstr(json,"\\u0000")) goto mutation_done;
             command = cJSON_ParseWithOpts(json,&end,1);
             if (!cJSON_IsObject(command)) goto mutation_done;
@@ -332,17 +333,17 @@ mutation_done:
     }
     memset(&r, 0, sizeof(r));
     reply->status = STRAPPY_IPC_INVALID;
-    if (request->length < 8 || strappy_ipc_get32(request->payload) > 0x7fffffffU) return;
-    session = (long long)(((uint64_t)strappy_ipc_get32(request->payload) << 32) |
-        strappy_ipc_get32(request->payload + 4));
+    if (request->length < 8 || strappy_ipc_get32(payload) > 0x7fffffffU) return;
+    session = (long long)(((uint64_t)strappy_ipc_get32(payload) << 32) |
+        strappy_ipc_get32(payload + 4));
     if (session <= 0) return;
     pthread_mutex_lock(&e->mutex);
     if (e->stopping) { reply->status = STRAPPY_IPC_NOT_READY; goto done; }
     if (request->operation == STRAPPY_IPC_CANCEL_RUN) {
         long long run;
-        if (request->length != 16 || strappy_ipc_get32(request->payload + 8) > 0x7fffffffU) goto done;
-        run = (long long)(((uint64_t)strappy_ipc_get32(request->payload + 8) << 32) |
-            strappy_ipc_get32(request->payload + 12));
+        if (request->length != 16 || strappy_ipc_get32(payload + 8) > 0x7fffffffU) goto done;
+        run = (long long)(((uint64_t)strappy_ipc_get32(payload + 8) << 32) |
+            strappy_ipc_get32(payload + 12));
         if (!strappy_run_latest(e->db, session, &r) || r.id != run) goto done;
         reply->status = STRAPPY_IPC_OK;
         strappy_execution *active = strappy_execution_session(e,session);
@@ -359,22 +360,22 @@ mutation_done:
         unsigned int i;
         /* 8-byte session, 64 lowercase hex retry-key, UTF-8 prompt. */
         if (request->length <= 72) goto done;
-        for (i = 0; i < 64; ++i) if (!((request->payload[8+i] >= '0' && request->payload[8+i] <= '9') ||
-            (request->payload[8+i] >= 'a' && request->payload[8+i] <= 'f'))) goto done;
-        memcpy(key, request->payload + 8, 64); key[64] = 0;
+        for (i = 0; i < 64; ++i) if (!((payload[8+i] >= '0' && payload[8+i] <= '9') ||
+            (payload[8+i] >= 'a' && payload[8+i] <= 'f'))) goto done;
+        memcpy(key, payload + 8, 64); key[64] = 0;
         if (request->operation == STRAPPY_IPC_SUBMIT_WITH_OPTIONS) {
             uint32_t length;
-            char json[STRAPPY_IPC_MAX_PAYLOAD + 1];
+            char json[STRAPPY_IPC_MAX_OPTIONS_BYTES + 1];
             const char *end;
             cJSON *item, *earlier;
             if (request->length <= 76) goto done;
-            length = strappy_ipc_get32(request->payload+72);
-            if (length >= request->length - 76) goto done;
+            length = strappy_ipc_get32(payload+72);
+            if (length > STRAPPY_IPC_MAX_OPTIONS_BYTES || length >= request->length - 76) goto done;
             offset = 76 + length;
             if (length) {
-                if (memchr(request->payload+76,0,length) ||
-                    !strappy_utf8_validate((const char *)request->payload+76,length)) goto done;
-                memcpy(json,request->payload+76,length); json[length] = 0;
+                if (memchr(payload+76,0,length) ||
+                    !strappy_utf8_validate((const char *)payload+76,length)) goto done;
+                memcpy(json,payload+76,length); json[length] = 0;
                 if (strstr(json,"\\u0000")) goto done;
                 settings = cJSON_ParseWithOpts(json,&end,1);
                 if (!cJSON_IsObject(settings)) goto done;
@@ -389,9 +390,12 @@ mutation_done:
             }
         }
         size = request->length - offset;
-        if (memchr(request->payload + offset, 0, size) ||
-            !strappy_utf8_validate((const char *)request->payload + offset, size)) goto done;
-        memcpy(prompt, request->payload + offset, size); prompt[size] = 0;
+        if (!size || size > STRAPPY_IPC_MAX_PROMPT_BYTES ||
+            memchr(payload + offset, 0, size) ||
+            !strappy_utf8_validate((const char *)payload + offset, size)) goto done;
+        prompt = malloc((size_t)size + 1);
+        if (!prompt) { reply->status = STRAPPY_IPC_STORAGE_ERROR; goto done; }
+        memcpy(prompt, payload + offset, size); prompt[size] = 0;
         strappy_execution *child, *existing;
         unsigned int workers = 0;
         strappy_execution_reap(e);
@@ -413,8 +417,7 @@ mutation_done:
             child->server = e->server; child->db = e->db; child->resources = e->resources;
             child->session_worker = 1; child->run = r.id; child->session = session;
             child->job = STRAPPY_IPC_SUBMIT_PROMPT;
-            child->prompt = strappy_string_duplicate(prompt);
-            if (!child->prompt) { free(child); goto launch_failed; }
+            child->prompt = prompt; prompt = NULL;
             if (pthread_mutex_init(&child->mutex,NULL) != 0) { free(child->prompt); free(child); goto launch_failed; }
             if (pthread_cond_init(&child->condition,NULL) != 0) {
                 pthread_mutex_destroy(&child->mutex); free(child->prompt); free(child); goto launch_failed;
@@ -442,7 +445,7 @@ accepted:;
         reply->length = 12;
     }
 done:
-    pthread_mutex_unlock(&e->mutex); strappy_run_destroy(&r); cJSON_Delete(settings);
+    pthread_mutex_unlock(&e->mutex); strappy_run_destroy(&r); cJSON_Delete(settings); free(prompt);
 }
 static void strappy_execution_command(const strappy_ipc_message *request,
     strappy_ipc_message *reply, void *context)

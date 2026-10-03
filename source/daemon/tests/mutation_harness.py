@@ -65,16 +65,16 @@ def exact(sock, n):
     return data
 
 def exchange(sock, op, ident, payload=b''):
-    sock.sendall(header.pack(b'STPY', 5, 1, op, ident, len(payload), 0)+payload)
+    sock.sendall(header.pack(b'STPY', 6, 1, op, ident, len(payload), 0)+payload)
     magic, version, kind, reply_op, reply_id, size, status = header.unpack(exact(sock, 24))
-    assert (magic, version, kind, reply_op, reply_id) == (b'STPY', 5, 2, op, ident)
+    assert (magic, version, kind, reply_op, reply_id) == (b'STPY', 6, 2, op, ident)
     return status, exact(sock, size)
 
 def command(directory, op, payload=b''):
     with socket.socket(socket.AF_UNIX) as sock:
         sock.settimeout(5)
         sock.connect(str(directory/'service.sock'))
-        status, _ = exchange(sock, 1, 1, struct.pack('!II', 5, 5))
+        status, _ = exchange(sock, 1, 1, struct.pack('!II', 6, 6))
         assert status == 0
         return exchange(sock, op, 2, payload)
 
@@ -131,11 +131,11 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         with socket.socket(socket.AF_UNIX) as subscriber:
             subscriber.settimeout(2)
             subscriber.connect(str(directory/'service.sock'))
-            assert exchange(subscriber, 1, 1, struct.pack('!II', 5, 5))[0] == 0
+            assert exchange(subscriber, 1, 1, struct.pack('!II', 6, 6))[0] == 0
             assert exchange(subscriber, 3, 2)[0] == 0
             rpc('options',session=session,**options)
             magic, version, kind, topic, ident, size, status = header.unpack(exact(subscriber, 24))
-            assert (magic, version, kind, topic, status) == (b'STPY', 5, 3, 32, 0)
+            assert (magic, version, kind, topic, status) == (b'STPY', 6, 3, 32, 0)
             exact(subscriber, size)
             subscriber.settimeout(.15)
             try:

@@ -3741,8 +3741,8 @@ static void StrappyStoreChanged(unsigned int topics)
   NSDictionary *pending = [[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey];
   char key[65];
   (void)context;
-  if ([data length] == 0 || [data length] > STRAPPY_IPC_MAX_PAYLOAD - 72 || [self isPromptInFlight]) {
-    if (error) *error = [StrappySession errorFromCString:"Prompt is empty, exceeds 4024 UTF-8 bytes, or a prompt is active."];
+  if ([data length] == 0 || [data length] > STRAPPY_IPC_MAX_PROMPT_BYTES || [self isPromptInFlight]) {
+    if (error) *error = [StrappySession errorFromCString:"Prompt is empty, exceeds 1 MiB of UTF-8 text, or a prompt is active."];
     return NO;
   }
   if (pending && (![[pending objectForKey:@"key"] isKindOfClass:[NSString class]] ||
@@ -3782,7 +3782,7 @@ static void StrappyStoreChanged(unsigned int topics)
 - (void)sendPromptInBackground:(NSDictionary *)request
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-  unsigned char payload[STRAPPY_IPC_MAX_PAYLOAD];
+  unsigned char *payload = NULL;
   NSData *prompt = [[request objectForKey:@"prompt"] dataUsingEncoding:NSUTF8StringEncoding];
   uint64_t session = (uint64_t)[sessionIdentifier_ longLongValue];
   unsigned int status = STRAPPY_IPC_NOT_READY;
@@ -3802,8 +3802,14 @@ static void StrappyStoreChanged(unsigned int topics)
     if (!settingsJSON) preflightError = @"Could not encode prompt options.";
     else settingsLength = (unsigned int)strlen(settingsJSON);
   }
-  if ([prompt length] + settingsLength + 76 > STRAPPY_IPC_MAX_PAYLOAD)
-    preflightError = @"The prompt and options exceed the service message limit.";
+  if ([prompt length] == 0 || [prompt length] > STRAPPY_IPC_MAX_PROMPT_BYTES)
+    preflightError = @"The prompt must contain between 1 byte and 1 MiB of UTF-8 text.";
+  if (settingsLength > STRAPPY_IPC_MAX_OPTIONS_BYTES)
+    preflightError = @"The session options exceed the service message limit.";
+  if (!preflightError) {
+    payload = malloc([prompt length] + settingsLength + STRAPPY_IPC_OPTIONS_PREFIX);
+    if (!payload) preflightError = @"Could not allocate the prompt submission.";
+  }
   if (!preflightError) {
     @synchronized([NSUserDefaults standardUserDefaults]) {
       [[NSUserDefaults standardUserDefaults] setObject:savedRequest forKey:[request objectForKey:@"pendingKey"]];
@@ -3812,7 +3818,7 @@ static void StrappyStoreChanged(unsigned int topics)
     }
   }
   if (preflightError) {
-    free(settingsJSON);
+    free(payload); free(settingsJSON);
     /* No submission was attempted. Keep the editable draft, and do not let a
      * reconnect silently retry a failed settings save. */
     @synchronized([NSUserDefaults standardUserDefaults]) {
@@ -3834,6 +3840,7 @@ static void StrappyStoreChanged(unsigned int topics)
   free(settingsJSON);
   received = strappy_store_client_command(STRAPPY_IPC_SUBMIT_WITH_OPTIONS, payload,
       (unsigned int)[prompt length] + settingsLength + 76U, &status) ? YES : NO;
+  free(payload);
   if (received && status == STRAPPY_IPC_OK) {
     @synchronized([StrappySession class]) {
       NSDictionary *draft = [StrappyOptionDrafts objectForKey:sessionIdentifier_];

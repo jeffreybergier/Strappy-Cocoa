@@ -1,6 +1,7 @@
 # Recovery and lifecycle
 
-IPC is now v5 for daemon-owned authorization; reader ABI 2 and SQLite
+IPC v6 adds larger bounded prompt submissions to daemon-owned authorization;
+reader ABI 2 and SQLite
 `user_version=1` are unchanged.
 No schema migration is added.
 

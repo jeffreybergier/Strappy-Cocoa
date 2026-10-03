@@ -13,7 +13,7 @@ int main(void)
     int pair[2];
     unsigned char header[24];
     const unsigned char expected[24] = {
-        'S','T','P','Y',0,5,0,1,0,0,0,16,1,2,3,4,0,0,0,3,0,0,0,0
+        'S','T','P','Y',0,6,0,1,0,0,0,16,1,2,3,4,0,0,0,3,0,0,0,0
     };
     strappy_ipc_message message, decoded;
     int64_t start;
@@ -39,6 +39,25 @@ int main(void)
     assert(strappy_ipc_send(pair[0], &message, 0) == -1);
     message.length = STRAPPY_IPC_MAX_PAYLOAD + 1;
     assert(strappy_ipc_send(pair[0], &message, 100) == -1);
+    /* Oversized control/reply frames fail during header validation. A large
+     * prompt header is valid, but the bounded client receive API must not copy
+     * its body into the inline control buffer. */
+    strappy_ipc_encode(header,&message);
+    assert(strappy_ipc_decode(header,&decoded) == 0);
+    assert(write(pair[0],header,sizeof(header)) == (ssize_t)sizeof(header));
+    assert(strappy_ipc_receive(pair[1],&decoded,100) == -1);
+    message.kind = STRAPPY_IPC_REPLY;
+    strappy_ipc_encode(header,&message);
+    assert(strappy_ipc_decode(header,&decoded) == -1);
+    message.kind = STRAPPY_IPC_REQUEST; message.operation = STRAPPY_IPC_MUTATE;
+    strappy_ipc_encode(header,&message);
+    assert(strappy_ipc_decode(header,&decoded) == -1);
+    message.operation = STRAPPY_IPC_SUBMIT_WITH_OPTIONS;
+    message.length = STRAPPY_IPC_OPTIONS_PREFIX + STRAPPY_IPC_MAX_OPTIONS_BYTES + STRAPPY_IPC_MAX_PROMPT_BYTES;
+    strappy_ipc_encode(header,&message);
+    assert(strappy_ipc_decode(header,&decoded) == 0);
+    ++message.length; strappy_ipc_encode(header,&message);
+    assert(strappy_ipc_decode(header,&decoded) == -1);
     message.length = 0;
     (void)close(pair[1]);
     /* Library users must not need a process-wide SIGPIPE handler. */

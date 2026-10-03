@@ -4,10 +4,15 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define STRAPPY_IPC_VERSION 5U
+#define STRAPPY_IPC_VERSION 6U
 #define STRAPPY_IPC_STORE_ABI 2U
 #define STRAPPY_IPC_HEADER 24U
+/* Ordinary control requests, every reply, and every event stay small. */
 #define STRAPPY_IPC_MAX_PAYLOAD 4096U
+#define STRAPPY_IPC_MAX_PROMPT_BYTES (1024U * 1024U)
+#define STRAPPY_IPC_MAX_OPTIONS_BYTES 4096U
+#define STRAPPY_IPC_PROMPT_PREFIX 72U
+#define STRAPPY_IPC_OPTIONS_PREFIX 76U
 #define STRAPPY_IPC_MAX_CLIENTS 16
 
 enum strappy_ipc_kind { STRAPPY_IPC_REQUEST = 1, STRAPPY_IPC_REPLY = 2,
@@ -39,9 +44,15 @@ enum strappy_ipc_status {
 typedef struct strappy_ipc_message {
     uint32_t kind, operation, request_id, length, status;
     unsigned char payload[STRAPPY_IPC_MAX_PAYLOAD];
+    /* Borrowed storage for large outgoing requests and server handler input.
+     * Valid until send/handler returns; never used for replies or events. */
+    const unsigned char *external_payload;
 } strappy_ipc_message;
 
 typedef struct strappy_ipc_server strappy_ipc_server;
+
+uint32_t strappy_ipc_payload_limit(uint32_t kind, uint32_t operation);
+const unsigned char *strappy_ipc_payload(const strappy_ipc_message *message);
 
 void strappy_ipc_put32(unsigned char *bytes, uint32_t value);
 uint32_t strappy_ipc_get32(const unsigned char *bytes);
@@ -78,6 +89,8 @@ void strappy_ipc_server_close(strappy_ipc_server *server);
  * Close/reconnect after ANY I/O failure, then hello + subscribe/snapshot. */
 int strappy_ipc_connect(const char *path, uid_t expected_uid, int timeout_ms);
 int strappy_ipc_send(int fd, const strappy_ipc_message *message, int timeout_ms);
+/* Receives bounded control messages/replies only; oversized input fails before
+ * reading the body. The server owns its separate incremental request reader. */
 int strappy_ipc_receive(int fd, strappy_ipc_message *message, int timeout_ms);
 
 #endif

@@ -96,7 +96,7 @@ static int strappy_probe(const char *path)
         }
     }
     (void)close(fd);
-    puts("IPC v5: same-user hello, snapshot, subscribe, unsubscribe passed; store ready; execution ready");
+    puts("IPC v6: same-user hello, snapshot, subscribe, unsubscribe passed; store ready; execution ready");
     return EXIT_SUCCESS;
 }
 

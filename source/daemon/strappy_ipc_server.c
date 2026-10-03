@@ -29,6 +29,7 @@ struct strappy_ipc_peer {
     int64_t progress;
     size_t received, needed, queued;
     unsigned char input[STRAPPY_IPC_HEADER + STRAPPY_IPC_MAX_PAYLOAD];
+    unsigned char *large_payload;
     unsigned char output[STRAPPY_IPC_QUEUE];
 };
 struct strappy_ipc_server {
@@ -87,6 +88,7 @@ static void strappy_ipc_drop(struct strappy_ipc_peer *peer)
         pthread_cond_signal(&peer->command_changed); pthread_mutex_unlock(peer->mutex);
         pthread_join(peer->worker,NULL); pthread_cond_destroy(&peer->command_changed);
     }
+    free(peer->large_payload);
     if (peer->fd >= 0) (void)close(peer->fd);
     memset(peer, 0, sizeof(*peer)); peer->fd = -1;
 }
@@ -163,7 +165,8 @@ static void strappy_ipc_request(strappy_ipc_server *s, struct strappy_ipc_peer *
                    request.operation <= STRAPPY_IPC_AUTH)
         {
             if (s->handler) {
-                memcpy(request.payload, p->input + STRAPPY_IPC_HEADER, request.length);
+                if (p->large_payload) request.external_payload = p->large_payload;
+                else memcpy(request.payload, p->input + STRAPPY_IPC_HEADER, request.length);
                 p->command = request; p->response = reply;
                 p->handler = s->handler; p->context = s->context; p->mutex = &s->mutex;
                 p->wake_fd = s->wake[1];
@@ -185,12 +188,15 @@ static void strappy_ipc_request(strappy_ipc_server *s, struct strappy_ipc_peer *
         else reply.status = STRAPPY_IPC_UNKNOWN_OPERATION;
     }
     strappy_ipc_error(&reply);
+    free(p->large_payload); p->large_payload = NULL;
     strappy_ipc_queue(p, &reply);
     p->received = 0; p->needed = STRAPPY_IPC_HEADER;
 }
 static void strappy_ipc_read(strappy_ipc_server *s, struct strappy_ipc_peer *p)
 {
-    ssize_t count = read(p->fd, p->input + p->received, p->needed - p->received);
+    unsigned char *destination = p->large_payload ?
+        p->large_payload + (p->received - STRAPPY_IPC_HEADER) : p->input + p->received;
+    ssize_t count = read(p->fd, destination, p->needed - p->received);
     if (count < 0 && (errno == EINTR || errno == EAGAIN)) return;
     if (count <= 0) { strappy_ipc_drop(p); return; }
     p->received += (size_t)count;
@@ -201,6 +207,14 @@ static void strappy_ipc_read(strappy_ipc_server *s, struct strappy_ipc_peer *p)
         int status = strappy_ipc_decode(p->input, &m);
         if (status == -1) { strappy_ipc_drop(p); return; }
         if (status == -2) { strappy_ipc_request(s, p); return; }
+        if (m.length > STRAPPY_IPC_MAX_PAYLOAD) {
+            /* Decode bounds the operation-specific length before allocation.
+             * Never reserve a prompt buffer for an unauthenticated handshake. */
+            if (!p->negotiated || m.kind != STRAPPY_IPC_REQUEST || m.status != 0 ||
+                !m.request_id) { strappy_ipc_drop(p); return; }
+            p->large_payload = malloc(m.length);
+            if (!p->large_payload) { strappy_ipc_drop(p); return; }
+        }
         p->needed += m.length;
         if (m.length != 0) return;
     }
@@ -290,6 +304,7 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
             pthread_mutex_unlock(&s->mutex);
             if (!finished) continue;
             p->working = 0;
+            free(p->large_payload); p->large_payload = NULL; p->command.external_payload = NULL;
             strappy_ipc_queue(p, &p->response);
             if (p->refresh && p->subscribed) {
                 unsigned int topic;
@@ -328,6 +343,7 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
             pthread_mutex_unlock(&s->mutex);
             if (!finished) continue;
             p->working = 0;
+            free(p->large_payload); p->large_payload = NULL; p->command.external_payload = NULL;
             strappy_ipc_queue(p, &p->response);
             if (p->refresh && p->subscribed) {
                 unsigned int topic;

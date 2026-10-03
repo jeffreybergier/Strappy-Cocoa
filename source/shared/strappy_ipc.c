@@ -11,6 +11,21 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+uint32_t strappy_ipc_payload_limit(uint32_t kind, uint32_t operation)
+{
+    if (kind == STRAPPY_IPC_REQUEST) {
+        if (operation == STRAPPY_IPC_SUBMIT_PROMPT)
+            return STRAPPY_IPC_PROMPT_PREFIX + STRAPPY_IPC_MAX_PROMPT_BYTES;
+        if (operation == STRAPPY_IPC_SUBMIT_WITH_OPTIONS)
+            return STRAPPY_IPC_OPTIONS_PREFIX + STRAPPY_IPC_MAX_OPTIONS_BYTES + STRAPPY_IPC_MAX_PROMPT_BYTES;
+    }
+    return STRAPPY_IPC_MAX_PAYLOAD;
+}
+const unsigned char *strappy_ipc_payload(const strappy_ipc_message *message)
+{
+    return message->external_payload ? message->external_payload : message->payload;
+}
+
 void strappy_ipc_put32(unsigned char *p, uint32_t v)
 {
     p[0] = (unsigned char)(v >> 24); p[1] = (unsigned char)(v >> 16);
@@ -33,13 +48,14 @@ void strappy_ipc_encode(unsigned char *p, const strappy_ipc_message *m)
 }
 int strappy_ipc_decode(const unsigned char *p, strappy_ipc_message *m)
 {
+    m->external_payload = NULL;
     if (memcmp(p, "STPY", 4) != 0) return -1;
     m->kind = ((uint32_t)p[6] << 8) | p[7];
     m->operation = strappy_ipc_get32(p + 8);
     m->request_id = strappy_ipc_get32(p + 12);
     m->length = strappy_ipc_get32(p + 16);
     m->status = strappy_ipc_get32(p + 20);
-    if (m->length > STRAPPY_IPC_MAX_PAYLOAD || m->kind < 1 || m->kind > 3)
+    if (m->length > strappy_ipc_payload_limit(m->kind, m->operation) || m->kind < 1 || m->kind > 3)
         return -1;
     if (p[4] != 0 || p[5] != STRAPPY_IPC_VERSION) return -2;
     return 0;
@@ -99,13 +115,15 @@ fail:
 }
 int strappy_ipc_send(int fd, const strappy_ipc_message *message, int timeout_ms)
 {
-    unsigned char bytes[STRAPPY_IPC_HEADER + STRAPPY_IPC_MAX_PAYLOAD];
-    if (!message || message->length > STRAPPY_IPC_MAX_PAYLOAD ||
+    unsigned char header[STRAPPY_IPC_HEADER];
+    long long deadline = strappy_ipc_platform_milliseconds() + timeout_ms;
+    if (!message || message->length > strappy_ipc_payload_limit(message->kind, message->operation) ||
+        (message->length > STRAPPY_IPC_MAX_PAYLOAD && !message->external_payload) ||
         timeout_ms <= 0 || timeout_ms > 30000) return -1;
-    strappy_ipc_encode(bytes, message);
-    memcpy(bytes + STRAPPY_IPC_HEADER, message->payload, message->length);
-    return strappy_ipc_transfer(fd, bytes, STRAPPY_IPC_HEADER + message->length,
-                               1, strappy_ipc_platform_milliseconds() + timeout_ms);
+    strappy_ipc_encode(header, message);
+    if (strappy_ipc_transfer(fd, header, sizeof(header), 1, deadline) != 0) return -1;
+    return strappy_ipc_transfer(fd, (unsigned char *)strappy_ipc_payload(message),
+                               message->length, 1, deadline);
 }
 int strappy_ipc_receive(int fd, strappy_ipc_message *message, int timeout_ms)
 {
@@ -113,6 +131,7 @@ int strappy_ipc_receive(int fd, strappy_ipc_message *message, int timeout_ms)
     long long deadline = strappy_ipc_platform_milliseconds() + timeout_ms;
     if (!message || timeout_ms <= 0 || timeout_ms > 120000 ||
         strappy_ipc_transfer(fd, header, sizeof(header), 0, deadline) != 0 ||
-        strappy_ipc_decode(header, message) != 0) return -1;
+        strappy_ipc_decode(header, message) != 0 ||
+        message->length > STRAPPY_IPC_MAX_PAYLOAD) return -1;
     return strappy_ipc_transfer(fd, message->payload, message->length, 0, deadline);
 }

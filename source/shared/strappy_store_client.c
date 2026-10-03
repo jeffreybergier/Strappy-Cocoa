@@ -177,7 +177,7 @@ static int strappy_store_exchange_once(unsigned int operation, const unsigned ch
     int *connection, uint32_t *sequence)
 {
     int attempt;
-    if (!strappy_command_socket || length > STRAPPY_IPC_MAX_PAYLOAD) return 0;
+    if (!strappy_command_socket || length > strappy_ipc_payload_limit(STRAPPY_IPC_REQUEST, operation)) return 0;
     for (attempt = 0; attempt < attempts; ++attempt) {
         int fd = *connection;
         if (fd >= 0 && *sequence == UINT32_MAX) { close(fd); fd = *connection = -1; }
@@ -200,8 +200,10 @@ static int strappy_store_exchange_once(unsigned int operation, const unsigned ch
         if (ok) {
             uint32_t identifier = ++*sequence;
             memset(&m, 0, sizeof(m)); m.kind = STRAPPY_IPC_REQUEST; m.operation = operation;
-            m.request_id = identifier; m.length = length; if (length) memcpy(m.payload, payload, length);
-            ok = strappy_ipc_send(fd, &m, 2000) == 0 && strappy_ipc_receive(fd, &m, timeout) == 0 &&
+            m.request_id = identifier; m.length = length;
+            if (length > STRAPPY_IPC_MAX_PAYLOAD) m.external_payload = payload;
+            else if (length) memcpy(m.payload, payload, length);
+            ok = strappy_ipc_send(fd, &m, length > STRAPPY_IPC_MAX_PAYLOAD ? 10000 : 2000) == 0 && strappy_ipc_receive(fd, &m, timeout) == 0 &&
                 m.kind == STRAPPY_IPC_REPLY && m.operation == operation && m.request_id == identifier;
         }
         if (!ok) { close(fd); *connection = -1; }

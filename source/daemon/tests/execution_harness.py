@@ -62,18 +62,18 @@ def exact(sock, n):
     return data
 
 def send(sock, op, ident, payload=b''):
-    sock.sendall(header.pack(b'STPY', 5, 1, op, ident, len(payload), 0)+payload)
+    sock.sendall(header.pack(b'STPY', 6, 1, op, ident, len(payload), 0)+payload)
 
 def receive(sock):
     magic, version, kind, op, ident, size, status = header.unpack(exact(sock, 24))
-    assert (magic, version, kind) == (b'STPY', 5, 2)
+    assert (magic, version, kind) == (b'STPY', 6, 2)
     return status, exact(sock, size)
 
 def connect(directory):
     sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(12)
     sock.connect(str(directory/'service.sock'))
-    send(sock, 1, 1, struct.pack('!II', 5, 5))
+    send(sock, 1, 1, struct.pack('!II', 6, 6))
     status, snapshot = receive(sock)
     assert status == 0 and struct.unpack('!I', snapshot[24:28])[0] == 7
     return sock
@@ -295,6 +295,72 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
         assert submit(directory, '9'*64, prompt=b'\xff')[0] == 1
         assert submit(directory, '9'*64, prompt=b'a\x00b')[0] == 1
         assert submit(directory, '9'*64, prompt=b'')[0] == 1
+        # Large submissions use independent prompt/options byte limits. Exercise
+        # real framing, persistence and provider delivery, not just allocation.
+        maximum = 1024 * 1024
+        text = ('漢' * (maximum // 3) + 'x' * (maximum % 3)).encode()
+        assert len(text) == maximum
+        sid = int(command(directory,25,json.dumps({'action':'create_session',
+            'directory':str(directory)}).encode())[1])
+        large_settings = dict(settings,session=str(sid))
+        options = json.dumps(large_settings).encode().ljust(4096,b' ')
+        large_key = 'b0' * 32
+        payload = struct.pack('!Q',sid)+large_key.encode()+struct.pack('!I',len(options))+options+text
+        def no_large_run():
+            with sqlite3.connect(dbpath) as db:
+                return db.execute('SELECT count(*) FROM prompt_runs WHERE session_id=?',(sid,)).fetchone()[0] == 0
+        # Neither an incomplete options block nor an incomplete prompt may
+        # commit settings or a run. Keep the first peer open while probing.
+        for cut in (80, len(payload)-1):
+            with connect(directory) as sock:
+                sock.sendall(header.pack(b'STPY',6,1,28,2,len(payload),0)+payload[:cut])
+                assert command(directory,26,b'')[0] == 0
+                assert no_large_run()
+                with sqlite3.connect(dbpath) as db:
+                    assert db.execute('SELECT round_limit FROM session_settings WHERE session_id=?',(sid,)).fetchone()[0] != 7
+        # Independent limits reject oversized options or text even when the
+        # combined frame fits. Invalid UTF-8 and NUL near the end also fail.
+        prefix = struct.pack('!Q',sid)+large_key.encode()
+        for bad in (prefix+struct.pack('!I',4097)+options+b' '+b'x',
+                    prefix+struct.pack('!I',0)+text+b'x',
+                    prefix+struct.pack('!I',0)+text[:-1]+b'\xff',
+                    prefix+struct.pack('!I',0)+text[:-1]+b'\0'):
+            assert command(directory,28,bad)[0] == 1
+            assert no_large_run()
+        # Reject oversized declared frames using the header alone, including
+        # ordinary control messages that still have their 4 KiB cap.
+        for op, size in ((16,maximum+73),(28,maximum+4096+77),(25,4097),(28,0xffffffff)):
+            with connect(directory) as sock:
+                sock.sendall(header.pack(b'STPY',6,1,op,2,size,0))
+                assert sock.recv(1) == b''
+        assert no_large_run()
+        # Split a maximum-sized options-bearing submission across many writes,
+        # including multibyte characters. Lose its acknowledgment and retry.
+        before = len(requests)
+        with connect(directory) as sock:
+            sock.sendall(header.pack(b'STPY',6,1,28,2,len(payload),0))
+            for offset in range(0,len(payload),8191):
+                sock.sendall(payload[offset:offset+8191])
+        wait_for(lambda: state(large_key) == 3)
+        assert command(directory,28,payload)[0] == 0
+        assert len(requests) == before+1
+        assert any(part.get('text') == text.decode() for item in requests[-1]['input']
+                   for part in item.get('content',[]) if isinstance(part,dict))
+        with sqlite3.connect(dbpath) as db:
+            assert db.execute('SELECT prompt FROM prompt_runs WHERE request_key=?',(large_key,)).fetchone()[0].encode() == text
+            assert db.execute('SELECT round_limit FROM session_settings WHERE session_id=?',(sid,)).fetchone()[0] == 7
+            assert db.execute('SELECT count(*) FROM prompt_runs WHERE session_id=?',(sid,)).fetchone()[0] == 1
+        # The plain submission operation also supports the exact text boundary;
+        # reuse a connection afterward to check large-buffer ownership/reset.
+        plain_key = 'b1' * 32
+        with connect(directory) as sock:
+            send(sock,16,2,struct.pack('!Q',sid)+plain_key.encode()+text)
+            assert receive(sock)[0] == 0
+            send(sock,26,3)
+            assert receive(sock)[0] == 0
+        wait_for(lambda: state(plain_key) == 3)
+        assert len(requests) == before+2
+        print('execution_harness: 1 MiB UTF-8 prompts, independent options limits, partial transfers, durable large retries passed')
         print('execution_harness: durable acceptance, lost reply, reconnect, contention, HTTP/tool cancellation, restart interruption and history passed')
     finally:
         gate.set()

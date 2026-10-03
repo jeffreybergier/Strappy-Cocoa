@@ -12,8 +12,15 @@ again. An identical retry returns the original run; a different prompt/session
 under the same key is a conflict. Transport IDs are unrelated to these keys.
 The combined submission carries an 8-byte session ID, 64-byte retry key,
 4-byte settings length, optional transient settings JSON, and UTF-8 prompt.
-The total payload is bounded at 4096 bytes. The UI reports oversized combined
-submissions explicitly. Legacy prompt-only submissions remain supported. Acknowledgment means durable acceptance, not completion.
+IPC v6 permits up to 1 MiB (1,048,576 bytes) of UTF-8 prompt text and a separate
+4 KiB of settings JSON. The UI reports either limit explicitly; options do not
+reduce prompt capacity. Submission buffers live on the heap. The daemon validates
+the header before allocating a large frame and waits for its complete body
+before validating/persisting options and accepting the run atomically. Partial
+transfers never execute; a retry after a lost reply returns the same durable run.
+Prompt-only submissions remain supported with the same text limit. Control
+requests, replies, and events retain their 4 KiB cap. App and daemon must both
+speak v6. Acknowledgment means durable acceptance, not completion.
 
 The run lifecycle is accepted, running, completed, failed, cancelled or
 interrupted. The daemon persists processing/retry fields as typed columns; the

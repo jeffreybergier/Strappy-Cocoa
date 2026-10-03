@@ -10,6 +10,7 @@ from pathlib import Path
 header = struct.Struct('!4sHHIIII')
 errors, mutation_connections = [], []
 count = 0
+prompt_count = 0
 lock = threading.Lock()
 refresh_entered, control_seen, background_entered = threading.Event(), threading.Event(), threading.Event()
 def exact(s, n):
@@ -25,7 +26,7 @@ with tempfile.TemporaryDirectory(prefix='strappy-control-',dir='/tmp') as tmp:
     server.bind(path)
     server.listen()
     def peer(s, identity):
-        global count
+        global count, prompt_count
         previous = 0
         snapshot = bytes(24)+struct.pack('!III',7,4096,2)
         try:
@@ -37,7 +38,15 @@ with tempfile.TemporaryDirectory(prefix='strappy-control-',dir='/tmp') as tmp:
                     assert ident > previous
                     assert (previous != 0) or op == 1
                     previous = ident
-                    if op == 29:
+                    if op == 16:
+                        assert size == 72+1024*1024
+                        assert payload[:8] == struct.pack('!Q',1)
+                        assert payload[8:72] == b'a'*64 and payload[72:] == b'x'*(1024*1024)
+                        with lock:
+                            prompt_count += 1
+                            if prompt_count == 1: return
+                        response = struct.pack('!QI',1,3)
+                    elif op == 29:
                         refresh_entered.set()
                         assert control_seen.wait(3), 'refresh blocked the control FIFO'
                         response = b'ok'
@@ -69,6 +78,7 @@ with tempfile.TemporaryDirectory(prefix='strappy-control-',dir='/tmp') as tmp:
     threading.Thread(target=accept,daemon=True).start()
     subprocess.run([sys.argv[1],path,str(Path(tmp)/'unused.sqlite')],check=True,timeout=15)
     assert not errors, errors
+    assert prompt_count == 2
     assert count == 34
     assert len(set(mutation_connections[:33])) == 1
     assert mutation_connections[33] != mutation_connections[32]

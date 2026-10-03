@@ -1,4 +1,4 @@
-# Strappy local service protocol v5
+# Strappy local service protocol v6
 
 The daemon runs the C Responses runtime, scans, study, catalog refresh and
 shared mutations. GUI clients read history, run state and catalogs from SQLite.
@@ -35,12 +35,28 @@ A frame is a 24-byte header followed by exactly `length` payload bytes:
 | Offset | Width | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `STPY` |
-| 4 | 2 | Protocol version, currently 5 |
+| 4 | 2 | Protocol version, currently 6 |
 | 6 | 2 | Kind: request 1, reply 2, event 3 |
 | 8 | 4 | Operation |
 | 12 | 4 | Request ID; zero only for unsolicited events |
-| 16 | 4 | Payload length, maximum 4096 |
+| 16 | 4 | Payload length, operation-specific maximum (below) |
 | 20 | 4 | Status, zero in requests and events |
+
+Protocol v6 separates prompt capacity from control-message capacity. All replies,
+all events, and requests other than operations 16 and 28 remain limited to
+4,096 bytes. Operation 16 permits 72 + 1,048,576 bytes; operation 28 permits
+76 + 4,096 + 1,048,576 bytes. The daemon also checks the prompt and settings
+lengths independently. These limits are fixed by v6; the snapshot's offset-28
+field continues to advertise the small control/reply/event limit.
+
+Clients use heap-backed submission buffers. After validating a negotiated
+request header and its operation-specific limit, the server allocates only that
+peer's large payload, incrementally fills it, and dispatches only a complete
+frame. The buffer lives through command completion and is freed on completion,
+disconnect, timeout, or shutdown. Incomplete transfers never persist options or
+accept a run. At most 16 peers each retain one bounded incoming frame. The
+blocking client send has one deadline across header and body (10 seconds for
+large submissions); it handles partial writes without a chunk-upload protocol.
 
 A connection starts with `hello`. Clients use nonzero strictly increasing
 request IDs per connection, including failed requests. A repeated or lower ID
@@ -50,7 +66,7 @@ Transport request IDs are connection-local. Submission retry identities are
 separate 256-bit keys persisted with the work before acceptance, as below.
 
 Malformed magic/kind/oversized frames cause immediate disconnect. Unsupported
-header versions receive a v4 incompatible-version reply then disconnect. Invalid
+header versions receive a v6 incompatible-version reply then disconnect. Invalid
 request kind, nonzero request status, or zero request ID similarly produce an
 invalid-request reply then disconnect. The server handles partial reads/writes
 and multiple frames on one stream. Each client has one bounded input frame and
@@ -70,7 +86,7 @@ work per client; execution never occurs on this thread.
 | 3 | subscribe | Empty | Snapshot, with subscription already active |
 | 4 | unsubscribe | Empty | Snapshot, with subscription disabled |
 
-The version interval must contain 4. `hello` is accepted once per connection.
+The version interval must contain 6. `hello` is accepted once per connection.
 Operations 2–4 are repeatable with new IDs. Every successful control reply is
 exactly 36 bytes:
 
@@ -79,7 +95,7 @@ exactly 36 bytes:
 | 0 | 16 | Opaque random service-instance identity from `/dev/urandom` |
 | 16 | 8 | Instance-local committed-state revision |
 | 24 | 4 | Readiness flags: bit 0 transport ready; bit 1 store ready; bit 2 execution ready |
-| 28 | 4 | Maximum frame payload (4096) |
+| 28 | 4 | Maximum control/reply/event payload (4096) |
 | 32 | 4 | Store reader ABI, currently 2 |
 
 Production readiness is 7 after store/resource configuration and the execution
@@ -111,7 +127,7 @@ Logs and errors never include request payloads or credentials.
 ## Prompt and cancellation payloads
 
 `submit_prompt` (16): u64 positive session ID, exactly 64 lowercase ASCII hex
-characters representing a random 256-bit client retry key, then 1–4024 bytes of
+characters representing a random 256-bit client retry key, then 1–1,048,576 bytes of
 valid UTF-8 prompt text (no NUL). The session and account/model must already be
 configured through the metadata commands below. The UI persists a pending
 submission before sending and retries the same key after an uncertain reply or
@@ -131,8 +147,8 @@ Storage waits and provider/tool work never block socket servicing.
 
 `submit_with_options` (28): u64 session ID, 64-byte retry key, u32 settings-byte
 length, that many bytes of a string-valued JSON `options` command, followed by
-nonempty UTF-8 prompt text. The settings length may be zero. The full payload
-must fit 4096 bytes. Settings must target the same session. Validation and
+nonempty UTF-8 prompt text. The settings length may be zero and must not exceed 4,096 bytes. Prompt text
+has its own 1,048,576-byte limit, independent of the settings size. Settings must target the same session. Validation and
 settings/run writes precede acknowledgement; the writes commit atomically.
 Reply/state and prompt/session retry-key conflict semantics match operation 16.
 On a retry of an accepted key, captured settings are not reapplied, even if the
@@ -226,13 +242,13 @@ strappyd --ipc-probe /absolute/private/directory/service.sock
 See `VALIDATION.md` for observed platforms and limitations. The probe does not
 connect to providers or access application data.
 
-## Step 4 command payloads (IPC v5, reader ABI 2)
+## Step 4 command payloads (IPC v6, reader ABI 2)
 
 Operations 18–25 and 27 accept bounded UTF-8 JSON objects with string values only.
 JSON is transient wire serialization, never a database document. Integer fields
 are decimal strings, preserving 64-bit identifiers on PPC/32-bit clients and
 avoiding floating-point rounding. Duplicate keys, non-string values, embedded
-NUL, invalid UTF-8 and trailing input are rejected. The frame limit remains 4096
+NUL, invalid UTF-8 and trailing input are rejected. The control frame limit remains 4096
 bytes, including all keys and credential text. Replies contain an identifier as
 UTF-8 text for creation, the refreshed account identity for OAuth refresh, or an
 empty success body. Other failures use the existing structured status codes.
