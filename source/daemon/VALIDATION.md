@@ -1193,8 +1193,15 @@ Validation:
   preservation of the rejected SQLite file all passed. Tests ran in a private
   directory under `/var/jb/tmp`; installed stores and services were untouched.
   No reboot or respring was performed.
-- `koolphone5`: SSH to 192.168.0.93 refused connections. Native armv7 validation
-  remains pending SSH availability; the armv7 release and probe builds passed.
+- `koolphone5`, iOS 8.4.1 / armv7, UID 501 (`mobile` via root SSH), SQLite
+  3.43.2: after SSH became available, the same native schema suite passed,
+  including fresh daemon readiness, UI-reader/daemon rejection of the legacy
+  constraint, absent socket after refusal, and byte-for-byte preservation of
+  the rejected database. The installed service remained running.
+- Read-only inspection of the installed stores found koolphone5 already has
+  only the nonunique provider-ID lookup index. pinkphone-rsa also retains the
+  legacy unique provider-ID autoindex. Inspection did not read conversation
+  content or change either store.
 
 Reproduce native probes after the platform build:
 
