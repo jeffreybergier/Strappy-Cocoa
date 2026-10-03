@@ -988,3 +988,71 @@ access or graphical acceptance. The timing samples include device scheduling
 and storage latency; they are not a before/after comparison. All fixture daemons
 were stopped and waited for, and their temporary directories were removed. Build,
 analyzer and device logs stay outside Git.
+
+
+## IPC v6 large-prompt validation (2026-10-03)
+
+Tested the production daemon from `88247ad` over SSH/SCP in fresh private
+fixture directories, without installing an app or replacing a launchd job.
+`large_prompt_device_probe.c` uses the production C IPC client and a native
+loopback HTTP provider. It creates a synthetic `other` account without a bearer
+credential and checks that no Authorization header reaches the fixture. It
+archives the fixture account afterward. No live application store or existing
+provider credential is copied or used.
+
+| Host | Runtime and identity | Result |
+| --- | --- | --- |
+| `x4-vm` | Tiger 10.4.11 / 32-bit PowerPC, UID 501 (`me`) | Production-daemon and Cocoa bridge probes passed. Large Send returned in 102.117 ms; accepted retry observed after 0.481 s. |
+| `koolphone5` | iOS 8.4.1 build 12H321 / 32-bit armv7, UID 501 (`mobile`, via `su` from root SSH) | Same probes passed. Large Send returned in 42.805 ms; accepted retry observed after 0.440 s. |
+
+The native daemon probe verified:
+
+- Exactly 1 MiB of multibyte UTF-8 text plus exactly 4 KiB of settings, including
+  atomic persistence of the changed round limit.
+- A transfer missing its final byte creates no run and does not change options;
+  an independent client remains responsive during that incomplete transfer.
+- Independent rejection of oversized text, oversized options, malformed UTF-8,
+  and an oversized ordinary control header.
+- Lost-acknowledgment retry returns the original accepted work without another
+  provider request; the plain submission operation also accepts 1 MiB and the
+  connection remains usable afterward.
+- Both runs complete, the local provider receives the exact prompt text, stored
+  prompt bytes match, and SQLite integrity is `ok`. Exactly two provider requests
+  occur, all to the device's own loopback listener.
+
+The Cocoa probe links the production `StrappySession` bridge with only its
+transport replaced. It checks rejection above 1 MiB, exact 1 MiB Unicode bytes
+in all three send attempts, editable drafts after rejection, persistence after
+an uncertain reply, retry-key preservation, and cleanup after acceptance. Its
+main-loop callback assertion now uses the XP compatibility bridge, since Tiger
+lacks `+[NSThread isMainThread]`. Timings above measure the method return and
+fixture acceptance, not graphical paste/render performance or provider latency.
+
+The first Tiger Cocoa run failed on that unsupported selector. The first iPhone
+Cocoa run exceeded the old five-second retry wait; the final probe uses a
+30-second completion allowance for large defaults writes, and the final run
+completed its retry in 0.440 seconds. This does not establish the cause of the
+initial timeout. Overwriting the signed iPhone probe in place also produced one
+SIGKILL before output; copying the final binary under a fresh filename ran
+successfully. The production-daemon tests passed on both hosts on the initial
+run; these fixture issues did not require production-code changes.
+
+Build after the normal platform build:
+
+```sh
+make -C source/iOS -f ../daemon/tests/large_prompt_device_probe.mk large-prompt-probe
+make -C source/macOS -f ../daemon/tests/large_prompt_device_probe.mk large-prompt-probe
+make -C source/iOS -f ../daemon/tests/session_options_device_probe.mk session-options-probe
+make -C source/macOS -f ../daemon/tests/session_options_device_probe.mk session-options-probe ALTIVECCORE_LINKAGE=static
+```
+
+Prepare a fresh mode-0700 directory owned by the testing user containing
+`strappyd`, `large-prompt-probe`, `session-options-probe`, and `resources/` (the
+bundled JSON catalogs, `Info.plist`, and CA bundle). Use the PPC probe outputs
+under those names on Tiger. Run `large_prompt_device_harness.sh /absolute/fixture`
+as the normal user, or mobile on iOS. It refuses an existing fixture store,
+starts a private daemon, and stops/waits for that daemon before the Cocoa probe.
+All fixture daemons were stopped and their sockets and temporary directories
+removed after this validation. Generated logs remain local under
+`/tmp/strappy-native-*` and are not committed. Graphical paste/Send, modern Mac,
+and other iOS runtime validation remain separate coverage.

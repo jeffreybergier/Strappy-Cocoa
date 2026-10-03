@@ -369,7 +369,9 @@ Implemented in IPC v6: 1 MiB of UTF-8 prompt text plus an independent 4 KiB
 options allowance. Large submissions use heap buffers; control requests, replies,
 and events remain capped at 4 KiB. Offline regressions cover exact limits,
 partial transfers without acceptance, provider delivery, and durable retries.
-Native runtime validation of large prompts remains unverified.
+Native production-daemon and Cocoa bridge probes passed on Tiger/PPC (`x4-vm`)
+and iOS 8.4.1/armv7 (`koolphone5`) as UID 501. See the IPC v6 large-prompt
+section of `source/daemon/VALIDATION.md`; graphical paste/Send remains untested.
 
 Relevant code: `source/shared/strappy_ipc.h`,
 `source/shared/StrappySession.m`, and `source/daemon/strappy_execution.c`.

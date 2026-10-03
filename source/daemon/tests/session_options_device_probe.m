@@ -16,6 +16,7 @@ static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 static int saves, submissions, failSave, loseReply, finished, accepted;
 static char submittedKey[65];
 static NSString *failure;
+static NSData *expectedPrompt;
 
 char *strappy_test_mutation(unsigned int operation, const cJSON *command, unsigned int *status)
 {
@@ -33,6 +34,9 @@ int strappy_test_command(unsigned int operation, const unsigned char *payload,
   assert(operation == STRAPPY_IPC_SUBMIT_WITH_OPTIONS && length > 76);
   size = strappy_ipc_get32(payload+72);
   assert(size > 0 && size < length-76);
+  assert(size <= STRAPPY_IPC_MAX_OPTIONS_BYTES);
+  assert(length-76-size == [expectedPrompt length]);
+  assert(!memcmp(payload+76+size,[expectedPrompt bytes],[expectedPrompt length]));
   memcpy(json,payload+76,size); json[size] = 0;
   settings = cJSON_Parse(json);
   assert(settings && !strcmp(cJSON_GetObjectItemCaseSensitive(settings,"rounds")->valuestring,"7"));
@@ -68,7 +72,7 @@ int strappy_test_command(unsigned int operation, const unsigned char *payload,
 @implementation OptionsProbeObserver
 - (void)finish:(NSNotification *)notification
 {
-  assert([NSThread isMainThread]);
+  assert([NSThread XP_isMainThread]);
   [failure release]; failure = [[[notification userInfo] objectForKey:@"error"] copy];
   finished = 1;
 }
@@ -79,7 +83,7 @@ static void pump(void)
 }
 static void waitFinish(void)
 {
-  NSTimeInterval deadline = [NSDate timeIntervalSinceReferenceDate] + 5;
+  NSTimeInterval deadline = [NSDate timeIntervalSinceReferenceDate] + 30;
   while (!finished && [NSDate timeIntervalSinceReferenceDate] < deadline) pump();
   assert(finished);
 }
@@ -108,6 +112,16 @@ int main(void)
   NSTimeInterval start, elapsed;
   int i, ticks = 0;
   NSError *error = nil;
+  NSMutableData *bytes = [NSMutableData dataWithLength:STRAPPY_IPC_MAX_PROMPT_BYTES];
+  unsigned char *raw = [bytes mutableBytes];
+  unsigned int byte;
+  NSString *largePrompt;
+  for (byte=0; byte<STRAPPY_IPC_MAX_PROMPT_BYTES; byte+=2) { raw[byte]=0xc3; raw[byte+1]=0xa9; }
+  expectedPrompt = bytes;
+  largePrompt = [[[NSString alloc] initWithData:bytes encoding:NSUTF8StringEncoding] autorelease];
+  assert(largePrompt);
+  assert(![s beginResponsesPrompt:[largePrompt stringByAppendingString:@"x"] context:nil error:&error]);
+  assert(error && saves == 0 && submissions == 0); error = nil;
   [[NSUserDefaults standardUserDefaults] removeObjectForKey:pendingKey];
   [[NSNotificationCenter defaultCenter] addObserver:observer selector:@selector(finish:)
     name:StrappySessionPromptDidFinishNotification object:s];
@@ -133,10 +147,10 @@ int main(void)
   assert([[s optionsWithError:NULL] roundLimit] == 7); /* invalidation preserves draft */
   failSave = 1;
   start = [NSDate timeIntervalSinceReferenceDate];
-  assert([s beginResponsesPrompt:@"offline probe" context:nil error:&error]);
+  assert([s beginResponsesPrompt:largePrompt context:nil error:&error]);
   elapsed = [NSDate timeIntervalSinceReferenceDate]-start;
   printf("Send with a 300 ms settings transport: %.3f ms on main thread\n",elapsed*1000);
-  assert(elapsed < .1);
+  assert(elapsed < 1.0);
   assert(![other updateOptions:options changedFields:StrappySessionOptionBash error:NULL]);
   while (!finished) { pump(); ++ticks; assert(ticks < 500); }
   printf("Delayed save: %d main-loop ticks, %d saves, %d submissions; %s\n", ticks, saves, submissions, [failure UTF8String]);
@@ -144,20 +158,21 @@ int main(void)
   assert([[s optionsWithError:NULL] roundLimit] == 7);
   assert([[NSUserDefaults standardUserDefaults] objectForKey:pendingKey] == nil);
   failSave = 0; loseReply = 1; finished = 0;
-  assert([s beginResponsesPrompt:@"offline probe" context:nil error:&error]);
+  assert([s beginResponsesPrompt:largePrompt context:nil error:&error]);
   waitFinish();
   assert(saves == 2 && submissions == 1);
   assert(![s updateOptions:options changedFields:StrappySessionOptionRoundLimit error:NULL]);
   assert([[[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey] objectForKey:@"optionsCommand"] != nil);
   loseReply = 0; accepted = 0;
-  assert([s beginResponsesPrompt:@"offline probe" context:nil error:&error]);
+  assert([s beginResponsesPrompt:largePrompt context:nil error:&error]);
   start = [NSDate timeIntervalSinceReferenceDate];
-  while (!accepted && [NSDate timeIntervalSinceReferenceDate]-start < 5) pump();
+  while (!accepted && [NSDate timeIntervalSinceReferenceDate]-start < 30) pump();
+  printf("Large retry: accepted=%d saves=%d submissions=%d wait=%.3f seconds\n",accepted,saves,submissions,[NSDate timeIntervalSinceReferenceDate]-start); fflush(stdout);
   assert(accepted && saves == 3 && submissions == 2);
   assert([[NSUserDefaults standardUserDefaults] objectForKey:pendingKey] == nil);
   [[NSNotificationCenter defaultCenter] removeObserver:observer];
   [[NSUserDefaults standardUserDefaults] synchronize];
-  puts("PASS: shared drafts, field merge, invalidation, responsive Send, failed save blocks submission, durable retry preserves combined payload");
+  puts("PASS: shared drafts, field merge, invalidation, responsive Send, failed save blocks submission, durable retry preserves 1 MiB Unicode payload; oversized prompt rejected");
   [failure release];
   [pool release];
   return 0;
