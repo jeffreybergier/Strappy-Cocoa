@@ -9,6 +9,8 @@ typedef enum StrappyAuthenticationState {
   StrappyAuthenticationStateSignedIn,
   StrappyAuthenticationStateRefreshing,
   StrappyAuthenticationStateError,
+  StrappyAuthenticationStateChecking,
+  StrappyAuthenticationStateSigningOut,
   StrappyAuthenticationStateCancelled
 } StrappyAuthenticationState;
 

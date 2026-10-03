@@ -1102,7 +1102,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     return;
   }
   if ([provider isEqualToString:@"openrouter"] && ([token length] == 0U) &&
-      (tokenEdited_ || ![[account objectForKey:@"has_credential"] boolValue])) {
+      (tokenEdited_ || ([[account objectForKey:@"credential_status_known"] boolValue] &&
+       ![[account objectForKey:@"has_credential"] boolValue]))) {
     [self showError:nil
               title:NSLocalizedString(@"API Key Is Required", nil)];
     return;
@@ -1119,7 +1120,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   [maxOutputTokensField_ setEditable:NO];
   [maxOutputTokensButton_ setEnabled:NO];
   [saveButton_ setEnabled:NO];
-  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save account",nil) receiver:self completion:@selector(accountSaved:) context:selectedAccountIdentifier_] updateProviderAccountIdentifier:selectedAccountIdentifier_
+  [[StrappyAsync credentialTarget:[StrappySession class] account:selectedAccountIdentifier_ title:NSLocalizedString(@"Save account",nil) receiver:self completion:@selector(accountSaved:) context:selectedAccountIdentifier_] updateProviderAccountIdentifier:selectedAccountIdentifier_
     displayName:name responsesEndpoint:endpoint maxOutputTokens:maxOutputTokens bearerToken:tokenEdited_ ? token : nil error:NULL];
 }
 
@@ -1184,7 +1185,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     return;
   }
 
-  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete account",nil) receiver:self completion:@selector(accountDeleted:) context:accountIdentifier] archiveProviderAccountIdentifier:accountIdentifier error:NULL];
+  [[StrappyAsync credentialTarget:[StrappySession class] account:accountIdentifier title:NSLocalizedString(@"Delete account",nil) receiver:self completion:@selector(accountDeleted:) context:accountIdentifier] archiveProviderAccountIdentifier:accountIdentifier error:NULL];
   [accountIdentifier release];
 }
 
@@ -1262,6 +1263,12 @@ static NSButton *StrappyAccountsButton(NSRect frame,
       break;
     case StrappyAuthenticationStateSignedIn:
       message = NSLocalizedString(@"Signed in to ChatGPT.", nil);
+      break;
+    case StrappyAuthenticationStateChecking:
+      message = NSLocalizedString(@"Checking credentials…", nil);
+      break;
+    case StrappyAuthenticationStateSigningOut:
+      message = NSLocalizedString(@"Signing out…", nil);
       break;
     case StrappyAuthenticationStateRefreshing:
       message = NSLocalizedString(@"Refreshing ChatGPT credentials…", nil);

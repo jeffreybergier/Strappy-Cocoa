@@ -17,6 +17,8 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
 - (void)runCredentialRefresh:(NSDictionary *)operation;
 - (void)postDidChangeNotification;
 - (void)notifyDidChange;
+- (void)credentialStatusDidChange:(NSNotification *)notification;
+- (void)credentialsDeleted:(StrappyAsyncResult *)result;
 @end
 
 @implementation StrappyAuthentication
@@ -103,13 +105,20 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
     accountIdentifier = nil;
     NSDictionary *credential = [StrappySession credentialStatusForProviderAccountIdentifier:
       providerAccountIdentifier error:NULL];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(credentialStatusDidChange:)
+      name:StrappyCredentialStatusDidChangeNotification object:nil];
     loaded = [[credential objectForKey:@"present"] boolValue];
     accountIdentifier = [credential objectForKey:@"identity"];
     if (loaded) {
       state_ = StrappyAuthenticationStateSignedIn;
       accountIdentifier_ = [accountIdentifier copy];
     } else {
-      state_ = StrappyAuthenticationStateSignedOut;
+      state_ = (credential || ![providerAccountIdentifier length]) ?
+        StrappyAuthenticationStateSignedOut : StrappyAuthenticationStateChecking;
+      if ([[credential objectForKey:@"unavailable"] boolValue]) {
+        state_ = StrappyAuthenticationStateError;
+        errorMessage_ = @"Credential status is unavailable.";
+      }
     }
   }
   return self;
@@ -172,7 +181,8 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
   state = [self state];
   return (state == StrappyAuthenticationStateRequestingCode) ||
     (state == StrappyAuthenticationStateAwaitingUser) ||
-    (state == StrappyAuthenticationStateRefreshing);
+    (state == StrappyAuthenticationStateRefreshing) ||
+    (state == StrappyAuthenticationStateSigningOut) || (state == StrappyAuthenticationStateChecking);
 }
 
 - (BOOL)hasStoredCredentials
@@ -190,7 +200,7 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
 
 - (void)notifyDidChange
 {
-  if ([NSThread isMainThread]) {
+  if ([NSThread XP_isMainThread]) {
     [self postDidChangeNotification];
   } else {
     [self performSelectorOnMainThread:@selector(postDidChangeNotification)
@@ -220,7 +230,8 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
   @synchronized(self) {
     if ((state_ == StrappyAuthenticationStateRequestingCode) ||
         (state_ == StrappyAuthenticationStateAwaitingUser) ||
-        (state_ == StrappyAuthenticationStateRefreshing)) {
+        (state_ == StrappyAuthenticationStateRefreshing) ||
+        (state_ == StrappyAuthenticationStateSigningOut) || (state_ == StrappyAuthenticationStateChecking)) {
       return NO;
     }
     operationGeneration_++;
@@ -354,6 +365,18 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
   providerAccountIdentifier = [self designatedProviderAccountIdentifier];
   NSDictionary *credential = [StrappySession credentialStatusForProviderAccountIdentifier:
     providerAccountIdentifier error:NULL];
+  if (credential == nil) return NO;
+  BOOL wasChecking;
+  @synchronized(self) {
+    wasChecking = state_ == StrappyAuthenticationStateChecking;
+    if (state_ == StrappyAuthenticationStateChecking) state_ = StrappyAuthenticationStateSignedOut;
+    if ([self isOperationInFlight]) return NO;
+    if ([[credential objectForKey:@"unavailable"] boolValue]) {
+      state_ = StrappyAuthenticationStateError;
+      errorMessage_ = @"Credential status is unavailable. Try again after the service reconnects.";
+    }
+  }
+  if ([[credential objectForKey:@"unavailable"] boolValue]) { [self notifyDidChange]; return NO; }
   loaded = [[credential objectForKey:@"present"] boolValue];
   accountIdentifier = [credential objectForKey:@"identity"];
   if (!loaded) {
@@ -362,7 +385,7 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
       if ((state_ != StrappyAuthenticationStateRequestingCode) &&
           (state_ != StrappyAuthenticationStateAwaitingUser) &&
           (state_ != StrappyAuthenticationStateRefreshing) &&
-          (state_ != StrappyAuthenticationStateSignedOut)) {
+          ((state_ != StrappyAuthenticationStateSignedOut) || wasChecking)) {
         state_ = StrappyAuthenticationStateSignedOut;
         accountIdentifier_ = nil;
         errorMessage_ = nil;
@@ -396,7 +419,8 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
   @synchronized(self) {
     if ((state_ == StrappyAuthenticationStateRequestingCode) ||
         (state_ == StrappyAuthenticationStateAwaitingUser) ||
-        (state_ == StrappyAuthenticationStateRefreshing)) {
+        (state_ == StrappyAuthenticationStateRefreshing) ||
+        (state_ == StrappyAuthenticationStateSigningOut) || (state_ == StrappyAuthenticationStateChecking)) {
       return NO;
     }
     operationGeneration_++;
@@ -469,32 +493,44 @@ static NSMutableDictionary *StrappyAuthenticationContexts = nil;
   }
 }
 
+- (void)credentialStatusDidChange:(NSNotification *)notification
+{
+  if ([[notification object] isEqual:[self designatedProviderAccountIdentifier]])
+    (void)[self refreshChatGPTCredentialsIfNeeded];
+}
+
 - (BOOL)signOutChatGPT
 {
-  BOOL deleted;
-  NSString *providerAccountIdentifier;
-
+  NSUInteger generation;
   @synchronized(self) {
+    if (state_ == StrappyAuthenticationStateSigningOut) return YES;
     cancellationRequested_ = YES;
-    operationGeneration_++;
-    verificationURL_ = nil;
-    userCode_ = nil;
-  }
-  providerAccountIdentifier = [self designatedProviderAccountIdentifier];
-  deleted = [StrappySession deleteChatGPTCredentialsForProviderAccountIdentifier:providerAccountIdentifier error:NULL];
-  @synchronized(self) {
-    accountIdentifier_ = nil;
-    if (deleted) {
-      state_ = StrappyAuthenticationStateSignedOut;
-      errorMessage_ = nil;
-    } else {
-      state_ = StrappyAuthenticationStateError;
-      errorMessage_ = NSLocalizedString(
-        @"The Keychain refused to remove the ChatGPT credential.", nil);
-    }
+    generation = ++operationGeneration_;
+    state_ = StrappyAuthenticationStateSigningOut;
   }
   [self notifyDidChange];
-  return deleted;
+  NSString *identifier = [self designatedProviderAccountIdentifier];
+  [[StrappyAsync credentialTarget:[StrappySession class] account:identifier
+    title:NSLocalizedString(@"Sign out",nil) receiver:self completion:@selector(credentialsDeleted:)
+    context:[NSNumber XP_numberWithUnsignedInteger:generation]]
+    deleteChatGPTCredentialsForProviderAccountIdentifier:identifier error:NULL];
+  return YES;
+}
+- (void)credentialsDeleted:(StrappyAsyncResult *)result
+{
+  @synchronized(self) {
+    if ([[result context] XP_unsignedIntegerValue] != operationGeneration_) return;
+    state_ = [result succeeded] ? StrappyAuthenticationStateSignedOut : StrappyAuthenticationStateError;
+    accountIdentifier_ = nil; verificationURL_ = nil; userCode_ = nil;
+    errorMessage_ = [[result error] localizedDescription];
+  }
+  [result handleError];
+  [self notifyDidChange];
+}
+
+- (void)dealloc
+{
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 @end

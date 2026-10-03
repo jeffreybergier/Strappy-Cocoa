@@ -391,7 +391,10 @@ titleForFooterInSection:(NSInteger)section
     } else {
       [[cell detailTextLabel] setText:NSLocalizedString(@"Custom", nil)];
     }
-    if (![[account objectForKey:@"available"] boolValue]) {
+    if (![[account objectForKey:@"credential_status_known"] boolValue]) {
+      [[cell detailTextLabel] setText:[[account objectForKey:@"credential_status_unavailable"] boolValue] ?
+        NSLocalizedString(@"Credential status unavailable",nil) : NSLocalizedString(@"Checking credentials…",nil)];
+    } else if (![[account objectForKey:@"available"] boolValue]) {
       [[cell detailTextLabel] setText:[NSString stringWithFormat:
         NSLocalizedString(@"%@ — setup required", nil),
         [[cell detailTextLabel] text]]];

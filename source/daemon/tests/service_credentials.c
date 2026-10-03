@@ -40,7 +40,7 @@ int strappy_service_account_command(const char *db, const cJSON *c, char **resul
         if (ok) *result = strappy_string_duplicate("{\"present\":false,\"identity\":\"\",\"needs_refresh\":false}");
         return ok && *result;
     }
-    if (!strcmp(action,"refresh_oauth") && !strcmp(strappy_command_text(c,"id"),"slow-fixture")) {
+    if (!strcmp(action,"refresh_oauth") && !strcmp(strappy_command_text(c,"identity"),"slow-fixture")) {
         sleep(2); *result = strappy_string_duplicate("fixture"); return *result != NULL;
     }
     if (!strcmp(action,"archive_account"))

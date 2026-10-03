@@ -31,9 +31,15 @@ static void *refresh(void *unused)
     cJSON *command = cJSON_CreateObject();
     (void)unused;
     cJSON_AddStringToObject(command,"action","refresh_oauth");
-    result = strappy_store_client_mutation(STRAPPY_IPC_MUTATE,command,&status);
+    cJSON_AddStringToObject(command,"id","fixture-account");
+    result = strappy_store_client_credential(command,&status);
     assert(result && status == STRAPPY_IPC_OK);
-    free(result); cJSON_Delete(command); return NULL;
+    free(result);
+    result = strappy_store_client_credential(command,&status);
+    assert(!result && status == STRAPPY_IPC_NOT_READY); /* daemon forgot job */
+    result = strappy_store_client_credential(command,&status);
+    assert(!result && status == STRAPPY_IPC_INVALID); /* definite terminal failure */
+    cJSON_Delete(command); return NULL;
 }
 static void *background(void *unused)
 {
@@ -87,6 +93,6 @@ int main(int argc, char **argv)
     }
     pthread_join(refresher,NULL);
     pthread_join(background_worker,NULL);
-    puts("control client: caller-thread transport, independent background connection, persistent connection, ordered replies, no mutation replay, reconnect, independent OAuth lane passed");
+    puts("control client: caller-thread transport, independent background connection, persistent connection, ordered replies, no mutation replay, reconnect, credential acceptance recovery, restart unknown, terminal failure and no credential replay passed");
     return 0;
 }

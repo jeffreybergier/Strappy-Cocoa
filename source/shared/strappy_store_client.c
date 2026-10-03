@@ -1,6 +1,7 @@
 #include "strappy_store_client.h"
 #include "strappy_db.h"
 #include "strappy_ipc.h"
+#include "XPFoundation/strappy_ipc_platform.h"
 #include <pthread.h>
 #include <poll.h>
 #include <stdlib.h>
@@ -255,21 +256,61 @@ char *strappy_store_client_mutation(unsigned int operation, const cJSON *command
     char *json = cJSON_PrintUnformatted(command), *result = NULL;
     *status = STRAPPY_IPC_INVALID;
     if (json) {
-        const cJSON *action = cJSON_GetObjectItemCaseSensitive(command,"action");
-        if (operation == STRAPPY_IPC_MUTATE && cJSON_IsString(action) && !strcmp(action->valuestring,"refresh_oauth")) {
-            /* Explicit credential refresh may wait on the network. It has an
-             * independent worker/connection and cannot occupy the control FIFO. */
-            int fd = -1;
-            uint32_t sequence = 0;
-            if (!strappy_store_exchange_once(STRAPPY_IPC_REFRESH_CREDENTIALS,
-                (unsigned char *)json,(unsigned int)strlen(json),status,&result,1,120000,&fd,&sequence))
-                *status = STRAPPY_IPC_NOT_READY;
-            if (fd >= 0) close(fd);
-        } else if (!strappy_store_exchange(operation,(unsigned char *)json,(unsigned int)strlen(json),status,&result,1,
-            cJSON_GetObjectItemCaseSensitive(command,"identity") ? 120000 : 2000))
+        if (!strappy_store_exchange(operation,(unsigned char *)json,(unsigned int)strlen(json),status,&result,1,2000))
             *status = STRAPPY_IPC_NOT_READY;
         memset(json,0,strlen(json)); free(json);
     }
     if (*status != STRAPPY_IPC_OK) { free(result); result = NULL; }
     return result;
+}
+
+char *strappy_store_client_credential(const cJSON *command, unsigned int *status)
+{
+    char key[65], *reply=NULL, *result=NULL;
+    const cJSON *account=cJSON_GetObjectItemCaseSensitive(command,"id");
+    const cJSON *action=cJSON_GetObjectItemCaseSensitive(command,"action");
+    cJSON *start=NULL, *query=NULL;
+    int misses=0;
+    int64_t deadline=strappy_ipc_platform_milliseconds()+300000;
+    *status=STRAPPY_IPC_INVALID;
+    if (!cJSON_IsString(account) || !cJSON_IsString(action) || !strappy_store_client_request_key(key)) return NULL;
+    start=cJSON_Duplicate(command,1); query=cJSON_CreateObject();
+    if (!start || !query || !cJSON_AddStringToObject(start,"credential_action",action->valuestring) ||
+        !cJSON_ReplaceItemInObjectCaseSensitive(start,"action",cJSON_CreateString("credential_start")) ||
+        !cJSON_AddStringToObject(start,"key",key) || !cJSON_AddStringToObject(query,"action","auth_status") ||
+        !cJSON_AddStringToObject(query,"id",account->valuestring) || !cJSON_AddStringToObject(query,"key",key)) goto done;
+    reply=strappy_store_client_mutation(STRAPPY_IPC_AUTH,start,status);
+    /* The submission is sent exactly once. A lost reply triggers only reads. */
+    if (!reply && *status!=STRAPPY_IPC_NOT_READY) goto done;
+    while (strappy_ipc_platform_milliseconds()<deadline) {
+        cJSON *snapshot=reply ? cJSON_Parse(reply) : NULL;
+        const cJSON *state=cJSON_GetObjectItemCaseSensitive(snapshot,"state");
+        int terminal=0;
+        free(reply); reply=NULL;
+        if (cJSON_IsString(state)) {
+            misses=0;
+            if (!strcmp(state->valuestring,"completed")) {
+                const cJSON *value=cJSON_GetObjectItemCaseSensitive(snapshot,"result");
+                if (cJSON_IsString(value)) result=strdup(value->valuestring);
+                *status=result ? STRAPPY_IPC_OK : STRAPPY_IPC_INVALID; terminal=1;
+            } else if (!strcmp(state->valuestring,"failed") || !strcmp(state->valuestring,"cancelled")) {
+                *status=STRAPPY_IPC_INVALID; terminal=1;
+            } else if (!strcmp(state->valuestring,"unknown")) {
+                *status=STRAPPY_IPC_NOT_READY; terminal=1;
+            }
+        } else if (++misses>=3) { *status=STRAPPY_IPC_NOT_READY; terminal=1; }
+        cJSON_Delete(snapshot);
+        if (terminal) goto done;
+        { struct timespec delay={0,250000000}; nanosleep(&delay,NULL); }
+        reply=strappy_store_client_mutation(STRAPPY_IPC_AUTH,query,status);
+    }
+    *status=STRAPPY_IPC_NOT_READY;
+done:
+    free(reply);
+    if (start) {
+        cJSON *item;
+        for (item=start->child; item; item=item->next)
+            if (item->valuestring) memset(item->valuestring,0,strlen(item->valuestring));
+    }
+    cJSON_Delete(start); cJSON_Delete(query); return result;
 }

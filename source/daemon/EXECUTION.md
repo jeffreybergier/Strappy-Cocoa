@@ -20,7 +20,7 @@ before validating/persisting options and accepting the run atomically. Partial
 transfers never execute; a retry after a lost reply returns the same durable run.
 Prompt-only submissions remain supported with the same text limit. Control
 requests, replies, and events retain their 4 KiB cap. App and daemon must both
-speak v6. Acknowledgment means durable acceptance, not completion.
+speak v7. Acknowledgment means durable acceptance, not completion.
 
 The run lifecycle is accepted, running, completed, failed, cancelled or
 interrupted. The daemon persists processing/retry fields as typed columns; the

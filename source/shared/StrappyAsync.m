@@ -36,6 +36,7 @@ NSString * const StrappyAsyncActivityChangedNotification = @"StrappyAsyncActivit
   SEL completion;
   id context;
   NSString *title;
+  NSString *account;
   BOOL query;
   BOOL synchronous;
   BOOL superseded;
@@ -45,6 +46,7 @@ NSString * const StrappyAsyncActivityChangedNotification = @"StrappyAsyncActivit
 - (void)deliver;
 @end
 
+static NSMutableDictionary *StrappyCredentialQueues;
 static NSMutableArray *StrappyCommandQueue;
 static NSMutableArray *StrappyQueryQueue;
 static NSMutableArray *StrappyQueries;
@@ -61,6 +63,7 @@ static NSUInteger StrappyCommandCount;
 @implementation StrappyAsyncRequest
 - (void)dealloc
 {
+  [account release];
   [invocation release]; [receiver release]; [context release]; [title release]; [result release];
   [super dealloc];
 }
@@ -187,6 +190,31 @@ static NSUInteger StrappyCommandCount;
 }
 + (id)backgroundTarget:(id)target title:(NSString *)title receiver:(id)receiver completion:(SEL)completion context:(id)context
 { return [self target:target title:title receiver:receiver completion:completion context:context query:NO]; }
++ (id)credentialTarget:(id)target account:(NSString *)account title:(NSString *)title receiver:(id)receiver completion:(SEL)completion context:(id)context
+{
+  StrappyAsyncRequest *request = [[[StrappyAsyncRequest alloc] init] autorelease];
+  request->account = [(account ? account : @"") copy];
+  request->receiver = [receiver retain]; request->completion = completion;
+  request->context = [context retain]; request->title = [title copy];
+  return [[[StrappyAsyncProxy alloc] initWithTarget:target request:request] autorelease];
+}
++ (void)runCredentials:(NSString *)account
+{
+  for (;;) {
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    StrappyAsyncRequest *request = nil;
+    @synchronized(self) {
+      NSMutableArray *queue = [StrappyCredentialQueues objectForKey:account];
+      if ([queue count]) {
+        request = [[queue objectAtIndex:0] retain]; [queue removeObjectAtIndex:0];
+      } else [StrappyCredentialQueues removeObjectForKey:account];
+    }
+    if (!request) { [pool drain]; return; }
+    [request execute];
+    [request performSelectorOnMainThread:@selector(deliver) withObject:nil waitUntilDone:NO];
+    [request release]; [pool drain];
+  }
+}
 + (id)queryTarget:(id)target receiver:(id)receiver completion:(SEL)completion context:(id)context
 { return [self target:target title:nil receiver:receiver completion:completion context:context query:YES]; }
 + (void)reportError:(NSError *)error title:(NSString *)title
@@ -205,7 +233,15 @@ static NSUInteger StrappyCommandCount;
       StrappyCommandQueue = [[NSMutableArray alloc] init]; StrappyQueryQueue = [[NSMutableArray alloc] init];
       StrappyQueries = [[NSMutableArray alloc] init];
     }
-    queue = request->query ? StrappyQueryQueue : StrappyCommandQueue;
+    if (request->account) {
+      if (!StrappyCredentialQueues) StrappyCredentialQueues = [[NSMutableDictionary alloc] init];
+      queue = [StrappyCredentialQueues objectForKey:request->account];
+      start = queue == nil;
+      if (!queue) {
+        queue = [NSMutableArray array];
+        [StrappyCredentialQueues setObject:queue forKey:request->account];
+      }
+    } else queue = request->query ? StrappyQueryQueue : StrappyCommandQueue;
     if (request->query) {
       NSUInteger i;
       for (i = 0; i < [StrappyQueries count]; ++i) {
@@ -217,8 +253,10 @@ static NSUInteger StrappyCommandCount;
     full = [queue count] >= 128;
     if (!full) {
       [queue addObject:request];
-      start = request->query ? !StrappyQueryWorker : !StrappyCommandWorker;
-      if (request->query) StrappyQueryWorker = YES; else StrappyCommandWorker = YES;
+      if (!request->account) {
+        start = request->query ? !StrappyQueryWorker : !StrappyCommandWorker;
+        if (request->query) StrappyQueryWorker = YES; else StrappyCommandWorker = YES;
+      }
     }
   }
   if (full) {
@@ -226,7 +264,8 @@ static NSUInteger StrappyCommandCount;
       [NSError errorWithDomain:@"StrappyAsync" code:4 userInfo:[NSDictionary dictionaryWithObject:
         @"Too many actions are pending. Wait for them to finish and try again." forKey:NSLocalizedDescriptionKey]] context:request->context title:request->title];
     [request performSelectorOnMainThread:@selector(deliver) withObject:nil waitUntilDone:NO];
-  } else if (start) [NSThread detachNewThreadSelector:request->query ? @selector(runQueries:) : @selector(runCommands:)
+  } else if (start && request->account) [NSThread detachNewThreadSelector:@selector(runCredentials:) toTarget:self withObject:request->account];
+  else if (start) [NSThread detachNewThreadSelector:request->query ? @selector(runQueries:) : @selector(runCommands:)
     toTarget:self withObject:nil];
   if (!request->query) [self postNotificationName:StrappyAsyncActivityChangedNotification object:nil];
   /* Even rejection has an asynchronous completion; never report it twice. */

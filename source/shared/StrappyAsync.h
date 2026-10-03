@@ -32,6 +32,10 @@ extern NSString * const StrappyAsyncActivityChangedNotification;
  * Captures arguments and queues them; completion is asynchronous. */
 + (id)backgroundTarget:(id)target title:(NSString *)title
   receiver:(id)receiver completion:(SEL)completion context:(id)context;
+/* Long credential work: FIFO per account, independent of controls and other
+ * accounts. Completion is delivered on the main thread after daemon completion. */
++ (id)credentialTarget:(id)target account:(NSString *)account title:(NSString *)title
+  receiver:(id)receiver completion:(SEL)completion context:(id)context;
 /* Read-only database queries remain asynchronous and latest-only per callback. */
 + (id)queryTarget:(id)target receiver:(id)receiver completion:(SEL)completion
   context:(id)context;

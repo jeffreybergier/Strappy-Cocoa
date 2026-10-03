@@ -105,10 +105,38 @@ static unsigned int exchange(int fd, unsigned int operation, unsigned int ident,
 }
 static char *command(const char *text)
 {
+    static unsigned int key_number;
     strappy_ipc_message reply;
-    int fd = connect_service();
-    char *result;
-    assert(exchange(fd,STRAPPY_IPC_MUTATE,2,(const unsigned char *)text,(unsigned int)strlen(text),&reply) == STRAPPY_IPC_OK);
+    int fd = connect_service(), credential, i;
+    char *result, *json=NULL, key[65];
+    cJSON *command=cJSON_Parse(text), *snapshot;
+    const char *action=cJSON_GetObjectItemCaseSensitive(command,"action")->valuestring;
+    credential=!strcmp(action,"update_account") || !strcmp(action,"archive_account");
+    if (credential) {
+        snprintf(key,sizeof(key),"%064x",++key_number);
+        cJSON_AddStringToObject(command,"credential_action",action);
+        cJSON_ReplaceItemInObjectCaseSensitive(command,"action",cJSON_CreateString("credential_start"));
+        cJSON_AddStringToObject(command,"key",key); json=cJSON_PrintUnformatted(command);
+        text=json;
+    }
+    assert(exchange(fd,credential ? STRAPPY_IPC_AUTH : STRAPPY_IPC_MUTATE,2,
+        (const unsigned char *)text,(unsigned int)strlen(text),&reply)==STRAPPY_IPC_OK);
+    free(json); json=NULL;
+    if (credential) {
+        cJSON_ReplaceItemInObjectCaseSensitive(command,"action",cJSON_CreateString("auth_status"));
+        json=cJSON_PrintUnformatted(command);
+        for (i=0;i<300;++i) {
+            assert(reply.length<sizeof(reply.payload)); reply.payload[reply.length]=0;
+            snapshot=cJSON_Parse((char *)reply.payload); assert(snapshot);
+            action=cJSON_GetObjectItemCaseSensitive(snapshot,"state")->valuestring;
+            if (!strcmp(action,"completed")) { cJSON_Delete(snapshot); break; }
+            assert(!strcmp(action,"running") || !strcmp(action,"queued")); cJSON_Delete(snapshot);
+            usleep(100000);
+            assert(exchange(fd,STRAPPY_IPC_AUTH,(unsigned int)i+3,(unsigned char *)json,(unsigned int)strlen(json),&reply)==STRAPPY_IPC_OK);
+        }
+        assert(i<300); free(json);
+    }
+    cJSON_Delete(command);
     close(fd); result = malloc((size_t)reply.length+1); assert(result);
     memcpy(result,reply.payload,reply.length); result[reply.length] = 0; return result;
 }

@@ -1056,3 +1056,58 @@ All fixture daemons were stopped and their sockets and temporary directories
 removed after this validation. Generated logs remain local under
 `/tmp/strappy-native-*` and are not committed. Graphical paste/Send, modern Mac,
 and other iOS runtime validation remain separate coverage.
+
+
+## Credential daemon jobs / IPC v7 (2026-10-03)
+
+Short non-credential main-thread control calls remain synchronous. Credential
+reads, account saves, refresh, sign-out and archival now use transient daemon
+jobs; public status is cached in Cocoa and completions return to the main loop.
+IPC v7 requires matching app/service builds. Reader ABI 2 and schema version 1
+are unchanged.
+
+Validation:
+
+- The full offline Linux suite passes. The authorization harness gates a
+  credential refresh/save and proves another account remains responsive,
+  per-account FIFO, sign-out after an already-started save, cancellation during
+  device approval, queued-job shutdown, retained-key conflicts, restart unknown,
+  and replies without secrets. Provider and Keychain boundaries are synthetic.
+- The production C transport test drops a credential acceptance reply, observes
+  query-only recovery and exactly one submission, and checks restart unknown and
+  terminal failure. Ordinary mutations still do not replay. The daemon execution
+  test accepts a two-second credential refresh promptly, queues a same-account
+  read, and completes unrelated controls and another account's read meanwhile.
+- Clean iOS armv7/arm64 and macOS PPC/x86/x64/arm64 builds pass without warnings.
+  Clang static analysis of the auth manager and shared transport reports no
+  diagnostics. Complete logs are under `/tmp/strappy-credential-*` in the work
+  environment, not committed.
+- x4-vm (Tiger 10.4.11, PPC, UID 501) passes the native authorization harness,
+  shared Cocoa dispatcher, and real Cocoa credential-cache bridge fixture. The
+  dispatcher proves an intentionally blocked credential queue leaves both the
+  main loop and another account usable, maintains same-account ordering, and
+  returns completions on main. The cache fixture blocks one read, completes
+  another account, coalesces 1,000 getters, and distinguishes unavailable from
+  absent credentials. Its production daemon passes the isolated loopback/account
+  job and 1 MiB prompt regression fixture too, then shuts down cleanly. The final
+  dispatcher cold enqueue was 140 ms and delayed Send returned in 30 ms on main.
+- koolphone5 (iOS 8.4.1, armv7, mobile UID 501) passes the same authorization,
+  dispatcher and credential-cache fixtures. The blocked-worker dispatcher enqueue
+  returned in 5.5 ms. Its production daemon also passes the isolated loopback
+  fixture: account update/archival use credential jobs, two exact 1 MiB prompts
+  complete, and size/UTF-8 rejection, partial transfer, lost-ack deduplication and
+  SQLite integrity pass. The temporary daemon logs clean shutdown. Initial SSH
+  attempts timed out; a later retry connected successfully.
+
+Concurrency fixtures use synthetic provider/credential boundaries. The separate
+production-daemon fixture uses a fresh private store and a synthetic account
+with no provider token; its two requests go only to its own loopback HTTP server.
+These tests do not demonstrate a live provider login or locked-Keychain ACL
+behavior. Temporary stores, binaries and sockets were removed from both devices after
+verified daemon shutdown. No production service was installed or changed. The first Tiger
+launch incorrectly used `su me` on a connection already running as `me`; rerunning
+the fixtures directly as UID 501 passed.
+
+Job status is transient: restart or completed-slot eviction can make a committed
+operation's result unknown. Clients report that condition and do not resubmit.
+A UI polling deadline likewise does not cancel already accepted daemon work.

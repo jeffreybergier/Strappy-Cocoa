@@ -47,7 +47,7 @@ int main(int argc, char **argv)
         cJSON *request = cJSON_CreateObject(), *snapshot;
         cJSON_AddStringToObject(request,"action","credential_status");
         cJSON_AddStringToObject(request,"id",account);
-        result = strappy_store_client_mutation(STRAPPY_IPC_AUTH,request,&status);
+        result = strappy_store_client_credential(request,&status);
         cJSON_Delete(request); assert(result && status == STRAPPY_IPC_OK);
         snapshot = cJSON_Parse(result);
         assert(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(snapshot,"present")));

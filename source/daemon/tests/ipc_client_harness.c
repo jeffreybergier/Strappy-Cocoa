@@ -13,7 +13,7 @@ int main(void)
     int pair[2];
     unsigned char header[24];
     const unsigned char expected[24] = {
-        'S','T','P','Y',0,6,0,1,0,0,0,16,1,2,3,4,0,0,0,3,0,0,0,0
+        'S','T','P','Y',0,7,0,1,0,0,0,16,1,2,3,4,0,0,0,3,0,0,0,0
     };
     strappy_ipc_message message, decoded;
     int64_t start;

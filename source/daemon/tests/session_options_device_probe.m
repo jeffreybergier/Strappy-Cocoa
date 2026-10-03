@@ -17,6 +17,20 @@ static int saves, submissions, failSave, loseReply, finished, accepted;
 static char submittedKey[65];
 static NSString *failure;
 static NSData *expectedPrompt;
+static pthread_cond_t credentialCondition = PTHREAD_COND_INITIALIZER;
+static int credentialReads, releaseCredential, credentialNotifications;
+char *strappy_test_credential(const cJSON *command, unsigned int *status)
+{
+  const char *account = cJSON_GetObjectItemCaseSensitive(command,"id")->valuestring;
+  assert(![NSThread XP_isMainThread]);
+  pthread_mutex_lock(&mutex); ++credentialReads;
+  if (!strcmp(account,"blocked-cache"))
+    while (!releaseCredential) pthread_cond_wait(&credentialCondition,&mutex);
+  pthread_mutex_unlock(&mutex);
+  *status = !strcmp(account,"unavailable-cache") ? STRAPPY_IPC_NOT_READY : STRAPPY_IPC_OK;
+  if (*status != STRAPPY_IPC_OK) return NULL;
+  return strdup("{\"present\":true,\"identity\":\"fixture-public-identity\",\"needs_refresh\":false}");
+}
 
 char *strappy_test_mutation(unsigned int operation, const cJSON *command, unsigned int *status)
 {
@@ -70,6 +84,11 @@ int strappy_test_command(unsigned int operation, const unsigned char *payload,
 - (void)finish:(NSNotification *)notification;
 @end
 @implementation OptionsProbeObserver
+- (void)credentialChanged:(NSNotification *)notification
+{
+  (void)notification;
+  assert([NSThread XP_isMainThread]); ++credentialNotifications;
+}
 - (void)finish:(NSNotification *)notification
 {
   assert([NSThread XP_isMainThread]);
@@ -96,6 +115,36 @@ static OptionsProbeSession *session(NSNumber *identifier, StrappySessionOptions 
   [s setValue:options forKey:@"options_"];
   [s setValue:[NSNumber numberWithBool:YES] forKey:@"optionsLoaded_"];
   return [s autorelease];
+}
+static void testCredentialCache(OptionsProbeObserver *observer)
+{
+  int i, reads;
+  NSTimeInterval deadline;
+  NSDictionary *status;
+  [[NSNotificationCenter defaultCenter] addObserver:observer selector:@selector(credentialChanged:)
+    name:StrappyCredentialStatusDidChangeNotification object:nil];
+  assert([StrappySession credentialStatusForProviderAccountIdentifier:@"blocked-cache" error:NULL] == nil);
+  assert([StrappySession credentialStatusForProviderAccountIdentifier:@"other-cache" error:NULL] == nil);
+  deadline=[NSDate timeIntervalSinceReferenceDate]+30;
+  while (!credentialNotifications && [NSDate timeIntervalSinceReferenceDate]<deadline) pump();
+  assert(credentialNotifications == 1);
+  status=[StrappySession credentialStatusForProviderAccountIdentifier:@"other-cache" error:NULL];
+  assert([[status objectForKey:@"present"] boolValue]);
+  for (i=0;i<1000;++i)
+    assert([StrappySession credentialStatusForProviderAccountIdentifier:@"blocked-cache" error:NULL] == nil);
+  pthread_mutex_lock(&mutex); reads=credentialReads; releaseCredential=1;
+  pthread_cond_broadcast(&credentialCondition); pthread_mutex_unlock(&mutex);
+  assert(reads==2);
+  while (credentialNotifications<2 && [NSDate timeIntervalSinceReferenceDate]<deadline) pump();
+  assert(credentialNotifications==2);
+  status=[StrappySession credentialStatusForProviderAccountIdentifier:@"blocked-cache" error:NULL];
+  assert([[status objectForKey:@"present"] boolValue]);
+  assert([StrappySession credentialStatusForProviderAccountIdentifier:@"unavailable-cache" error:NULL] == nil);
+  while (credentialNotifications<3 && [NSDate timeIntervalSinceReferenceDate]<deadline) pump();
+  assert(credentialNotifications==3);
+  status=[StrappySession credentialStatusForProviderAccountIdentifier:@"unavailable-cache" error:NULL];
+  assert([[status objectForKey:@"unavailable"] boolValue] && [status objectForKey:@"present"] == nil);
+  puts("PASS credential cache: blocked reads leave main loop and other accounts responsive; reads coalesce; unknown differs from signed-out");
 }
 int main(void)
 {
@@ -170,6 +219,7 @@ int main(void)
   printf("Large retry: accepted=%d saves=%d submissions=%d wait=%.3f seconds\n",accepted,saves,submissions,[NSDate timeIntervalSinceReferenceDate]-start); fflush(stdout);
   assert(accepted && saves == 3 && submissions == 2);
   assert([[NSUserDefaults standardUserDefaults] objectForKey:pendingKey] == nil);
+  testCredentialCache(observer);
   [[NSNotificationCenter defaultCenter] removeObserver:observer];
   [[NSUserDefaults standardUserDefaults] synchronize];
   puts("PASS: shared drafts, field merge, invalidation, responsive Send, failed save blocks submission, durable retry preserves 1 MiB Unicode payload; oversized prompt rejected");

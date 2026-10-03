@@ -261,7 +261,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
     return;
   }
   if ([provider isEqualToString:@"openrouter"] && ([token length] == 0U) &&
-      ([self tokenEdited] || ![[[self account] objectForKey:@"has_credential"] boolValue])) {
+      ([self tokenEdited] || ([[[self account] objectForKey:@"credential_status_known"] boolValue] &&
+       ![[[self account] objectForKey:@"has_credential"] boolValue]))) {
     [self showError:nil title:NSLocalizedString(@"API Key Is Required", nil)];
     return;
   }
@@ -273,7 +274,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 
   [[[self navigationItem] rightBarButtonItem] setEnabled:NO];
   [[self view] setUserInteractionEnabled:NO];
-  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save account",nil) receiver:self completion:@selector(accountSaved:) context:nil] updateProviderAccountIdentifier:identifier
+  [[StrappyAsync credentialTarget:[StrappySession class] account:identifier title:NSLocalizedString(@"Save account",nil) receiver:self completion:@selector(accountSaved:) context:nil] updateProviderAccountIdentifier:identifier
     displayName:name responsesEndpoint:endpoint maxOutputTokens:maximum bearerToken:[self tokenEdited] ? token : nil error:NULL];
 }
 
@@ -306,6 +307,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   authentication = [StrappyAuthentication
     authenticationForProviderAccountIdentifier:[self providerAccountIdentifier]];
   state = [authentication state];
+  if (state == StrappyAuthenticationStateChecking || state == StrappyAuthenticationStateSigningOut) return 1;
   if (state == StrappyAuthenticationStateAwaitingUser) {
     return 6;
   }
@@ -325,6 +327,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
     authenticationForProviderAccountIdentifier:[self providerAccountIdentifier]];
   state = [authentication state];
   if (![StrappyAuthentication isChatGPTProviderEnabled]) return NSLocalizedString(@"Disabled", nil);
+  if (state == StrappyAuthenticationStateChecking) return NSLocalizedString(@"Checking credentials…", nil);
+  if (state == StrappyAuthenticationStateSigningOut) return NSLocalizedString(@"Signing out…", nil);
   if (state == StrappyAuthenticationStateRequestingCode) return NSLocalizedString(@"Requesting a device code…", nil);
   if (state == StrappyAuthenticationStateAwaitingUser) return NSLocalizedString(@"Waiting for browser approval", nil);
   if (state == StrappyAuthenticationStateSignedIn) return NSLocalizedString(@"Signed in", nil);
@@ -343,6 +347,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   authentication = [StrappyAuthentication authenticationForProviderAccountIdentifier:
     [self providerAccountIdentifier]];
   state = [authentication state];
+  if (state == StrappyAuthenticationStateChecking || state == StrappyAuthenticationStateSigningOut) return;
   if (state == StrappyAuthenticationStateAwaitingUser) {
     if ((row == 1) || (row == 2)) return;
     if (row == 3) {
@@ -450,6 +455,9 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
       [[cell textLabel] setText:NSLocalizedString(@"Status", nil)];
       [[cell detailTextLabel] setText:[self chatGPTStatus]];
       [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
+    } else if (state == StrappyAuthenticationStateChecking || state == StrappyAuthenticationStateSigningOut) {
+      [[cell textLabel] setText:NSLocalizedString(@"Please wait…",nil)];
+      [cell setSelectionStyle:UITableViewCellSelectionStyleNone];
     } else if (state == StrappyAuthenticationStateAwaitingUser) {
       if (row == 1) { [[cell textLabel] setText:NSLocalizedString(@"Code", nil)]; [[cell detailTextLabel] setText:[authentication userCode]]; [cell setSelectionStyle:UITableViewCellSelectionStyleNone]; }
       else if (row == 2) {
@@ -531,7 +539,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   (void)alertView;
   if (buttonIndex == 0) return;
 
-  [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete account",nil) receiver:self completion:@selector(accountDeleted:) context:nil] archiveProviderAccountIdentifier:[self providerAccountIdentifier] error:NULL];
+  [[StrappyAsync credentialTarget:[StrappySession class] account:[self providerAccountIdentifier] title:NSLocalizedString(@"Delete account",nil) receiver:self completion:@selector(accountDeleted:) context:nil] archiveProviderAccountIdentifier:[self providerAccountIdentifier] error:NULL];
 }
 
 - (void)accountDeleted:(StrappyAsyncResult *)result

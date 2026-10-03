@@ -58,8 +58,16 @@ int main(int argc, char **argv)
     snprintf(json,sizeof(json),"{\"action\":\"delete_session\",\"session\":\"%s\"}",session);
     CHECK(command(20,json,NULL,0));
     CHECK(command(25,"{\"action\":\"archive_model\",\"id\":\"other\",\"wire\":\"step4-fixture\"}",NULL,0));
-    snprintf(json,sizeof(json),"{\"action\":\"archive_account\",\"id\":\"%s\"}",account);
-    CHECK(command(25,json,NULL,0));
+    snprintf(json,sizeof(json),"{\"action\":\"credential_start\",\"credential_action\":\"archive_account\",\"id\":\"%s\",\"key\":\"%064d\"}",account,1);
+    CHECK(command(30,json,NULL,0));
+    snprintf(json,sizeof(json),"{\"action\":\"auth_status\",\"id\":\"%s\",\"key\":\"%064d\"}",account,1);
+    for (count=0;count<100;++count) {
+        char snapshot[4096];
+        CHECK(command(30,json,snapshot,sizeof(snapshot)));
+        if (strstr(snapshot,"\"completed\"")) break;
+        CHECK(!strstr(snapshot,"\"failed\"")); usleep(100000);
+    }
+    CHECK(count<100);
     puts("Step 4 native probe passed: accounts, models, defaults, session create/delete, daemon scan, approvals, visibility, cross-connection status.");
     return 0;
 }

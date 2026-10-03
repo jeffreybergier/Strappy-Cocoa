@@ -1,5 +1,6 @@
 """Step 4 commands against the real daemon, DB, scanner and loopback provider."""
 import http.server
+import uuid
 import json
 import os
 from pathlib import Path
@@ -65,16 +66,16 @@ def exact(sock, n):
     return data
 
 def exchange(sock, op, ident, payload=b''):
-    sock.sendall(header.pack(b'STPY', 6, 1, op, ident, len(payload), 0)+payload)
+    sock.sendall(header.pack(b'STPY', 7, 1, op, ident, len(payload), 0)+payload)
     magic, version, kind, reply_op, reply_id, size, status = header.unpack(exact(sock, 24))
-    assert (magic, version, kind, reply_op, reply_id) == (b'STPY', 6, 2, op, ident)
+    assert (magic, version, kind, reply_op, reply_id) == (b'STPY', 7, 2, op, ident)
     return status, exact(sock, size)
 
 def command(directory, op, payload=b''):
     with socket.socket(socket.AF_UNIX) as sock:
         sock.settimeout(5)
         sock.connect(str(directory/'service.sock'))
-        status, _ = exchange(sock, 1, 1, struct.pack('!II', 6, 6))
+        status, _ = exchange(sock, 1, 1, struct.pack('!II', 7, 7))
         assert status == 0
         return exchange(sock, op, 2, payload)
 
@@ -98,6 +99,21 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         return process
     def rpc(action=None, op=25, expected=0, **values):
         if action: values['action'] = action
+        if action in ('credential_status','update_account','archive_account','delete_oauth','refresh_oauth'):
+            key = uuid.uuid4().hex * 2
+            values.update(action='credential_start',credential_action=action,key=key)
+            op = 30
+            status, data = command(directory,op,json.dumps({k:str(v) for k,v in values.items()}).encode())
+            assert status == expected, (action,status,data)
+            if status: return None
+            for _ in range(500):
+                snapshot = json.loads(data)
+                if snapshot['state'] == 'completed': return snapshot['result']
+                assert snapshot['state'] in ('queued','running'), snapshot
+                time.sleep(.01)
+                status,data = command(directory,30,json.dumps(dict(action='auth_status',id=values['id'],key=key)).encode())
+                assert status == 0
+            raise AssertionError('credential timeout')
         status, data = command(directory,op,json.dumps({k:str(v) for k,v in values.items()}).encode())
         assert status == expected, (action, status, data)
         return data.decode() if status == 0 else None
@@ -110,9 +126,8 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         account = rpc('create_account', id='other', name='Offline')
         def auth_rpc(op, **values):
             return command(directory,op,json.dumps(values).encode())
-        status, payload = auth_rpc(30,action='credential_status',id=account)
-        assert status == 0 and json.loads(payload) == dict(present=False,identity='',needs_refresh=False)
-        assert auth_rpc(30,action='credential_status',id='missing')[0] == 1
+        assert json.loads(rpc('credential_status',id=account)) == dict(present=False,identity='',needs_refresh=False)
+        rpc('credential_status',id='missing',expected=1)
         assert auth_rpc(25,action='save_oauth',id=account,access='should-not-save',
                         refresh='should-not-save',identity='fixture',expiry='1')[0] == 1
         assert auth_rpc(30,action='auth_start',id=account,key='a'*64)[0] == 1
@@ -131,11 +146,11 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         with socket.socket(socket.AF_UNIX) as subscriber:
             subscriber.settimeout(2)
             subscriber.connect(str(directory/'service.sock'))
-            assert exchange(subscriber, 1, 1, struct.pack('!II', 6, 6))[0] == 0
+            assert exchange(subscriber, 1, 1, struct.pack('!II', 7, 7))[0] == 0
             assert exchange(subscriber, 3, 2)[0] == 0
             rpc('options',session=session,**options)
             magic, version, kind, topic, ident, size, status = header.unpack(exact(subscriber, 24))
-            assert (magic, version, kind, topic, status) == (b'STPY', 6, 3, 32, 0)
+            assert (magic, version, kind, topic, status) == (b'STPY', 7, 3, 32, 0)
             exact(subscriber, size)
             subscriber.settimeout(.15)
             try:

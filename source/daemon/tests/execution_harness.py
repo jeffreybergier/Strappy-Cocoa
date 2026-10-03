@@ -62,18 +62,18 @@ def exact(sock, n):
     return data
 
 def send(sock, op, ident, payload=b''):
-    sock.sendall(header.pack(b'STPY', 6, 1, op, ident, len(payload), 0)+payload)
+    sock.sendall(header.pack(b'STPY', 7, 1, op, ident, len(payload), 0)+payload)
 
 def receive(sock):
     magic, version, kind, op, ident, size, status = header.unpack(exact(sock, 24))
-    assert (magic, version, kind) == (b'STPY', 6, 2)
+    assert (magic, version, kind) == (b'STPY', 7, 2)
     return status, exact(sock, size)
 
 def connect(directory):
     sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(12)
     sock.connect(str(directory/'service.sock'))
-    send(sock, 1, 1, struct.pack('!II', 6, 6))
+    send(sock, 1, 1, struct.pack('!II', 7, 7))
     status, snapshot = receive(sock)
     assert status == 0 and struct.unpack('!I', snapshot[24:28])[0] == 7
     return sock
@@ -130,14 +130,25 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
         def combined(key, values=settings, prompt=b'Hello daemon'):
             encoded = json.dumps(values).encode()
             return struct.pack('!Q',1)+key.encode()+struct.pack('!I',len(encoded))+encoded+prompt
-        # Explicit OAuth networking uses an independent command worker.
-        with concurrent.futures.ThreadPoolExecutor(1) as pool:
-            refreshing = pool.submit(command,directory,29,b'{"action":"refresh_oauth","id":"slow-fixture"}')
-            time.sleep(.1)
-            started = time.monotonic()
-            assert command(directory,25,b'{"action":"create_account","id":"other","name":"Concurrent control"}')[0] == 0
-            assert time.monotonic()-started < 1
-            assert refreshing.result()[0] == 0
+        # Credential acceptance is short; waits stay in per-account daemon jobs.
+        def auth(**values):
+            status, data = command(directory,30,json.dumps(values).encode())
+            assert status == 0
+            return json.loads(data)
+        started = time.monotonic()
+        auth(action='credential_start',credential_action='refresh_oauth',id='daemon-offline',identity='slow-fixture',key='a'*64)
+        assert time.monotonic()-started < 1
+        auth(action='credential_start',credential_action='credential_status',id='daemon-offline',key='b'*64)
+        assert auth(action='auth_status',id='daemon-offline',key='b'*64)['state'] == 'queued'
+        started = time.monotonic()
+        status, other = command(directory,25,b'{"action":"create_account","id":"other","name":"Concurrent control"}')
+        assert status == 0 and time.monotonic()-started < 1
+        auth(action='credential_start',credential_action='credential_status',id=other.decode(),key='c'*64)
+        wait_for(lambda: auth(action='auth_status',id=other.decode(),key='c'*64)['state'] == 'completed')
+        assert time.monotonic()-started < 1
+        wait_for(lambda: auth(action='auth_status',id='daemon-offline',key='b'*64)['state'] == 'completed')
+        assert auth(action='auth_status',id='daemon-offline',key='a'*64)['result'] == 'fixture'
+        assert command(directory,29,b'{"action":"refresh_oauth","id":"daemon-offline"}')[0] == 1
         # An acceptance failure rolls the settings back in the same transaction.
         with sqlite3.connect(dbpath) as db:
             previous_rounds = db.execute('SELECT round_limit FROM session_settings WHERE session_id=1').fetchone()[0]
@@ -313,7 +324,7 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
         # commit settings or a run. Keep the first peer open while probing.
         for cut in (80, len(payload)-1):
             with connect(directory) as sock:
-                sock.sendall(header.pack(b'STPY',6,1,28,2,len(payload),0)+payload[:cut])
+                sock.sendall(header.pack(b'STPY',7,1,28,2,len(payload),0)+payload[:cut])
                 assert command(directory,26,b'')[0] == 0
                 assert no_large_run()
                 with sqlite3.connect(dbpath) as db:
@@ -331,14 +342,14 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
         # ordinary control messages that still have their 4 KiB cap.
         for op, size in ((16,maximum+73),(28,maximum+4096+77),(25,4097),(28,0xffffffff)):
             with connect(directory) as sock:
-                sock.sendall(header.pack(b'STPY',6,1,op,2,size,0))
+                sock.sendall(header.pack(b'STPY',7,1,op,2,size,0))
                 assert sock.recv(1) == b''
         assert no_large_run()
         # Split a maximum-sized options-bearing submission across many writes,
         # including multibyte characters. Lose its acknowledgment and retry.
         before = len(requests)
         with connect(directory) as sock:
-            sock.sendall(header.pack(b'STPY',6,1,28,2,len(payload),0))
+            sock.sendall(header.pack(b'STPY',7,1,28,2,len(payload),0))
             for offset in range(0,len(payload),8191):
                 sock.sendall(payload[offset:offset+8191])
         wait_for(lambda: state(large_key) == 3)

@@ -14,6 +14,8 @@
 
 static pthread_mutex_t fixture_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int starts, saves, finish, fail;
+static int block_store, store_entered, stored, deletes, reads;
+static char blocked_account[128];
 static void pause_fixture(void) { struct timespec delay = {0,1000000}; nanosleep(&delay,NULL); }
 const char *strappy_command_text(const cJSON *c, const char *key)
 {
@@ -26,11 +28,31 @@ int strappy_ipc_server_committed(strappy_ipc_server *server, uint32_t event)
 { (void)server; (void)event; return 1; }
 int strappy_service_account_command(const char *db,const cJSON *c,char **result)
 {
-    (void)db; (void)result;
-    assert(!strcmp(strappy_command_text(c,"action"),"save_oauth"));
-    assert(!strcmp(strappy_command_text(c,"access"),"SECRET_ACCESS"));
-    assert(!strcmp(strappy_command_text(c,"refresh"),"SECRET_REFRESH"));
-    pthread_mutex_lock(&fixture_mutex); ++saves; pthread_mutex_unlock(&fixture_mutex);
+    const char *action=strappy_command_text(c,"action");
+    int blocked;
+    (void)db;
+    pthread_mutex_lock(&fixture_mutex);
+    if (!strcmp(strappy_command_text(c,"id"),blocked_account) &&
+        (!strcmp(action,"save_oauth") || !strcmp(action,"refresh_oauth"))) store_entered=1;
+    pthread_mutex_unlock(&fixture_mutex);
+    do {
+        pthread_mutex_lock(&fixture_mutex);
+        blocked=block_store && !strcmp(strappy_command_text(c,"id"),blocked_account) &&
+            (!strcmp(action,"save_oauth") || !strcmp(action,"refresh_oauth"));
+        pthread_mutex_unlock(&fixture_mutex);
+        if (blocked) pause_fixture();
+    } while (blocked);
+    pthread_mutex_lock(&fixture_mutex);
+    if (!strcmp(action,"save_oauth")) {
+        assert(!strcmp(strappy_command_text(c,"access"),"SECRET_ACCESS"));
+        assert(!strcmp(strappy_command_text(c,"refresh"),"SECRET_REFRESH"));
+        ++saves; stored=1;
+    } else if (!strcmp(action,"refresh_oauth")) stored=1;
+    else if (!strcmp(action,"delete_oauth") || !strcmp(action,"archive_account")) { ++deletes; stored=0; }
+    else if (!strcmp(action,"credential_status")) { ++reads;
+        *result=strappy_string_duplicate("{\"present\":false,\"identity\":\"\",\"needs_refresh\":false}");
+    } else assert(0);
+    pthread_mutex_unlock(&fixture_mutex);
     return 1;
 }
 void strappy_openai_oauth_default_configuration(strappy_openai_oauth_configuration *c)
@@ -73,6 +95,10 @@ static cJSON *call(strappy_auth *auth,const char *action,const char *account,int
     cJSON *command=cJSON_CreateObject(), *snapshot=NULL;
     char retry[65], *result=NULL;
     memset(retry,'a'+key,64); retry[64]=0;
+    if (!strcmp(action,"refresh_oauth") || !strcmp(action,"credential_status") ||
+        !strcmp(action,"delete_oauth") || !strcmp(action,"archive_account")) {
+        cJSON_AddStringToObject(command,"credential_action",action); action="credential_start";
+    }
     cJSON_AddStringToObject(command,"action",action); cJSON_AddStringToObject(command,"id",account);
     cJSON_AddStringToObject(command,"key",retry);
     assert(strappy_auth_command(auth,command,&result)==expected);
@@ -93,6 +119,68 @@ static void wait_state(strappy_auth *auth,const char *account,int key,const char
         pause_fixture();
     }
     assert(0 && "authorization state timed out");
+}
+static void wait_store(void)
+{
+    int i, entered=0;
+    for (i=0;i<5000 && !entered;++i) {
+        pthread_mutex_lock(&fixture_mutex); entered=store_entered; pthread_mutex_unlock(&fixture_mutex);
+        if (!entered) pause_fixture();
+    }
+    assert(entered);
+}
+static void credential_tests(const char *db, const char *account, const char *other)
+{
+    strappy_auth *auth=strappy_auth_open(db,NULL);
+    long long before;
+    pthread_mutex_lock(&fixture_mutex);
+    strcpy(blocked_account,account); block_store=1; store_entered=0;
+    pthread_mutex_unlock(&fixture_mutex);
+    cJSON_Delete(call(auth,"refresh_oauth",account,0,STRAPPY_IPC_OK));
+    wait_store(); before=strappy_unix_milliseconds();
+    cJSON_Delete(call(auth,"delete_oauth",account,1,STRAPPY_IPC_OK));
+    wait_state(auth,account,1,"queued");
+    cJSON_Delete(call(auth,"credential_status",other,2,STRAPPY_IPC_OK));
+    wait_state(auth,other,2,"completed");
+    assert(strappy_unix_milliseconds()-before<1000);
+    /* Lost acceptance replies are recovered by status, never a second write. */
+    cJSON_Delete(call(auth,"auth_status",account,0,STRAPPY_IPC_OK));
+    cJSON_Delete(call(auth,"refresh_oauth",account,0,STRAPPY_IPC_CONFLICT));
+    pthread_mutex_lock(&fixture_mutex); block_store=0; pthread_mutex_unlock(&fixture_mutex);
+    wait_state(auth,account,1,"completed");
+    pthread_mutex_lock(&fixture_mutex); assert(stored==0 && deletes==1 && reads==1); pthread_mutex_unlock(&fixture_mutex);
+    strappy_auth_close(auth);
+    auth=strappy_auth_open(db,NULL);
+    wait_state(auth,account,0,"unknown"); /* restart cannot justify replay */
+    pthread_mutex_lock(&fixture_mutex); finish=1; fail=0; block_store=1; store_entered=0; pthread_mutex_unlock(&fixture_mutex);
+    cJSON_Delete(call(auth,"auth_start",account,0,STRAPPY_IPC_OK));
+    wait_store(); before=strappy_unix_milliseconds();
+    cJSON_Delete(call(auth,"delete_oauth",account,1,STRAPPY_IPC_OK));
+    wait_state(auth,account,0,"cancelled");
+    cJSON_Delete(call(auth,"credential_status",other,2,STRAPPY_IPC_OK));
+    wait_state(auth,other,2,"completed");
+    assert(strappy_unix_milliseconds()-before<1000);
+    pthread_mutex_lock(&fixture_mutex); block_store=0; pthread_mutex_unlock(&fixture_mutex);
+    wait_state(auth,account,1,"completed");
+    strappy_auth_close(auth);
+    pthread_mutex_lock(&fixture_mutex); assert(stored==0 && deletes==2); finish=0; pthread_mutex_unlock(&fixture_mutex);
+    /* Cancellation while waiting for provider approval prevents any save. */
+    auth=strappy_auth_open(db,NULL);
+    cJSON_Delete(call(auth,"auth_start",account,0,STRAPPY_IPC_OK));
+    wait_state(auth,account,0,"awaiting_user");
+    cJSON_Delete(call(auth,"archive_account",account,1,STRAPPY_IPC_OK));
+    wait_state(auth,account,1,"completed");
+    strappy_auth_close(auth);
+    pthread_mutex_lock(&fixture_mutex); assert(stored==0 && deletes==3); pthread_mutex_unlock(&fixture_mutex);
+    auth=strappy_auth_open(db,NULL);
+    pthread_mutex_lock(&fixture_mutex); block_store=1; store_entered=0; pthread_mutex_unlock(&fixture_mutex);
+    cJSON_Delete(call(auth,"refresh_oauth",account,0,STRAPPY_IPC_OK));
+    wait_store();
+    cJSON_Delete(call(auth,"archive_account",account,1,STRAPPY_IPC_OK));
+    strappy_auth_stop(auth);
+    pthread_mutex_lock(&fixture_mutex); block_store=0; pthread_mutex_unlock(&fixture_mutex);
+    strappy_auth_close(auth);
+    pthread_mutex_lock(&fixture_mutex); assert(deletes==3); pthread_mutex_unlock(&fixture_mutex);
 }
 int main(void)
 {
@@ -134,9 +222,10 @@ int main(void)
     cJSON_Delete(call(auth,"auth_start",account,4,STRAPPY_IPC_OK));
     wait_state(auth,account,4,"failed"); strappy_auth_close(auth);
     pthread_mutex_lock(&fixture_mutex); total=saves; pthread_mutex_unlock(&fixture_mutex); assert(total==1);
+    credential_tests(db,account,other);
     free(account); free(other); strappy_db_shutdown_connection();
     unlink(db); snprintf(db,sizeof(db),"%s/strappy.sqlite-wal",path); unlink(db);
     snprintf(db,sizeof(db),"%s/strappy.sqlite-shm",path); unlink(db); rmdir(path);
-    puts("auth_harness: acceptance, deduplication, isolation, cancellation, sign-out, shutdown, failure and secret-free replies passed");
+    puts("auth_harness: acceptance, deduplication, isolation, cancellation, sign-out, shutdown, failure, credential FIFO, blocked-store isolation, late-save sign-out, restart and secret-free replies passed");
     return 0;
 }

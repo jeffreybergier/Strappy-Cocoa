@@ -12,7 +12,7 @@ The FIFO control path serializes short metadata mutations and prompt acceptance.
 Each active prompt owns a separate session worker; one maintenance worker owns
 study, scanning, and catalog refresh. Mutating the executing session returns
 `busy`, while idle-session creation/deletion remains available. Clients render
-committed state. Explicit credential refresh has a separate network lane. Database calls commit before persistent
+committed state. Credential actions use per-account daemon jobs outside the control FIFO. Database calls commit before persistent
 invalidation events. Catalog invalidations also hint that transient worker status
 changed; consumers query `work_status`, rather than interpreting events as rows.
 IPC socket handling and worker status/cancellation stay responsive during work.
@@ -101,9 +101,11 @@ The client preserves topic bits and combines queued callbacks on the main loop.
 Session-only invalidation does not regenerate conversation HTML or reload the
 WebView. Reconnect refreshes all committed state while preserving local drafts.
 
-Other metadata mutation APIs execute through the asynchronous Cocoa command
-queue. Future-session defaults show pending control state and reload on
-completion. Authentication refresh retains its background thread. See
+Short non-credential mutations execute synchronously on the Cocoa main thread.
+Credential operations, including account save and archival, use asynchronous
+per-account jobs and main-thread completion. Public credential getters use a
+cache populated off the main thread. Authentication refresh retains its
+background presentation thread. See
 [ASYNC_UI.md](ASYNC_UI.md) for ordering, failure handling, and query ownership.
 
 ## Verification

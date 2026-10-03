@@ -25,6 +25,7 @@ extern NSString * const StrappySessionStreamEventNotification;
 extern NSString * const StrappySessionModelCatalogRefreshDidStartNotification;
 extern NSString * const StrappySessionModelCatalogRefreshDidFinishNotification;
 extern NSString * const StrappySessionModelCatalogDidChangeNotification;
+extern NSString * const StrappyCredentialStatusDidChangeNotification;
 extern NSString * const StrappyProviderAccountsDidChangeNotification;
 extern NSString * const StrappySessionChangeKindKey;
 extern NSString * const StrappySessionChangeKindActivity;
@@ -187,6 +188,9 @@ enum {
                       responsesEndpoint:(NSString *)responsesEndpoint
                         maxOutputTokens:(long long)maxOutputTokens
                                   error:(NSError **)error;
+/* Cached public snapshot. Missing entries start an asynchronous read and
+ * return nil; failed reads have unavailable=YES, not present=NO. Observe
+ * StrappyCredentialStatusDidChangeNotification for completion. */
 + (NSDictionary *)credentialStatusForProviderAccountIdentifier:(NSString *)identifier
                                                          error:(NSError **)error;
 + (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier

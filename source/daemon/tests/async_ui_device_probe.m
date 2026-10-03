@@ -14,11 +14,14 @@ static pthread_cond_t condition = PTHREAD_COND_INITIALIZER;
 static BOOL releaseCommands, releaseQueries;
 static unsigned int commandEntered, queryEntered, delivered, errors, queryResults;
 static NSMutableArray *order;
+static BOOL releaseCredential;
+static unsigned int credentialEntered, credentialDelivered;
 static NSString *lastQuery;
 
 @interface AsyncFixture : NSObject
 + (BOOL)command:(NSString *)text big:(long long)big flag:(BOOL)flag error:(NSError **)error;
 + (NSDictionary *)query:(NSString *)text error:(NSError **)error;
++ (BOOL)credential:(NSString *)text error:(NSError **)error;
 + (BOOL)fail:(NSError **)error;
 @end
 @implementation AsyncFixture
@@ -43,6 +46,15 @@ static NSString *lastQuery;
   if ([text isEqualToString:@"old"]) while (!releaseQueries) pthread_cond_wait(&condition,&lock);
   pthread_mutex_unlock(&lock);
   return [NSDictionary dictionaryWithObject:text forKey:@"query"];
+}
++ (BOOL)credential:(NSString *)text error:(NSError **)error
+{
+  (void)error;
+  assert(![NSThread XP_isMainThread]);
+  pthread_mutex_lock(&lock); ++credentialEntered;
+  if ([text isEqual:@"blocked"]) while (!releaseCredential) pthread_cond_wait(&condition,&lock);
+  [order addObject:text]; pthread_mutex_unlock(&lock);
+  return YES;
 }
 + (BOOL)fail:(NSError **)error
 {
@@ -75,6 +87,10 @@ static unsigned int controlDelivered;
 - (void)failed:(NSNotification *)notification;
 @end
 @implementation AsyncObserver
+- (void)credentialDone:(StrappyAsyncResult *)result
+{
+  assert([NSThread XP_isMainThread] && [result succeeded]); ++credentialDelivered;
+}
 - (void)controlDone:(StrappyAsyncResult *)result
 {
   assert([NSThread XP_isMainThread] && controlEntered && [result succeeded]);
@@ -182,7 +198,24 @@ int main(void)
   waitFor(&delivered,134);
   assert([StrappyAsync pendingCommandCount] == 0);
   assert(commandEntered == 131 && errors == 3);
-  printf("PASS async UI: enqueue %.3f ms; FIFO, immutable arguments, 64-bit scalars, independent query worker, latest-only results, main-thread completions, exactly-once errors, detached errors, queue overflow, synchronous main-thread control\n",elapsed*1000);
+  [order removeAllObjects];
+  [[StrappyAsync credentialTarget:[AsyncFixture class] account:@"a" title:@"Credential" receiver:observer
+    completion:@selector(credentialDone:) context:nil] credential:@"blocked" error:NULL];
+  waitFor(&credentialEntered,1);
+  [[StrappyAsync credentialTarget:[AsyncFixture class] account:@"a" title:@"Credential" receiver:observer
+    completion:@selector(credentialDone:) context:nil] credential:@"second" error:NULL];
+  [[StrappyAsync credentialTarget:[AsyncFixture class] account:@"b" title:@"Credential" receiver:observer
+    completion:@selector(credentialDone:) context:nil] credential:@"independent" error:NULL];
+  waitFor(&credentialDelivered,1);
+  assert(credentialEntered == 2 && [StrappyAsync pendingCommandCount] == 2);
+  [[StrappyAsync commandTarget:[ControlFixture class] title:@"Control" receiver:observer
+    completion:@selector(controlDone:) context:nil] control:NULL];
+  assert(controlDelivered == 2);
+  pthread_mutex_lock(&lock); releaseCredential=YES; pthread_cond_broadcast(&condition); pthread_mutex_unlock(&lock);
+  waitFor(&credentialDelivered,3);
+  assert(([order isEqual:[NSArray arrayWithObjects:@"independent",@"blocked",@"second",nil]]));
+  assert([StrappyAsync pendingCommandCount] == 0);
+  printf("PASS async UI: enqueue %.3f ms; FIFO, immutable arguments, 64-bit scalars, independent query worker, latest-only results, main-thread completions, exactly-once errors, detached errors, queue overflow, synchronous main-thread control, per-account credential FIFO and isolation\n",elapsed*1000);
   [[NSNotificationCenter defaultCenter] removeObserver:observer];
   [order release]; [lastQuery release];
   [pool release];

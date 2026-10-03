@@ -302,8 +302,9 @@ study, scans, catalog refresh and account changes; conflicting mutations return
 busy. UI-only presentation, drafts and authentication presentation remain local.
 See `source/daemon/VALIDATION.md` for verified outcomes and explicit limitations.
 
-The Cocoa performance follow-up is implemented: metadata commands run on a
-serial background queue, catalog searches use an independent query worker, and
+The Cocoa command policy keeps short non-credential IPC synchronous on the
+main thread. Credential operations use per-account daemon jobs with asynchronous
+UI completion; catalog searches use an independent query worker, and
 unhandled command failures reach an app-wide error channel. Active-session
 options remain local drafts until Send. See `source/daemon/ASYNC_UI.md` for
 operation policy and `source/daemon/VALIDATION.md` for test limits.
@@ -376,28 +377,30 @@ section of `source/daemon/VALIDATION.md`; graphical paste/Send remains untested.
 Relevant code: `source/shared/strappy_ipc.h`,
 `source/shared/StrappySession.m`, and `source/daemon/strappy_execution.c`.
 
-### GUI responsiveness during control commands (high priority)
+### Credential operations as daemon jobs (high priority)
 
-`StrappyAsync commandTarget:` currently executes synchronously on the GUI
-thread, including socket send/receive. Ordinary reply waits can take two
-seconds, with additional reconnect overhead. Account operations can also wait
-behind the account credential lock held during a network refresh; a client
-timeout does not mean the server-side mutation was cancelled.
+Keep short, non-credential IPC synchronous on the GUI main thread. Credential
+operations are long work: accept a request promptly, return to the event loop,
+and deliver completion after the daemon finishes.
 
-- [ ] Restore asynchronous, ordered control commands with main-thread
-  completions. Audit callers that currently depend on inline completion and
-  preserve committed-state rendering and explicit pending UI state.
-- [ ] Keep credential serialization without allowing a blocked account command
-  to stall unrelated control work. Preserve unknown-acknowledgment handling and
-  never automatically replay ordinary mutations.
-- [ ] Verify main-loop responsiveness during delayed replies, reconnects,
-  database contention, and an account save/delete concurrent with credential
-  refresh. Check completion ordering and late server-side commits after timeout.
+- [x] Move credential reads, saves, refresh, sign-out and account archival onto
+  daemon jobs. Account saves touch Keychain even when only metadata changes.
+- [x] Serialize credential commits per account without holding the global
+  control/authentication mutex during Keychain or network work. Sign-out and
+  archival must cancel pending login and prevent late credential restoration.
+- [x] Use opaque operation keys and read-only status polling after an uncertain
+  acknowledgment. Never automatically replay ordinary mutations. A lost daemon
+  job after restart has an unknown outcome, not permission to repeat the write.
+- [x] Keep public credential status cached for main-thread getters; load it
+  asynchronously and distinguish unavailable status from confirmed sign-out.
+- [x] Preserve pending UI state and main-thread completions for account actions.
+  Verify blocked credentials do not stall unrelated controls or other accounts,
+  ordering, cancellation, lost acknowledgment, and shutdown on Linux, Tiger/PPC,
+  and koolphone5 (iOS 8.4.1 / armv7).
 
 Relevant code: `source/shared/StrappyAsync.m`,
-`source/shared/strappy_store_client.c`, and `source/daemon/StrappySession.m`.
-Update `source/daemon/ASYNC_UI.md` and the step 4 status notes to match the final
-command policy.
+`source/shared/strappy_store_client.c`, and `source/daemon/strappy_auth.c`.
+Update `source/daemon/ASYNC_UI.md` and step 4 notes to match this command policy.
 
 ### Scoped, incremental conversation invalidation (medium priority)
 

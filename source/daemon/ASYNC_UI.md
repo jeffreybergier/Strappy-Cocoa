@@ -18,7 +18,10 @@ command worker per connection and independent per-session prompt workers.
 Replies use increasing request IDs. Reconnect revalidates version, ABI, and
 readiness. Ordinary mutations never replay after an uncertain acknowledgment;
 durable prompt/cancel commands retain their existing request-key retry behavior.
-Explicit OAuth refresh remains on a separate network worker/connection.
+Credential work uses daemon jobs with short acceptance and status replies.
+Only read-only status queries repeat after a lost credential acknowledgment.
+A missing job (restart or terminal-slot eviction) is an unknown outcome; the UI
+asks the user to check stored state before explicitly trying again.
 
 ## Choosing when to wait
 
@@ -27,9 +30,10 @@ Explicit OAuth refresh remains on a separate network worker/connection.
 | Active-session model, account, tools, limits | Shared local draft; no IPC | Settings submit atomically with prompt acceptance |
 | Future-session defaults | Main-thread control call | Read committed defaults in inline completion |
 | Model/database approval or visibility, context inclusion, study reset/delete | Main-thread control call | Notifications refresh committed values |
-| Conversation/account/model creation, save, deletion | Main-thread control call | Completion receives committed identifier/value before handler returns |
+| Conversation/model creation, save, deletion; account creation | Main-thread control call | Completion receives committed identifier/value before handler returns |
 | macOS daemon installation/verification | Explicit `backgroundTarget:` startup work | Main window opens on completion |
 | Scan, catalog fetch, Database Study start | Main-thread acceptance call | Actual long-running job remains in the daemon worker |
+| Account save, credential read/refresh, sign-out, account archival | Per-account daemon credential job; UI worker polls status | Pending state until terminal result, main-thread completion |
 | Prompt submission/cancellation and authentication presentation | Independent background/session paths | Existing durable run and authentication lifecycles |
 | Catalog search, sidebar refresh, conversation refresh | Existing query worker | Latest-only results return to the main thread |
 
@@ -57,6 +61,38 @@ Its bounded FIFO, pending-count/background-task bookkeeping, asynchronous errors
 and argument ownership remain unchanged. It is independent of the synchronous
 control path and the latest-only query worker. Background queries and startup
 work cannot prevent a short control invocation from executing on the main thread.
+
+## Credential jobs
+
+`credentialTarget:account:` has a FIFO worker per account. A blocked account
+cannot delay another account, the startup worker, searches, or synchronous main
+controls. Its pending count, retained receiver/arguments, error routing, and
+main-thread completion follow the background proxy contract. Save/delete callers
+set pending state before enqueueing; sign-out presents a signing-out state and
+publishes signed-out only after completion. Device authorization and explicit
+refresh retain their existing dedicated presentation workers.
+
+The daemon accepts `credential_start` once, then exposes `auth_status` by opaque
+key. Keychain reads, saves, refreshes, deletion, archival and account updates run
+outside both global control and authentication locks. Jobs run FIFO per account;
+login's final save shares that account's commit lock. Sign-out/archival marks
+pending login cancelled before acknowledging acceptance. If a save already
+started, deletion waits for it and runs afterward. Automatic prompt refresh still
+uses the same Keychain account lock, so it cannot restore a token after deletion.
+
+Credential getters read a process-local public cache. Missing entries start
+independent background reads and return unknown immediately; no main-thread
+getter waits for Keychain. Cache notifications update authentication presentation
+and account catalogs. Entries refresh on catalog invalidation or when read after
+60 seconds; generation checks discard stale reads. Failure is represented as
+unavailable, not confirmed absence. No cached entry contains token values.
+
+Daemon jobs are transient and bounded (64 retained slots); no SQLite migration,
+secret persistence, or automatic mutation replay is introduced. UI workers poll
+at 250 ms, with a five-minute polling bound and three consecutive missing replies
+before reporting unknown. That UI limit does not cancel daemon work. Completed
+slots may be reused; restart or eviction makes status unknown. Non-credential
+mutations retain their single-send, synchronous behavior and two-second replies.
 
 ## Search and remaining local work
 
@@ -92,7 +128,8 @@ user on a test device. The fixture blocks the command worker while pumping the
 main loop and completing an independent search. It checks FIFO execution,
 copied mutable input, 64-bit scalar/BOOL transport, latest-only search delivery,
 main-thread callbacks, handled/unhandled/detached errors, queue overflow, and
-inline main-thread control execution while the background command worker is blocked. It performs no database mutation or provider request.
+inline main-thread control execution while background work is blocked, and
+per-account credential FIFO with independent account completion. It performs no database mutation or provider request.
 Cold Foundation/NSProxy startup on an emulator is reported separately from the
 fact that enqueue returns while command execution remains deliberately blocked.
 

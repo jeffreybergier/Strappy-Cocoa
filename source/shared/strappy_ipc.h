@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define STRAPPY_IPC_VERSION 6U
+#define STRAPPY_IPC_VERSION 7U
 #define STRAPPY_IPC_STORE_ABI 2U
 #define STRAPPY_IPC_HEADER 24U
 /* Ordinary control requests, every reply, and every event stay small. */

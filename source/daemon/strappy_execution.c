@@ -271,6 +271,12 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
             }
             goto mutation_done;
         }
+        /* Credential work is accepted only through AUTH jobs. No Keychain or
+         * network wait may occupy the global control FIFO. */
+        if (command && (!strcmp(strappy_command_text(command,"action"),"update_account") ||
+            !strcmp(strappy_command_text(command,"action"),"archive_account") ||
+            !strcmp(strappy_command_text(command,"action"),"delete_oauth") ||
+            !strcmp(strappy_command_text(command,"action"),"refresh_oauth"))) goto mutation_done;
         pthread_mutex_lock(&e->mutex);
         if (e->stopping) reply->status = STRAPPY_IPC_NOT_READY;
         else if (request->operation == STRAPPY_IPC_WORK_STATUS) {
@@ -313,8 +319,6 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
             }
             /* Control mutations never reserve the prompt/maintenance worker. */
             pthread_mutex_unlock(&e->mutex);
-            if (!strcmp(action,"delete_oauth") || !strcmp(action,"archive_account"))
-                strappy_auth_cancel_account(e->auth,strappy_command_text(command,"id"));
             reply->status = strappy_mutation(e->db,e->resources,command,&result) ? STRAPPY_IPC_OK : STRAPPY_IPC_INVALID;
             pthread_mutex_lock(&e->mutex);
             if (reply->status == STRAPPY_IPC_OK) {

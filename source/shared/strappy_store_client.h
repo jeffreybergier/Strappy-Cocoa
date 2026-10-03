@@ -22,5 +22,8 @@ int strappy_store_client_request_key(char key[65]);
 #include "cJSON.h"
 /* One-shot mutations are never retried implicitly after a lost acknowledgment. */
 char *strappy_store_client_mutation(unsigned int operation, const cJSON *command, unsigned int *status);
+/* Worker-only: submit once, then poll public job status. NOT_READY means unknown
+ * outcome, including daemon restart; never resubmit the mutation automatically. */
+char *strappy_store_client_credential(const cJSON *command, unsigned int *status);
 void strappy_store_client_work_status(unsigned int *active, unsigned int *last, unsigned int *result);
 #endif

@@ -1,6 +1,9 @@
 # Recovery and lifecycle
 
-IPC v6 adds larger bounded prompt submissions to daemon-owned authorization;
+IPC v7 adds transient per-account credential jobs with query-only recovery after
+an uncertain acknowledgment. Restarted or evicted jobs report unknown; no
+credential mutation is automatically replayed. The larger bounded prompt
+submissions introduced in v6 retain durable retry keys;
 reader ABI 2 and SQLite
 `user_version=1` are unchanged.
 No schema migration is added.

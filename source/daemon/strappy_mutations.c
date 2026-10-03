@@ -116,9 +116,6 @@ int strappy_mutation(const char *db, const char *resources, const cJSON *c, char
         ok = strappy_db_archive_manual_model(db,id,strappy_command_text(c,"wire"),&error);
     } else if (!strcmp(action,"create_account")) {
         ok = strappy_db_create_provider_account(db,id,strappy_command_text(c,"name"),NULL,result,&error);
-    } else if (!strcmp(action,"update_account") || !strcmp(action,"archive_account") ||
-               !strcmp(action,"delete_oauth") || !strcmp(action,"refresh_oauth")) {
-        ok = strappy_service_account_command(db,c,result);
     }
     /* Return only stable status codes; provider and Keychain diagnostics may contain secrets. */
     free(error);

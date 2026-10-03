@@ -114,6 +114,9 @@ NSString * const StrappySessionModelCatalogRefreshDidFinishNotification =
   @"StrappySessionModelCatalogRefreshDidFinishNotification";
 NSString * const StrappySessionModelCatalogDidChangeNotification =
   @"StrappySessionModelCatalogDidChangeNotification";
+NSString * const StrappyCredentialStatusDidChangeNotification = @"StrappyCredentialStatusDidChangeNotification";
+static NSMutableDictionary *StrappyCredentialCache, *StrappyCredentialPending;
+static NSUInteger StrappyCredentialGeneration;
 NSString * const StrappyProviderAccountsDidChangeNotification =
   @"StrappyProviderAccountsDidChangeNotification";
 NSString * const StrappySessionChangeKindKey = @"change_kind";
@@ -665,7 +668,15 @@ static NSString *StrappyServiceCommand(unsigned int operation, NSDictionary *val
   NSString *text;
   while ((key = [keys nextObject]) != nil)
     cJSON_AddStringToObject(command,[key UTF8String],[[[values objectForKey:key] description] UTF8String]);
-  result = strappy_store_client_mutation(operation,command,&status);
+  NSString *action = [values objectForKey:@"action"];
+  BOOL credential = [action isEqualToString:@"credential_status"] ||
+    [action isEqualToString:@"update_account"] || [action isEqualToString:@"archive_account"] ||
+    [action isEqualToString:@"delete_oauth"] || [action isEqualToString:@"refresh_oauth"];
+  NSCAssert(!credential || ![NSThread XP_isMainThread], @"Credential jobs must wait off the main thread");
+  result = credential ? strappy_store_client_credential(command,&status) :
+    strappy_store_client_mutation(operation,command,&status);
+  { cJSON *item; for (item=command->child; item; item=item->next)
+      if (item->valuestring) memset(item->valuestring,0,strlen(item->valuestring)); }
   cJSON_Delete(command);
   text = result ? [NSString stringWithUTF8String:result] : nil;
   free(result);
@@ -771,6 +782,7 @@ static void StrappyStoreChanged(unsigned int topics)
     [StrappyAsync postNotificationName:StrappySessionDidUpdateNotification object:nil];
   }
   if (topics & STRAPPY_STORE_CATALOG) {
+    @synchronized(self) { ++StrappyCredentialGeneration; [StrappyCredentialCache removeAllObjects]; }
     [StrappyAsync postNotificationName:StrappyProviderAccountsDidChangeNotification object:nil];
     [StrappyAsync postNotificationName:StrappySessionModelCatalogDidChangeNotification object:nil];
     [StrappyAsync postNotificationName:FileScannerDatabaseCatalogDidChangeNotification object:nil];
@@ -1804,6 +1816,7 @@ static void StrappyStoreChanged(unsigned int topics)
   if (error) *error = nil;
   NSString *action = @"auth_start";
   BOOL displayedCode = NO;
+  NSUInteger missedReplies = 0;
   if (![identifier length] || observer == nil || key == nil) return nil;
   for (;;) {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
@@ -1812,6 +1825,7 @@ static void StrappyStoreChanged(unsigned int topics)
     cJSON *snapshot;
     const cJSON *state, *url, *code, *account;
     BOOL cancelled = [observer strappyChatGPTAuthorizationShouldCancelWithContext:operationContext];
+    if (error) *error = nil;
     reply = StrappyServiceCommand(STRAPPY_IPC_AUTH,
       [NSDictionary dictionaryWithObjectsAndKeys:cancelled ? @"auth_cancel" : action,@"action",
         identifier,@"id",key,@"key",nil],error);
@@ -1829,12 +1843,14 @@ static void StrappyStoreChanged(unsigned int topics)
     }
     if (!cancelled && cJSON_IsString(state) && !strcmp(state->valuestring,"signed_in") && cJSON_IsString(account))
       identity = [[NSString alloc] initWithUTF8String:account->valuestring];
-    BOOL finished = cancelled || !cJSON_IsString(state) || identity != nil ||
-      !strcmp(state->valuestring,"failed") || !strcmp(state->valuestring,"cancelled");
+    if (cJSON_IsString(state)) missedReplies = 0; else ++missedReplies;
+    BOOL unknown = (cJSON_IsString(state) && !strcmp(state->valuestring,"unknown")) || missedReplies >= 3;
+    BOOL refused = reply == nil && error && *error && [*error code] != STRAPPY_IPC_NOT_READY;
+    BOOL finished = cancelled || unknown || refused || identity != nil ||
+      (cJSON_IsString(state) && (!strcmp(state->valuestring,"failed") || !strcmp(state->valuestring,"cancelled")));
+    if (unknown && error) *error = [self errorFromCString:
+      "The service lost the sign-in status. Check credential state before starting another sign-in."];
     cJSON_Delete(snapshot);
-    if (finished && identity == nil && !cancelled)
-      (void)StrappyServiceCommand(STRAPPY_IPC_AUTH,[NSDictionary dictionaryWithObjectsAndKeys:
-        @"auth_cancel",@"action",identifier,@"id",key,@"key",nil],NULL);
     if (finished && !identity && error != NULL && *error == nil)
       *error = [self errorFromCString:cancelled ? "ChatGPT sign-in cancelled." : "ChatGPT sign-in failed."];
     NSError *retainedError = error ? [*error retain] : nil;
@@ -2059,7 +2075,7 @@ static void StrappyStoreChanged(unsigned int topics)
     NSString *responsesEndpoint;
     unsigned int missingFields;
     BOOL available;
-    BOOL hasCredential;
+    BOOL hasCredential, credentialKnown, credentialUnavailable = NO;
 
     account = [StrappySession dictionaryFromProviderAccountRecord:
       &list.records[index]];
@@ -2073,25 +2089,29 @@ static void StrappyStoreChanged(unsigned int topics)
       hasCredential = (definition != NULL) &&
         (definition->credential_kind ==
           STRAPPY_PROVIDER_CREDENTIAL_OPTIONAL_BEARER);
+      credentialKnown = hasCredential;
       if ((definition != NULL) && !hasCredential) {
         NSDictionary *status = [self credentialStatusForProviderAccountIdentifier:accountIdentifier error:NULL];
+        credentialKnown = [status objectForKey:@"present"] != nil;
+        credentialUnavailable = [[status objectForKey:@"unavailable"] boolValue];
         hasCredential = [[status objectForKey:@"present"] boolValue];
       }
       missingFields = strappy_provider_account_missing_required_fields(
         definition,
         [[account objectForKey:@"name"] UTF8String],
         [responsesEndpoint UTF8String],
-        hasCredential ? 1 : 0);
+        (hasCredential || !credentialKnown) ? 1 : 0);
       if ((missingFields & STRAPPY_PROVIDER_ACCOUNT_MISSING_ENDPOINT) != 0U) {
         available = NO;
       }
       if (verifyCredentials &&
-          ((missingFields &
-            STRAPPY_PROVIDER_ACCOUNT_MISSING_CREDENTIAL) != 0U)) {
+          (!credentialKnown || (missingFields & STRAPPY_PROVIDER_ACCOUNT_MISSING_CREDENTIAL) != 0U)) {
         available = NO;
       }
       availableAccount = [[account mutableCopy] autorelease];
       [availableAccount setObject:[NSNumber numberWithBool:hasCredential] forKey:@"has_credential"];
+      [availableAccount setObject:[NSNumber numberWithBool:credentialKnown] forKey:@"credential_status_known"];
+      [availableAccount setObject:[NSNumber numberWithBool:credentialUnavailable] forKey:@"credential_status_unavailable"];
       [availableAccount setObject:[NSNumber numberWithBool:available]
                            forKey:@"available"];
       [availableAccount setObject:[NSNumber numberWithUnsignedInt:missingFields]
@@ -2186,8 +2206,7 @@ static void StrappyStoreChanged(unsigned int topics)
     nil],error) != nil;
 }
 
-+ (NSDictionary *)credentialStatusForProviderAccountIdentifier:(NSString *)identifier
-                                                         error:(NSError **)error
++ (NSDictionary *)loadCredentialStatus:(NSString *)identifier error:(NSError **)error
 {
   NSString *reply = StrappyServiceCommand(STRAPPY_IPC_AUTH,
     [NSDictionary dictionaryWithObjectsAndKeys:@"credential_status",@"action",
@@ -2204,6 +2223,48 @@ static void StrappyStoreChanged(unsigned int topics)
       [NSNumber numberWithBool:cJSON_IsTrue(refresh) ? YES : NO],@"needs_refresh",nil];
   cJSON_Delete(snapshot);
   return result;
+}
+
++ (void)fetchCredentialStatus:(NSDictionary *)request
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  NSString *identifier = [request objectForKey:@"id"];
+  NSDictionary *status = [self loadCredentialStatus:identifier error:NULL];
+  if (!status) status = [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES] forKey:@"unavailable"];
+  BOOL current;
+  @synchronized(self) {
+    current = [[request objectForKey:@"generation"] XP_unsignedIntegerValue] == StrappyCredentialGeneration;
+    [StrappyCredentialPending removeObjectForKey:identifier];
+    if (current) [StrappyCredentialCache setObject:[NSDictionary dictionaryWithObjectsAndKeys:
+      status,@"status",[NSDate date],@"date",nil] forKey:identifier];
+  }
+  /* Invalidation during a read discards it. The notification causes observers
+   * to request a fresh snapshot, never publish an older credential state. */
+  [StrappyAsync postNotificationName:StrappyCredentialStatusDidChangeNotification object:identifier];
+  [StrappyAsync postNotificationName:StrappyProviderAccountsDidChangeNotification object:nil];
+  [pool drain];
+}
++ (NSDictionary *)credentialStatusForProviderAccountIdentifier:(NSString *)identifier error:(NSError **)error
+{
+  NSDictionary *entry, *request = nil, *status;
+  if (error) *error = nil;
+  if (![identifier length]) return nil;
+  @synchronized(self) {
+    if (!StrappyCredentialCache) {
+      StrappyCredentialCache = [[NSMutableDictionary alloc] init];
+      StrappyCredentialPending = [[NSMutableDictionary alloc] init];
+    }
+    entry = [StrappyCredentialCache objectForKey:identifier];
+    status = [[[entry objectForKey:@"status"] retain] autorelease];
+    if ((!entry || -[[entry objectForKey:@"date"] timeIntervalSinceNow] > 60.0) &&
+        ![StrappyCredentialPending objectForKey:identifier]) {
+      request = [NSDictionary dictionaryWithObjectsAndKeys:identifier,@"id",
+        [NSNumber XP_numberWithUnsignedInteger:StrappyCredentialGeneration],@"generation",nil];
+      [StrappyCredentialPending setObject:request forKey:identifier];
+    }
+  }
+  if (request) [NSThread detachNewThreadSelector:@selector(fetchCredentialStatus:) toTarget:self withObject:request];
+  return status;
 }
 
 + (BOOL)updateProviderAccountIdentifier:(NSString *)providerAccountIdentifier

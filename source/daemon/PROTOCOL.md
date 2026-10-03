@@ -1,4 +1,4 @@
-# Strappy local service protocol v6
+# Strappy local service protocol v7
 
 The daemon runs the C Responses runtime, scans, study, catalog refresh and
 shared mutations. GUI clients read history, run state and catalogs from SQLite.
@@ -35,7 +35,7 @@ A frame is a 24-byte header followed by exactly `length` payload bytes:
 | Offset | Width | Field |
 | --- | --- | --- |
 | 0 | 4 | ASCII `STPY` |
-| 4 | 2 | Protocol version, currently 6 |
+| 4 | 2 | Protocol version, currently 7 |
 | 6 | 2 | Kind: request 1, reply 2, event 3 |
 | 8 | 4 | Operation |
 | 12 | 4 | Request ID; zero only for unsolicited events |
@@ -66,7 +66,7 @@ Transport request IDs are connection-local. Submission retry identities are
 separate 256-bit keys persisted with the work before acceptance, as below.
 
 Malformed magic/kind/oversized frames cause immediate disconnect. Unsupported
-header versions receive a v6 incompatible-version reply then disconnect. Invalid
+header versions receive a v7 incompatible-version reply then disconnect. Invalid
 request kind, nonzero request status, or zero request ID similarly produce an
 invalid-request reply then disconnect. The server handles partial reads/writes
 and multiple frames on one stream. Each client has one bounded input frame and
@@ -154,10 +154,8 @@ Reply/state and prompt/session retry-key conflict semantics match operation 16.
 On a retry of an accepted key, captured settings are not reapplied, even if the
 retry's settings differ. The original committed run remains authoritative.
 
-`refresh_credentials` (29): the same string-valued `refresh_oauth` JSON command
-as the mutation boundary, with its normal result/status. Other actions are
-rejected. The UI sends it on an independent connection; its worker does not
-acquire the short-command control lock. The bounded reply timeout is 120 seconds.
+`refresh_credentials` (29) is retired and returns invalid. Refresh now uses
+operation 30 credential jobs, like other potentially blocking account operations.
 
 `cancel_run` (17): u64 session ID followed by u64 run ID. The run must be the
 session's latest run, protecting a newer prompt from a stale cancel. Success has
@@ -224,8 +222,8 @@ and reads catalog snapshots; it no longer performs scanning in the UI.
 Short metadata/acceptance commands and their completions run inline on the GUI
 main thread, including the socket send/receive. A permanent caller-owned control
 connection preserves their FIFO order. Background callers have independent
-connections and cannot hold a client-side control lock. OAuth refresh is called by
-the authentication background thread. No metadata command is automatically
+connections and cannot hold a client-side control lock. Credential operations
+use daemon jobs with background status polling. No metadata command is automatically
 retried after a lost reply. See [ASYNC_UI.md](ASYNC_UI.md) for completion and
 app-wide asynchronous error delivery.
 
@@ -242,7 +240,7 @@ strappyd --ipc-probe /absolute/private/directory/service.sock
 See `VALIDATION.md` for observed platforms and limitations. The probe does not
 connect to providers or access application data.
 
-## Step 4 command payloads (IPC v6, reader ABI 2)
+## Step 4 command payloads (IPC v7, reader ABI 2)
 
 Operations 18–25 and 27 accept bounded UTF-8 JSON objects with string values only.
 JSON is transient wire serialization, never a database document. Integer fields
@@ -283,39 +281,52 @@ Operation 25 actions:
   `price_read`, `price_write`. `archive_model`: provider `id`, `wire`.
 - `delete_study`: assistant database `id`; `reset_study`: no other fields.
 - `include_context`: `session`, model request `id`, `value` (0/1).
-- `refresh_oauth`: account `id`, expected `identity`; `delete_oauth`: `id`.
+- Credential actions (`update_account`, `archive_account`, `refresh_oauth`,
+  `delete_oauth`) require operation 30 jobs; they are rejected on the ordinary
+  mutation operation.
   `save_oauth` is an internal service operation and is rejected over IPC.
 
 Only prompt submission is automatically retried by the client. A lost mutation
 acknowledgment requires reading committed state before an explicit retry.
 
-## Authentication (v5)
+## Authentication and credential jobs (v7)
 
-Operation `auth` (30) accepts the same bounded, string-valued command objects.
-It uses a connection command worker independently of the metadata control lock.
-Version 5 requires a matching app/service pair; the store ABI and SQLite
-`user_version` are unchanged.
+Operation `auth` (30) uses bounded string-valued command objects on independent
+connection workers, outside the metadata control lock. Version 7 requires a
+matching app/service pair; reader ABI 2 and SQLite `user_version` 1 are unchanged.
 
-- `credential_status`: account `id`. Returns an object with `present` and
-  `needs_refresh` booleans and an `identity` display string. It performs no
-  provider request and never returns a saved token.
-- `auth_start`: account `id` and 64-character lowercase hexadecimal `key`.
-  Validates an active ChatGPT account before starting a service-owned worker.
-  At most sixteen retained jobs exist, with one unfinished job per account.
-  A repeated retained key resolves to the same job; a different account using
-  that key conflicts. A new key for a busy account is refused.
-- `auth_status` / `auth_cancel`: the same account `id` and `key`. Replies contain
-  `state`, `url`, `code`, and `identity`. States are `requesting_code`,
-  `awaiting_user`, `signed_in`, `failed`, and `cancelled`. Only the public
-  verification URL/code and final display identity cross IPC. Device IDs and
-  access/refresh tokens remain in daemon memory/Keychain.
+- `auth_start`: active ChatGPT account `id` and 64-character lowercase hexadecimal
+  `key`. Starts device authorization; a retained key resolves to the same job,
+  and another account using that key conflicts. A new login is refused while
+  that account has unfinished jobs.
+- `credential_start`: active account `id`, opaque `key`, `credential_action`,
+  and the action's fields. Actions are `credential_status`, `update_account`,
+  `refresh_oauth`, `delete_oauth`, and `archive_account`. Account updates use the
+  existing `name`, `endpoint`, `output`, optional `token` fields; refresh uses
+  expected `identity`. Other actions require only the account. Reusing a retained
+  credential-start key returns conflict; clients submit once and only poll.
+- `auth_status`: account `id` and `key`. A missing key returns `state: unknown`.
+  It must never be interpreted as permission to replay a mutation.
+- `auth_cancel`: cancels a device authorization job. Credential mutations cannot
+  be cancelled after acceptance; status is returned without changing their work.
 
-Start returns before network authorization completes. The app's background
-presentation worker polls status every 250 ms while sign-in is open and sends
-cancel when dismissed. Transport failure attempts cancellation with the same
-key. Sign-out and account archival cancel jobs before removing credentials;
-credential commits serialize with cancellation so a cancelled job cannot save
-late credentials. Daemon shutdown cancels and joins authorization workers.
-Jobs are bounded, transient service state: terminal slots can be reused, restart
-forgets them, and no authorization is automatically replayed. Existing provider
-polling/HTTP deadlines bound work if the UI disappears without cancelling.
+Snapshots contain `state`, public `url`, `code`, `identity`, and `result` strings.
+Login states are `requesting_code`, `awaiting_user`, `signed_in`, `failed`, and
+`cancelled`. Credential states are `queued`, `running`, `completed`, and `failed`.
+On completion, `result` is empty for mutations, a display identity for refresh,
+or a JSON-encoded public object (`present`, `identity`, `needs_refresh`) for
+credential status. It never contains access, refresh, bearer or device tokens.
+No secrets or raw job payloads are persisted to SQLite.
+
+Acceptance returns before Keychain/network work. Clients query status after an
+uncertain acceptance reply without resending the action. At most 64 jobs are
+retained; completed slots are evicted oldest-first. Restart forgets all jobs.
+Unknown outcomes require checking current stored state before an explicit retry.
+
+Credential jobs run FIFO per account. Login commit and credential jobs share an
+account lock; global authentication/control locks never span Keychain or network
+work. Sign-out/archival acceptance cancels pending login. A save already in
+progress finishes before the queued deletion; a cancelled login waiting to save
+cannot restore credentials afterward. Prompt refresh retains the same underlying
+Keychain account lock. Shutdown cancels authorization, wakes queued jobs, and
+joins all workers before releasing their shared state.
