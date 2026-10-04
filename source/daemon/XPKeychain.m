@@ -5,6 +5,7 @@
 
 #include <string.h>
 #include <limits.h>
+#include <syslog.h>
 
 #ifndef errSecSuccess
 #define errSecSuccess 0
@@ -830,6 +831,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
     return YES;
   }
   if ((status != errSecSuccess) || (item == NULL)) {
+    syslog(LOG_ERR, "Strappy Keychain: delete lookup status=%d", (int)status);
     if (!xpkc_background) NSLog(@"XPKeychain.deleteGenericPassword find status=%d service=%@ account=%@",
           (int)status,
           service,
@@ -839,6 +841,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
   status = SecKeychainItemDelete(item);
   CFRelease(item);
   if (status != errSecSuccess) {
+    syslog(LOG_ERR, "Strappy Keychain: delete status=%d", (int)status);
     if (!xpkc_background) NSLog(@"XPKeychain.deleteGenericPassword delete status=%d service=%@ account=%@",
           (int)status,
           service,
@@ -932,6 +935,7 @@ static NSString *xpkc_macReadURLForItem(SecKeychainItemRef item)
     }
   }
   if (status != errSecSuccess) {
+    syslog(LOG_ERR, "Strappy Keychain: write status=%d", (int)status);
     if (!xpkc_background) NSLog(@"XPKeychain.setGenericPasswordData status=%d service=%@ account=%@",
           (int)status,
           service,

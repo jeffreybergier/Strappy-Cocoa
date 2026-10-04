@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 
 #define STRAPPY_AUTH_JOBS 64
 struct strappy_auth_lane {
@@ -132,7 +133,8 @@ static void *strappy_auth_work(void *context)
     strappy_openai_oauth_device device;
     strappy_openai_oauth_credentials credentials;
     char *error = NULL, *ignored = NULL;
-    int ok;
+    const char *phase = "request_code";
+    int ok, cancelled;
     void *pool = strappy_service_worker_enter();
     strappy_openai_oauth_default_configuration(&configuration);
     strappy_openai_oauth_device_init(&device);
@@ -147,8 +149,12 @@ static void *strappy_auth_work(void *context)
         if (ok) job->state = "awaiting_user";
     } else ok = 0;
     pthread_mutex_unlock(&auth->mutex);
-    if (ok) ok = strappy_openai_oauth_complete_device_authorization(&configuration,
-        &device, &credentials, strappy_auth_cancelled, job, &error);
+    if (ok) {
+        syslog(LOG_NOTICE, "Strappy OAuth: verification code issued");
+        phase = "poll_or_exchange";
+        ok = strappy_openai_oauth_complete_device_authorization(&configuration,
+            &device, &credentials, strappy_auth_cancelled, job, &error);
+    }
     /* A sign-out accepted before this lock/check cancels the save. If the save
      * has already started, deletion waits on this account's lock and runs last. */
     pthread_mutex_lock(&job->lane->mutex);
@@ -156,6 +162,7 @@ static void *strappy_auth_work(void *context)
     ok = ok && !job->cancelled && !auth->stopping;
     pthread_mutex_unlock(&auth->mutex);
     if (ok) {
+        phase = "save_credentials";
         cJSON *command = cJSON_CreateObject();
         char expiry[32];
         snprintf(expiry,sizeof(expiry),"%lld",credentials.expires_at_milliseconds);
@@ -172,10 +179,20 @@ static void *strappy_auth_work(void *context)
     }
     pthread_mutex_unlock(&job->lane->mutex);
     pthread_mutex_lock(&auth->mutex);
-    job->state = job->cancelled || auth->stopping ? "cancelled" : (ok ? "signed_in" : "failed");
-    if (ok && !job->cancelled && !auth->stopping)
+    cancelled = job->cancelled || auth->stopping;
+    job->state = cancelled ? "cancelled" : (ok ? "signed_in" : "failed");
+    if (ok && !cancelled)
         job->identity=strappy_string_duplicate(credentials.account_id);
     pthread_mutex_unlock(&auth->mutex);
+    if (cancelled)
+        syslog(LOG_NOTICE, "Strappy OAuth: device flow cancelled");
+    else if (ok)
+        syslog(LOG_NOTICE, "Strappy OAuth: credentials stored");
+    else if (strcmp(phase,"save_credentials") == 0)
+        syslog(LOG_ERR, "Strappy OAuth: credential save failed");
+    else
+        syslog(LOG_ERR, "Strappy OAuth: %s failed: %s", phase,
+            error ? error : "unknown error");
     free(error); free(ignored);
     strappy_openai_oauth_credentials_destroy(&credentials);
     strappy_openai_oauth_device_destroy(&device);
@@ -276,6 +293,7 @@ unsigned int strappy_auth_command(strappy_auth *auth, const cJSON *command, char
     }
     if (!strcmp(action,"auth_cancel") && !job->credential) {
         job->cancelled = 1; job->state = "cancelled";
+        syslog(LOG_NOTICE, "Strappy OAuth: UI requested cancellation");
         free(job->identity); job->identity = NULL;
     }
     snapshot = cJSON_CreateObject();
