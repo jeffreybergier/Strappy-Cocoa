@@ -1,8 +1,6 @@
 include ../daemon/store.mk
 STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
-# Altivec Intelligence - Strappy (iPhone)
-APP_NAME = Strappy
-SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
+GROUP_ui_SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
           StrappyAuthentication.m \
           StrappyAccountTableViewController.m \
           StrappyAppearance.m \
@@ -42,185 +40,45 @@ SHARED_RESOURCES = $(SYSTEM_PROMPT_RESOURCE) \
                    $(SHARED_DIR)/Resources/GuidanceSkills.json \
                    $(SHARED_DIR)/Resources/GuidanceDatabase.json \
                    $(FONTAWESOME_ICONS_RESOURCE)
-ALTIVECCORE_REQUIRED = 1
-ALTIVECCOCOA_REQUIRED = 1
 SOURCE_DIRS = $(SHARED_DIR) $(SHARED_DIR)/XPFoundation
-vpath %.m $(SHARED_DIR)
 EXTRA_FLAGS = -DSTRAPPY_DB_UI=1 -I$(SHARED_DIR)
-EXTRA_SOURCES = strappy_run.c strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyAsync.m StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_study.c strappy_webview.c strappy_options.c strappy_tool_metadata.c
-PHONE_SOURCE_FLAGS = -fobjc-arc
+GROUP_shared_SOURCES = strappy_run.c strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyAsync.m StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_study.c strappy_webview.c strappy_options.c strappy_tool_metadata.c
 LIBS_IPHONE = -framework QuartzCore -weak_framework WebKit
-PHONE_LDID_SIGN ?= 1
-PHONE_LDID_ENTITLEMENTS ?= Entitlements.plist
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
-EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying shared resources"; for resource in $(SHARED_RESOURCES); do cp "$$resource" "$@/"; done
 
-DEB_PACKAGE_ID ?= com.altivecintelligence.strappy
-# Keep package metadata aligned with the plist versions managed by the release
-# helper. Rootful and rootless packages use different installation prefixes,
-# while sharing the same universal armv7/arm64 app and architecture-independent
-# package metadata.
-DEB_VERSION ?= $(shell altivec-release current)
-DEB_UNIVERSAL_ARCH ?= all
-DEB_SECTION ?= Applications
-DEB_PRIORITY ?= optional
-DEB_MAINTAINER ?= Altivec Intelligence <support@altivecintelligence.com>
-DEB_DESCRIPTION ?= OpenRouter assistant for jailbroken iOS devices.
-DEB_COMPRESSION ?= gzip
-DEB_APP_PROCESS ?= $(APP_NAME)
-DEB_STAGE = $(INT_DIR)/deb-$(DEB_VARIANT)
-DEB_APP_DIR = $(DEB_STAGE)$(DEB_INSTALL_PREFIX)/Applications
-PHONE_DEB_ROOTFUL = $(BUILD_DIR)/$(APP_NAME)-rootful.deb
-PHONE_DEB_ROOTLESS = $(BUILD_DIR)/$(APP_NAME)-rootless.deb
-PHONE_DEBS = $(PHONE_DEB_ROOTFUL) $(PHONE_DEB_ROOTLESS)
-
-VALIDATE_PATHS = . $(SHARED_DIR)
-
-# The common Phone engine also exposes IPA packaging targets. Keep that engine
-# private so Strappy's public build targets only produce Debian packages.
-ifeq ($(STRAPPY_PHONE_INTERNAL_BUILD),1)
+PROJECT_ROOT := $(abspath ../..)
+PRODUCTS = Strappy strappyd
+Strappy_TYPE = app
+Strappy_GROUPS = ui shared
+Strappy_PLIST = $(INFO_PLIST)
+Strappy_FLAGS = $(EXTRA_FLAGS)
+Strappy_RESOURCES = $(filter-out Resources/Info.plist,$(wildcard Resources/*)) $(SHARED_RESOURCES)
+Strappy_LOCALIZATIONS = $(BUNDLE_LOCALIZATION_DIRS)
+Strappy_GENERATED = $(FONTAWESOME_GENERATED)
+Strappy_COCOA = static
+strappyd_TYPE = daemon
+strappyd_SOURCES = ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES)
+strappyd_CORE = static
+strappyd_FLAGS = -DSTRAPPY_DB_WRITER=1 -I../shared -I../daemon
+strappyd_GENERATED = $(FONTAWESOME_GENERATED)
+strappyd_LDFLAGS = -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration
+GENERATORS = fontawesome
+GEN_fontawesome_OUTPUT = $(FONTAWESOME_GENERATED)
+GEN_fontawesome_INPUTS = $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
+GEN_fontawesome_COMMAND = python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
+Strappy_CORE = static
+GROUP_ui_MEMORY = arc
+Strappy_LDFLAGS = -framework UIKit -framework Foundation -framework CoreGraphics $(LIBS_IPHONE)
+Strappy_ENTITLEMENTS = Entitlements.plist
+Strappy_SANDBOX = unsandboxed
+strappyd_ENTITLEMENTS = daemon/Entitlements.plist
+Strappy_INSTALL = strappyd
+Strappy_PACKAGES = deb-rootful deb-rootless
+Strappy_PACKAGE_ARCH = all
+Strappy_PACKAGE_ID = com.altivecintelligence.strappy
+Strappy_VERSION := $(shell altivec-release current)
+Strappy_LAUNCHD = daemon/com.altivecintelligence.strappyd.plist.in
+Strappy_PACKAGE_SCRIPTS = daemon/preinst.in daemon/prerm.in daemon/postinst.in
+Strappy_LIFECYCLE = daemon/lifecycle.sh.in
 ALTIVEC_ROOT ?= /altivec
 include $(ALTIVEC_ROOT)/altivec_common_phone.mk
-
-$(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
-	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
-
-.DEFAULT_GOAL := __deb
-
-__deb: validate
-	@set -e; configured_version="$$(altivec-release current)"; \
-	if [ "$(DEB_VERSION)" != "$$configured_version" ]; then \
-	  echo " [!] ERROR: Debian version $(DEB_VERSION) does not match configured app version $$configured_version"; \
-	  exit 1; \
-	fi
-	@echo "--- Building Phone $(DEB_BUILD_LABEL) Debian Packages ($(OPT_FLAGS)) ---"
-	@$(MAKE) --no-print-directory $(PHONE_DEBS) BUILD_DIR=$(BUILD_DIR) OPT_FLAGS=$(OPT_FLAGS)
-
-$(PHONE_DEB_ROOTFUL): DEB_VARIANT = rootful
-$(PHONE_DEB_ROOTFUL): DEB_ARCH = $(DEB_UNIVERSAL_ARCH)
-$(PHONE_DEB_ROOTFUL): DEB_INSTALL_PREFIX =
-$(PHONE_DEB_ROOTLESS): DEB_VARIANT = rootless
-$(PHONE_DEB_ROOTLESS): DEB_ARCH = $(DEB_UNIVERSAL_ARCH)
-$(PHONE_DEB_ROOTLESS): DEB_INSTALL_PREFIX = /var/jb
-
-STRAPPY_DAEMON = $(INT_DIR)/strappyd
-STRAPPY_DAEMON_INPUTS = ../daemon/strappyd.c daemon/Entitlements.plist daemon/com.altivecintelligence.strappyd.plist.in daemon/lifecycle.sh.in
-
-$(STRAPPY_DAEMON): ../daemon/strappyd.c daemon/Entitlements.plist $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
-	@mkdir -p "$(INT_DIR)"
-	@export PATH=$(BIN_DIR):$(PATH); $(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) -I../daemon -USTRAPPY_DB_UI -DSTRAPPY_DB_WRITER=1 $(ALTIVECCORE_DIR)/lib/libAltivecCore.a -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration -o $@
-	@$(PHONE_LDID) -Sdaemon/Entitlements.plist $@
-
-$(PHONE_DEBS): $(APP_BUNDLE) $(STRAPPY_DAEMON) $(STRAPPY_DAEMON_INPUTS) Makefile
-	@echo " [5/5] Packaging $(DEB_VARIANT) Debian archive..."
-	@rm -rf "$(DEB_STAGE)"
-	@mkdir -p "$(DEB_STAGE)/DEBIAN" "$(DEB_APP_DIR)"
-	@cp -R "$(APP_BUNDLE)" "$(DEB_APP_DIR)/"
-	@if [ "$(PHONE_LDID_SIGN)" = "1" ] || [ -n "$(PHONE_LDID_ENTITLEMENTS)" ]; then \
-		flags="-S"; \
-		if [ -n "$(PHONE_LDID_ENTITLEMENTS)" ]; then flags="-S$(PHONE_LDID_ENTITLEMENTS)"; fi; \
-		echo "  > ldid-signing staged $(APP_NAME).app bundle"; \
-		$(PHONE_LDID) "$$flags" "$(DEB_APP_DIR)/$(APP_NAME).app"; \
-	fi
-	@mkdir -p "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/usr/libexec" "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/Library/LaunchDaemons"
-	@cp "$(STRAPPY_DAEMON)" "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/usr/libexec/strappyd"
-	@sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/com.altivecintelligence.strappyd.plist.in > "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/Library/LaunchDaemons/com.altivecintelligence.strappyd.plist"
-	@installed_size=$$(du -sk "$(DEB_STAGE)" | awk '{print $$1}'); \
-	{ \
-	  echo "Package: $(DEB_PACKAGE_ID)"; \
-	  echo "Name: $(APP_NAME)"; \
-	  echo "Version: $(DEB_VERSION)"; \
-	  echo "Architecture: $(DEB_ARCH)"; \
-	  echo "Section: $(DEB_SECTION)"; \
-	  echo "Priority: $(DEB_PRIORITY)"; \
-	  echo "Maintainer: $(DEB_MAINTAINER)"; \
-	  echo "Installed-Size: $$installed_size"; \
-	  echo "Description: $(DEB_DESCRIPTION)"; \
-	} > "$(DEB_STAGE)/DEBIAN/control"
-	@{ \
-	  echo '#!$(DEB_INSTALL_PREFIX)/bin/sh'; \
-	  echo 'export PATH=$(DEB_INSTALL_PREFIX)/usr/sbin:$(DEB_INSTALL_PREFIX)/usr/bin:$(DEB_INSTALL_PREFIX)/sbin:$(DEB_INSTALL_PREFIX)/bin:/usr/sbin:/usr/bin:/sbin:/bin'; \
-	  echo 'set -e'; \
-	  sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/lifecycle.sh.in; \
-	  echo ''; \
-	  echo 'case "$$1" in'; \
-	  echo '  install|upgrade)'; \
-	  echo '    strappy_service stop'; \
-	  echo '    if command -v killall >/dev/null 2>&1; then'; \
-	  echo '      killall $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
-	  echo '      sleep 1'; \
-	  echo '      killall -9 $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
-	  echo '    fi'; \
-	  echo '    if command -v uicache >/dev/null 2>&1 && [ -d "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" ]; then'; \
-	  echo '      su mobile -c "uicache -u $(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || uicache -u "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || true'; \
-	  echo '    fi'; \
-	  echo '    ;;'; \
-	  echo 'esac'; \
-	  echo ''; \
-	  echo 'exit 0'; \
-	} > "$(DEB_STAGE)/DEBIAN/preinst"
-	@{ \
-	  echo '#!$(DEB_INSTALL_PREFIX)/bin/sh'; \
-	  echo 'export PATH=$(DEB_INSTALL_PREFIX)/usr/sbin:$(DEB_INSTALL_PREFIX)/usr/bin:$(DEB_INSTALL_PREFIX)/sbin:$(DEB_INSTALL_PREFIX)/bin:/usr/sbin:/usr/bin:/sbin:/bin'; \
-	  echo 'set -e'; \
-	  sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/lifecycle.sh.in; \
-	  echo ''; \
-	  echo 'case "$$1" in'; \
-	  echo '  remove|upgrade|deconfigure)'; \
-	  echo '    strappy_service stop'; \
-	  echo '    if command -v killall >/dev/null 2>&1; then'; \
-	  echo '      killall $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
-	  echo '      sleep 1'; \
-	  echo '      killall -9 $(DEB_APP_PROCESS) >/dev/null 2>&1 || true'; \
-	  echo '    fi'; \
-	  echo '    if [ "$$1" != upgrade ] && command -v uicache >/dev/null 2>&1 && [ -d "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" ]; then'; \
-	  echo '      su mobile -c "uicache -u $(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || uicache -u "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || true'; \
-	  echo '    fi'; \
-	  echo '    ;;'; \
-	  echo 'esac'; \
-	  echo ''; \
-	  echo 'exit 0'; \
-	} > "$(DEB_STAGE)/DEBIAN/prerm"
-	@{ \
-	  echo '#!$(DEB_INSTALL_PREFIX)/bin/sh'; \
-	  echo 'export PATH=$(DEB_INSTALL_PREFIX)/usr/sbin:$(DEB_INSTALL_PREFIX)/usr/bin:$(DEB_INSTALL_PREFIX)/sbin:$(DEB_INSTALL_PREFIX)/bin:/usr/sbin:/usr/bin:/sbin:/bin'; \
-	  echo 'set -e'; \
-	  sed 's|@PREFIX@|$(DEB_INSTALL_PREFIX)|g' daemon/lifecycle.sh.in; \
-	  echo ''; \
-	  echo 'case "$$1" in'; \
-	  echo '  configure)'; \
-	  echo '    strappy_service start'; \
-	  echo '    if command -v uicache >/dev/null 2>&1; then'; \
-	  echo '      su mobile -c "uicache -p $(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || uicache -p "$(DEB_INSTALL_PREFIX)/Applications/$(APP_NAME).app" >/dev/null 2>&1 || su mobile -c uicache >/dev/null 2>&1 || uicache >/dev/null 2>&1 || true'; \
-	  echo '    fi'; \
-	  echo '    ;;'; \
-	  echo 'esac'; \
-	  echo ''; \
-	  echo 'exit 0'; \
-	} > "$(DEB_STAGE)/DEBIAN/postinst"
-	@find "$(DEB_STAGE)" -type d -exec chmod 0755 {} \;
-	@find "$(DEB_STAGE)" -type f -exec chmod 0644 {} \;
-	@chmod 0755 "$(DEB_STAGE)/DEBIAN/preinst" "$(DEB_STAGE)/DEBIAN/prerm" "$(DEB_STAGE)/DEBIAN/postinst"
-	@chmod 0755 "$(DEB_APP_DIR)/$(APP_NAME).app/$(APP_NAME)" "$(DEB_STAGE)$(DEB_INSTALL_PREFIX)/usr/libexec/strappyd"
-	@fakeroot sh -c 'chown -R 0:0 "$$1" && dpkg-deb -Z"$$3" --build "$$1" "$$2"' sh "$(DEB_STAGE)" "$@" "$(DEB_COMPRESSION)"
-
-.PHONY: __deb
-
-else
-
-.DEFAULT_GOAL := release
-
-release:
-	@$(MAKE) --no-print-directory STRAPPY_PHONE_INTERNAL_BUILD=1 __deb \
-		BUILD_DIR=build-release OPT_FLAGS=-O3 DEB_BUILD_LABEL=Release
-
-debug:
-	@$(MAKE) --no-print-directory STRAPPY_PHONE_INTERNAL_BUILD=1 __deb \
-		BUILD_DIR=build-debug OPT_FLAGS=-O0 DEB_BUILD_LABEL=Debug
-
-clean analyze:
-	@$(MAKE) --no-print-directory STRAPPY_PHONE_INTERNAL_BUILD=1 $@
-
-.PHONY: clean debug release analyze
-
-endif

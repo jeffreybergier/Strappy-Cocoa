@@ -1,8 +1,6 @@
 include ../daemon/store.mk
 STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
-# Altivec Intelligence - Strappy (Mac)
-APP_NAME = Strappy
-SOURCES = main.m AppDelegate.m StrappyServiceController.m XPAppKit.m PreferencesWindowController.m \
+GROUP_ui_SOURCES = main.m AppDelegate.m StrappyServiceController.m XPAppKit.m PreferencesWindowController.m \
           StrappyAuthentication.m \
           StrappyPreferencesWhitelistView.m \
           StrappyPreferencesAuthenticationView.m \
@@ -38,54 +36,38 @@ SHARED_RESOURCES = $(SYSTEM_PROMPT_RESOURCE) \
                    $(SHARED_DIR)/Resources/GuidanceSkills.json \
                    $(SHARED_DIR)/Resources/GuidanceDatabase.json \
                    $(FONTAWESOME_ICONS_RESOURCE)
-ALTIVECCORE_REQUIRED = 1
-ALTIVECCORE_LINKAGE = dynamic
-ALTIVECCOCOA_REQUIRED = 1
-ALTIVECCOCOA_LINKAGE = static
 SOURCE_DIRS = $(SHARED_DIR) $(SHARED_DIR)/XPFoundation
-vpath %.m $(SHARED_DIR)
 EXTRA_FLAGS = -DSTRAPPY_DB_UI=1 -I$(SHARED_DIR) -I$(ALTIVECCORE_DIR)/include
-EXTRA_SOURCES = strappy_run.c strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyAsync.m StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_study.c strappy_webview.c strappy_options.c strappy_tool_metadata.c
+GROUP_shared_SOURCES = strappy_run.c strappy_store_client.c strappy_ipc.c strappy_ipc_platform.c StrappyAsync.m StrappyModelRows.m StrappySessionSections.m XPFoundationCalendar.m XPFoundation.m StrappySession.m FileScanner.m strappy_core.c strappy_cocoa.c strappy_calendar.c strappy_provider.c strappy_db.c strappy_db_catalog.c strappy_db_sidebar.c strappy_db_sessions.c strappy_db_responses.c strappy_session.c strappy_prompt.c strappy_quality_policy.c strappy_assistant_sets.c strappy_study.c strappy_webview.c strappy_options.c strappy_tool_metadata.c
 MAC_ICON = Resources/Strappy.icns
 BUNDLE_FONT_DIRS = $(ALTIVECCOCOA_DIR)/Resources/Fonts
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
-EXTRA_BUNDLE_STEPS = @set -e; $(MAKE) -f Makefile $(FONTAWESOME_GENERATED); echo "  > copying shared resources"; for resource in $(SHARED_RESOURCES); do cp "$$resource" "$@/Contents/Resources/"; done; mkdir -p "$@/Contents/Library/LaunchServices"; cp "$(STRAPPY_DAEMON)" "$@/Contents/Library/LaunchServices/strappyd"; cp "$(ALTIVECCORE_DIR)/lib/cacert.pem" "$@/Contents/Resources/cacert.pem"; cp "$(INFO_PLIST)" "$@/Contents/Resources/Info.plist"
 
-# Import common Mac build engine. CI mounts the toolchain at /altivec, while
-# local checkouts can override ALTIVEC_ROOT without requiring a root symlink.
+PROJECT_ROOT := $(abspath ../..)
+PRODUCTS = Strappy strappyd
+Strappy_TYPE = app
+Strappy_GROUPS = ui shared
+Strappy_PLIST = $(INFO_PLIST)
+Strappy_FLAGS = $(EXTRA_FLAGS)
+Strappy_RESOURCES = $(filter-out Resources/Info.plist,$(wildcard Resources/*)) $(SHARED_RESOURCES)
+Strappy_LOCALIZATIONS = $(BUNDLE_LOCALIZATION_DIRS)
+Strappy_GENERATED = $(FONTAWESOME_GENERATED)
+Strappy_COCOA = static
+strappyd_TYPE = daemon
+strappyd_SOURCES = ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES)
+strappyd_CORE = static
+strappyd_FLAGS = -DSTRAPPY_DB_WRITER=1 -I../shared -I../daemon
+strappyd_GENERATED = $(FONTAWESOME_GENERATED)
+strappyd_LDFLAGS = -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration
+GENERATORS = fontawesome
+GEN_fontawesome_OUTPUT = $(FONTAWESOME_GENERATED)
+GEN_fontawesome_INPUTS = $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
+GEN_fontawesome_COMMAND = python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
+Strappy_CORE = dynamic
+Strappy_EMBED = strappyd
+Strappy_LDFLAGS = -framework AppKit -lobjc
+GROUP_ui_FLAGS_x86_64 = -fblocks
+GROUP_ui_FLAGS_arm64 = -fblocks
+Strappy_RESOURCE_MAP = Info.plist=Info.plist
 ALTIVEC_ROOT ?= /altivec
 include $(ALTIVEC_ROOT)/altivec_common_mac.mk
-
-$(FONTAWESOME_GENERATED): $(FONTAWESOME_GENERATOR) $(FONTAWESOME_FONT_FILES)
-	python3 $(FONTAWESOME_GENERATOR) --font-dir "$(FONTAWESOME_FONT_DIR)" --webview-map "$(FONTAWESOME_WEBVIEW_MAP)"
-
-MAC_FLAGS += $(EXTRA_FLAGS)
-MAC_ANALYZE_SOURCE_FLAGS += -fblocks
-$(INT_DIR)/x64/XPAppKit.o $(INT_DIR)/arm/XPAppKit.o: MAC_FLAGS += -fblocks
-VALIDATE_PATHS = . $(SHARED_DIR)
-
-# Statically link Altivec libraries; use system frameworks for the credential boundary.
-STRAPPY_DAEMON = $(INT_DIR)/strappyd
-STRAPPY_DAEMON_FLAGS = $(OPT_FLAGS) -std=c99 -Wall -Wextra -DSTRAPPY_DB_WRITER=1 -I../shared -I../daemon -I$(ALTIVECCORE_DIR)/include
-$(BUNDLE): $(STRAPPY_DAEMON)
-# Directory mtimes alone do not track replaced files inside an existing bundle.
-$(ZIP_FILE): $(UNIVERSAL_BIN) $(STRAPPY_DAEMON)
-
-$(STRAPPY_DAEMON): $(INT_DIR)/strappyd-ppc $(INT_DIR)/strappyd-x86 $(INT_DIR)/strappyd-x64 $(INT_DIR)/strappyd-arm
-	$(LIPO) -create $^ -output $@
-
-$(INT_DIR)/strappyd-ppc: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
-	@mkdir -p $(INT_DIR)
-	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_PPC) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch ppc -isysroot $(SDK_MAC_OLD_PATH) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(ALTIVECCORE_DIR)/lib/libAltivecCore.a -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration -lgcc_s.10.4 -o $@
-
-$(INT_DIR)/strappyd-x86: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
-	@mkdir -p $(INT_DIR)
-	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_X86) $(STRAPPY_DAEMON_FLAGS) $(LEGACY_GCC_FLAGS) -arch i386 -isysroot $(SDK_MAC_OLD_PATH) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(ALTIVECCORE_DIR)/lib/libAltivecCore.a -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration -lgcc_s.10.4 -o $@
-
-$(INT_DIR)/strappyd-x64: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
-	@mkdir -p $(INT_DIR)
-	$(COMPILER_X64) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target x86_64-apple-macos$(MAC_MIN_MID) -isysroot $(SDK_MAC_NEW_PATH) --ld-path=$(LD64_LLD) -Wl,-platform_version,macos,$(MAC_MIN_MID),$(SDK_MAC_NEW) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(ALTIVECCORE_DIR)/lib/libAltivecCore.a -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration -o $@
-
-$(INT_DIR)/strappyd-arm: ../daemon/strappyd.c $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(STRAPPY_IPC_SOURCES) ../shared/strappy_ipc.h ../shared/XPFoundation/strappy_ipc_platform.h Makefile
-	@mkdir -p $(INT_DIR)
-	$(COMPILER_ARM) $(STRAPPY_DAEMON_FLAGS) $(CLANG_EXTRA_WARNINGS) -target arm64-apple-macos$(MAC_MIN_NEW) -isysroot $(SDK_MAC_NEW_PATH) $< $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES) $(ALTIVECCORE_DIR)/lib/libAltivecCore.a -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration -o $@

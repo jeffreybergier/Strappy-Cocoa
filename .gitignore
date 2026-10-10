@@ -21,3 +21,6 @@ __pycache__/
 
 # Mac Junk
 .DS_Store
+
+# Shared Make module outputs
+build/

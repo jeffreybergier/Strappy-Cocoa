@@ -19,16 +19,16 @@ targets:
     build:
       - make clean
       - make release
-    artifact: source/macOS/build-release/Strappy.zip
+    artifact: build/macOS/release/Strappy.zip
     asset_name: Strappy-{version}-macOS.zip
 
   - name: iOS
     workdir: source/iOS
     build:
       - make clean
-      - make release DEB_VERSION="$(altivec-release current)"
+      - make release
     artifacts:
-      - path: source/iOS/build-release/Strappy-rootful.deb
+      - path: build/iOS/release/Strappy-rootful.deb
         asset_name: Strappy-{version}-iOS-rootful.deb
-      - path: source/iOS/build-release/Strappy-rootless.deb
+      - path: build/iOS/release/Strappy-rootless.deb
         asset_name: Strappy-{version}-iOS-rootless.deb

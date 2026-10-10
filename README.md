@@ -311,9 +311,9 @@ docker compose run --rm make clean release
 
 Outputs:
 
-- `source/iOS/build-release/Strappy-rootful.deb` for rootful jailbreaks
-- `source/iOS/build-release/Strappy-rootless.deb` for rootless jailbreaks
-- `source/macOS/build-release/Strappy.zip`
+- `build/iOS/release/Strappy-rootful.deb` for rootful jailbreaks
+- `build/iOS/release/Strappy-rootless.deb` for rootless jailbreaks
+- `build/macOS/release/Strappy.zip`
 
 (Optional) Run the Linux-Based Tests for the C Backend:
 

@@ -11,7 +11,7 @@ for platform in ('iOS', 'macOS'):
     directory = source / platform
     manifest = (directory / 'Makefile').read_text().replace('\\\n', ' ')
     app_sources = []
-    for variable in ('SOURCES', 'EXTRA_SOURCES'):
+    for variable in ('GROUP_ui_SOURCES', 'GROUP_shared_SOURCES'):
         value = re.search(rf'^{variable} = (.*)$', manifest, re.M)
         assert value, variable
         app_sources += value[1].replace('\\\n', ' ').split()

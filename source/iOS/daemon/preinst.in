@@ -1,0 +1,16 @@
+#!@PREFIX@/bin/sh
+set -e
+# ALTIVEC_LIFECYCLE
+case "$1" in
+    install|upgrade)
+        strappy_service stop
+        if command -v killall >/dev/null 2>&1; then
+            killall Strappy >/dev/null 2>&1 || true
+            sleep 1
+            killall -9 Strappy >/dev/null 2>&1 || true
+        fi
+        if command -v uicache >/dev/null 2>&1 && [ -d '@PREFIX@/Applications/Strappy.app' ]; then
+            su mobile -c 'uicache -u @PREFIX@/Applications/Strappy.app' >/dev/null 2>&1 || uicache -u '@PREFIX@/Applications/Strappy.app' >/dev/null 2>&1 || true
+        fi
+        ;;
+esac
