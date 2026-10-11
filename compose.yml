@@ -1,6 +1,6 @@
 services:
   altivec:
-    image: ${ALTIVEC_IMAGE:-altivec-intelligence:local}
+    image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
     working_dir: /repo/Strappy
     environment:
       ALTIVEC_SDK_ARCHIVE_DIR: /altivec-sdk
@@ -15,7 +15,7 @@ services:
   altivec-sdk:
     profiles:
       - tools
-    image: ${ALTIVEC_IMAGE:-altivec-intelligence:local}
+    image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
     environment:
       ALTIVEC_SDK_ARCHIVE_DIR: /altivec-sdk
     volumes:
@@ -25,7 +25,7 @@ services:
     entrypoint: altivec-sdk
 
   altivec-intelligence:
-    image: ${ALTIVEC_IMAGE:-altivec-intelligence:local}
+    image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
     stdin_open: true
     tty: true
     environment:
@@ -47,7 +47,7 @@ services:
   make:
     profiles:
       - tools
-    image: ${ALTIVEC_IMAGE:-altivec-intelligence:local}
+    image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
     working_dir: /repo/Strappy
     environment:
       ALTIVEC_SDK_ARCHIVE_DIR: /altivec-sdk
