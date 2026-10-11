@@ -31,7 +31,7 @@ Package: `com.altivecintelligence.strappy` **1.1.2**, normal rootful `.deb`.
 All timestamps below are UTC from the phone. Installation used:
 
 ```sh
-scp -O build/iOS/release/Strappy-rootful.deb koolphone5:/var/tmp/strappy-step0.deb
+scp -O build/iOS/release/Strappy/Strappy-rootful.deb koolphone5:/var/tmp/strappy-step0.deb
 ssh koolphone5 'dpkg -i /var/tmp/strappy-step0.deb'
 ssh koolphone5 'launchctl list com.altivecintelligence.strappyd; cat /var/log/strappy/heartbeat.log'
 ```
@@ -185,7 +185,7 @@ No daemon C changes were needed.
 Validation commands included:
 
 ```sh
-scp -O build/iOS/release/Strappy-rootless.deb pinkphone-rsa:/var/tmp/strappy-rootless-test.deb
+scp -O build/iOS/release/Strappy/Strappy-rootless.deb pinkphone-rsa:/var/tmp/strappy-rootless-test.deb
 ssh pinkphone-rsa 'sudo -n dpkg -i /var/tmp/strappy-rootless-test.deb'
 ssh pinkphone-rsa 'sudo -n /var/jb/bin/launchctl print system/com.altivecintelligence.strappyd'
 ssh pinkphone-rsa 'cat /var/jb/var/log/strappy/heartbeat.log'
@@ -1158,7 +1158,7 @@ Native fixture reproduction (after the platform build):
 
 ```sh
 make -C source/daemon/tests build-linux/responses_harness
-source/daemon/tests/build-linux/responses_harness --incremental-fixture /tmp/incremental.sqlite
+build/tests/linux/daemon/responses_harness --incremental-fixture /tmp/incremental.sqlite
 make -C source/macOS -f ../daemon/tests/incremental_device_probe.mk ALTIVECCORE_LINKAGE=static incremental-probe
 ```
 

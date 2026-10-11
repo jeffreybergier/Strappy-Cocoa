@@ -1,3 +1,4 @@
+import os
 """Readiness gates startup, disconnects, incompatible peers, and restarts."""
 from pathlib import Path
 import select
@@ -8,7 +9,7 @@ import sys
 import tempfile
 
 daemon, monitor = [str(Path(p).resolve()) for p in sys.argv[1:]]
-resources = str(Path('build-test/daemon-resources').resolve())
+resources = str(Path(os.environ['STRAPPY_TEST_RESOURCE_DIR']).resolve())
 
 def expect(process, line):
     assert select.select([process.stdout], [], [], 8)[0], 'monitor timeout'

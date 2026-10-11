@@ -19,7 +19,7 @@ targets:
     build:
       - make clean
       - make release
-    artifact: build/macOS/release/Strappy.zip
+    artifact: build/macOS/release/Strappy/Strappy.zip
     asset_name: Strappy-{version}-macOS.zip
 
   - name: iOS
@@ -28,7 +28,7 @@ targets:
       - make clean
       - make release
     artifacts:
-      - path: build/iOS/release/Strappy-rootful.deb
+      - path: build/iOS/release/Strappy/Strappy-rootful.deb
         asset_name: Strappy-{version}-iOS-rootful.deb
-      - path: build/iOS/release/Strappy-rootless.deb
+      - path: build/iOS/release/Strappy/Strappy-rootless.deb
         asset_name: Strappy-{version}-iOS-rootless.deb

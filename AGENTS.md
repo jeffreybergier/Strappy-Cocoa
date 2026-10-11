@@ -37,7 +37,7 @@ model but sends the app's OpenRouter-specific request profile. It also makes
 exactly one request and requires the explicit live-test opt-in.
 Use `make -C source/daemon/tests prompts` to write all assistant-set prompts with web
 search set to none, auto, native, Exa, and Parallel under
-`source/daemon/tests/build-linux/system-prompts`, or use
+`build/tests/linux/daemon/system-prompts`, or use
 `make -C source/daemon/tests review-prompts` to print all twenty variants.
 `database_query_harness` also covers
 OpenRouter model catalog persistence, catalog search, default model selection,

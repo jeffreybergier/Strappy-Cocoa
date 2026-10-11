@@ -138,15 +138,15 @@ jobs:
             -v "${{ github.workspace }}:/repo/user" \
             -w /repo/user \
             "$BUILD_IMAGE" \
-            -lc 'altivec-sdk install && altivec-release build && altivec-release stage "$RELEASE_VERSION"'
-          ls -lh dist
+            -lc 'altivec-sdk install && altivec-release build && altivec-release stage "$RELEASE_VERSION" --dist build/release/artifacts'
+          ls -lh build/release/artifacts
 
       - name: Validate staged release assets
         run: |
           set -euo pipefail
-          mac_asset="dist/Strappy-${RELEASE_VERSION}-macOS.zip"
-          ios_rootful_asset="dist/Strappy-${RELEASE_VERSION}-iOS-rootful.deb"
-          ios_rootless_asset="dist/Strappy-${RELEASE_VERSION}-iOS-rootless.deb"
+          mac_asset="build/release/artifacts/Strappy-${RELEASE_VERSION}-macOS.zip"
+          ios_rootful_asset="build/release/artifacts/Strappy-${RELEASE_VERSION}-iOS-rootful.deb"
+          ios_rootless_asset="build/release/artifacts/Strappy-${RELEASE_VERSION}-iOS-rootless.deb"
           test -s "$mac_asset"
           test -s "$ios_rootful_asset"
           test -s "$ios_rootless_asset"
@@ -189,4 +189,4 @@ jobs:
               --target "$RELEASE_SHA" \
               --generate-notes
           fi
-          gh release upload "$RELEASE_TAG" dist/* --clobber
+          gh release upload "$RELEASE_TAG" build/release/artifacts/* --clobber

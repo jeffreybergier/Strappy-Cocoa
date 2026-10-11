@@ -15,7 +15,7 @@ import threading
 import time
 
 binary = str(Path(sys.argv[1]).resolve())
-resources = str(Path('build-test/daemon-resources').resolve())
+resources = str(Path(os.environ['STRAPPY_TEST_RESOURCE_DIR']).resolve())
 header = struct.Struct('!4sHHIIII')
 gate, entered = threading.Event(), threading.Event()
 gate.set()

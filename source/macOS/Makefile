@@ -1,3 +1,7 @@
+ALTIVEC_ROOT ?= /altivec
+include $(ALTIVEC_ROOT)/make/entry.mk
+ifeq ($(_altivec_relocated),)
+PROJECT_ROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/../..)
 include ../daemon/store.mk
 STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
 GROUP_ui_SOURCES = main.m AppDelegate.m StrappyServiceController.m XPAppKit.m PreferencesWindowController.m \
@@ -23,7 +27,7 @@ BUNDLED_MODELS_RESOURCE = $(SHARED_DIR)/Resources/BundledModels.json
 FONTAWESOME_GENERATOR = $(SHARED_DIR)/tools/generate_fontawesome_webview_map.py
 FONTAWESOME_FONT_DIR ?= $(ALTIVECCOCOA_DIR)/Resources/Fonts
 FONTAWESOME_ICONS_RESOURCE = $(SHARED_DIR)/Resources/FontAwesomeIcons.json
-FONTAWESOME_WEBVIEW_MAP = $(SHARED_DIR)/strappy_fontawesome_icons.inc
+FONTAWESOME_WEBVIEW_MAP = $(GENERATED_DIR)/strappy_fontawesome_icons.inc
 FONTAWESOME_GENERATED = $(FONTAWESOME_WEBVIEW_MAP)
 FONTAWESOME_FONT_FILES = \
                      $(FONTAWESOME_FONT_DIR)/FA7-Solid-900.otf \
@@ -43,8 +47,8 @@ MAC_ICON = Resources/Strappy.icns
 BUNDLE_FONT_DIRS = $(ALTIVECCOCOA_DIR)/Resources/Fonts
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 
-PROJECT_ROOT := $(abspath ../..)
 PRODUCTS = Strappy strappyd
+CPPFLAGS += -DSTRAPPY_FONTAWESOME_MAP=\"$(FONTAWESOME_WEBVIEW_MAP)\"
 Strappy_TYPE = app
 Strappy_GROUPS = ui shared
 Strappy_PLIST = $(INFO_PLIST)
@@ -69,5 +73,5 @@ Strappy_LDFLAGS = -framework AppKit -lobjc
 GROUP_ui_FLAGS_x86_64 = -fblocks
 GROUP_ui_FLAGS_arm64 = -fblocks
 Strappy_RESOURCE_MAP = Info.plist=Info.plist
-ALTIVEC_ROOT ?= /altivec
 include $(ALTIVEC_ROOT)/altivec_common_mac.mk
+endif

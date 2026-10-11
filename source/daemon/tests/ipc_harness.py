@@ -51,7 +51,7 @@ def revision(payload):
 def start(directory, worker=False):
     path = directory / 'service.sock'
     process = subprocess.Popen([fixture if worker else binary,
-                                str(directory if worker else directory / 'heartbeat.log')] + ([] if worker else [str(directory / 'strappy.sqlite'), str(Path('build-test/daemon-resources').resolve())]),
+                                str(directory if worker else directory / 'heartbeat.log')] + ([] if worker else [str(directory / 'strappy.sqlite'), str(Path(os.environ['STRAPPY_TEST_RESOURCE_DIR']).resolve())]),
                                stdin=subprocess.PIPE if worker else subprocess.DEVNULL)
     for _ in range(300):
         if path.exists():
@@ -78,7 +78,7 @@ with tempfile.TemporaryDirectory(prefix="strappy-ipc-", dir="/tmp") as temporary
         assert path.stat().st_mode & 0o777 == 0o600
         assert subprocess.run([binary, '--ipc-probe', str(path)], check=True).returncode == 0
         # A competing server cannot remove the live socket.
-        assert subprocess.run([binary, str(directory / 'other.log'), str(directory / 'strappy.sqlite'), str(Path('build-test/daemon-resources').resolve())]).returncode != 0
+        assert subprocess.run([binary, str(directory / 'other.log'), str(directory / 'strappy.sqlite'), str(Path(os.environ['STRAPPY_TEST_RESOURCE_DIR']).resolve())]).returncode != 0
         with connect(path) as sock:
             request(sock, 2, 1, status=3)
             snapshot = request(sock, 1, 2, struct.pack('!II', 8, 8))

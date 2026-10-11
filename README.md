@@ -311,9 +311,9 @@ docker compose run --rm make clean release
 
 Outputs:
 
-- `build/iOS/release/Strappy-rootful.deb` for rootful jailbreaks
-- `build/iOS/release/Strappy-rootless.deb` for rootless jailbreaks
-- `build/macOS/release/Strappy.zip`
+- `build/iOS/release/Strappy/Strappy-rootful.deb` for rootful jailbreaks
+- `build/iOS/release/Strappy/Strappy-rootless.deb` for rootless jailbreaks
+- `build/macOS/release/Strappy/Strappy.zip`
 
 (Optional) Run the Linux-Based Tests for the C Backend:
 
@@ -370,3 +370,10 @@ If you want to contribute, these are the next items I plan to add myself:
 Strappy is experimental personal software, not a hardened product. It is
 [MIT licensed](https://github.com/jeffreybergier/Strappy-Cocoa/blob/main/LICENSE), 
 100% AI coded and 100% compiled.
+
+Build roots are resolved from the project Makefile and inherited by child makes.
+`BUILD_ROOT=custom` is relative to the repository root. Native artifacts live in
+`build/<platform>/<configuration>/<product>/`; `BUILD_VARIANT=name` keeps an
+additional build variant. Use `make macOS-clean PRODUCT=<name>` for one product,
+`make macOS-clean` for a platform, or `make clean-all` for the whole build root.
+CI stages release assets in `build/release` (including the release manifest).

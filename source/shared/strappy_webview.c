@@ -2758,7 +2758,10 @@ static int strappy_webview_append_scripts(strappy_webview_buffer *buffer)
     "n.textContent=t;else n.innerText=t;}",
     "function escHTML(t){return String(t).replace(/&/g,'&amp;')",
     ".replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}",
-#include "strappy_fontawesome_icons.inc"
+#ifndef STRAPPY_FONTAWESOME_MAP
+#define STRAPPY_FONTAWESOME_MAP "strappy_fontawesome_icons.inc"
+#endif
+#include STRAPPY_FONTAWESOME_MAP
     "function faIconCode(s,n){var k=String(n||'').toLowerCase();var m;",
     "if(k.indexOf('fa-')==0)k=k.substring(3);if(k.indexOf('0x')==0)k=k.substring(2);",
     "if(/^[0-9a-f]{3,6}$/i.test(k))return k.toUpperCase();",

@@ -15,8 +15,8 @@ import threading
 import time
 
 binary = str(Path(sys.argv[1]).resolve())
-resources = str(Path('build-test/daemon-resources').resolve())
-reader = str(Path('build-linux/run_reader_harness').resolve())
+resources = str(Path(os.environ['STRAPPY_TEST_RESOURCE_DIR']).resolve())
+reader = str((Path(os.environ['STRAPPY_TEST_BUILD_DIR']) / 'run_reader_harness').resolve())
 header = struct.Struct('!4sHHIIII')
 gate = threading.Event()
 entered = threading.Event()

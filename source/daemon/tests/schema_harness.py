@@ -1,3 +1,4 @@
+import os
 """Unsupported semantic constraints must fail before daemon readiness."""
 from pathlib import Path
 import sqlite3
@@ -6,7 +7,7 @@ import sys
 import tempfile
 
 writer, reader, daemon = (str(Path(p).resolve()) for p in sys.argv[1:])
-resources = str(Path('build-test/daemon-resources').resolve())
+resources = str(Path(os.environ['STRAPPY_TEST_RESOURCE_DIR']).resolve())
 with tempfile.TemporaryDirectory(prefix='strappy-schema-', dir='/tmp') as directory:
     path = str(Path(directory)/'legacy.sqlite')
     subprocess.run([writer, path, '--legacy'], check=True)

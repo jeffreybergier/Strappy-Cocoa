@@ -24,3 +24,6 @@ __pycache__/
 
 # Shared Make module outputs
 build/
+
+# Shared host/container build locks survive whole-root cleanup.
+.*.altivec-locks/
