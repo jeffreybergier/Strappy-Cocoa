@@ -127,7 +127,7 @@ jobs:
       - name: Build configured targets and stage assets
         run: |
           set -euo pipefail
-          docker run --rm \
+          docker run --rm --network none \
             --entrypoint /bin/bash \
             -e IS_SANDBOX=1 \
             -e ALTIVEC_SDK_ARCHIVE_DIR=/altivec-sdk \

@@ -11,7 +11,7 @@ version:
     - source/iOS/Info.plist
 
 release:
-  commit_message: "Version {version}"
+  commit_message: "chore(release): release {version}"
 
 targets:
   - name: macOS
