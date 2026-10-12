@@ -1,3 +1,5 @@
+#import <AICollectionController.h>
+#import <AICollectionTableAdapter.h>
 #import "StrappyAsync.h"
 #import "PreferencesWindowController.h"
 
@@ -438,7 +440,6 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       name:FileScannerDatabaseCatalogScanDidFinishNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelListReadFailed:)
       name:StrappyModelListReadFailedNotification object:nil];
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelPageLoaded:) name:AIPagedRowsDidLoadNotification object:nil];
     [self buildContentView];
     [self loadSystemPrompt];
     [self setModelCatalogRefreshing:[StrappySession isModelCatalogRefreshInFlight]];
@@ -1320,24 +1321,20 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 - (void)applyModelRows
 {
   [modelStatusLabel_ setStringValue:NSLocalizedString(@"Loading…",nil)];
-  NSString *identifier = [self selectedModelTableRowIdentifier];
   NSArray *sort = [modelWhitelistView_ effectiveSortDescriptorsForSortDescriptors:[modelTableView_ sortDescriptors]];
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyModelRows) object:nil];
-  [[StrappyAsync queryTarget:[StrappySession class] receiver:self completion:@selector(modelRowsLoaded:)
-    context:[NSDictionary dictionaryWithObjectsAndKeys:[self currentModelSearchText] ? [self currentModelSearchText] : @"",@"search",
-      identifier ? identifier : @"",@"selection",nil]]
-    modelPreferenceSnapshotMatchingSearch:[self currentModelSearchText] sortDescriptors:sort error:NULL];
+  if (!modelCollectionController_) modelCollectionController_ = [[AICollectionController alloc]
+    initWithTarget:self selector:@selector(modelRowsLoaded:) builder:[StrappySession class]];
+  [modelCollectionController_ request:[NSDictionary dictionaryWithObjectsAndKeys:
+    [self currentModelSearchText] ?: @"",@"search",sort,@"sort",
+    [self selectedModelTableRowIdentifier] ?: @"",@"selection",nil]];
 }
 
-- (void)modelRowsLoaded:(StrappyAsyncResult *)result
+- (void)modelRowsLoaded:(NSDictionary *)result
 {
-  NSString *search = [self currentModelSearchText] ? [self currentModelSearchText] : @"";
-  if (![search isEqual:[[result context] objectForKey:@"search"]]) return;
-  NSError *error = [result error];
-  NSString *identifier = [[[self selectedModelTableRowIdentifier] copy] autorelease];
-  StrappyModelRows *rows = [[result value] objectForKey:@"rows"];
-  if (rows == nil) {
-    [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(error,
+  StrappyModelRows *rows = [result objectForKey:@"rows"];
+  if (!rows) {
+    [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage([result objectForKey:@"error"],
       NSLocalizedString(@"Model list could not be loaded.",nil))];
     return;
   }
@@ -1346,14 +1343,17 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
   [rows retain];
   if ([modelRows_ isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)modelRows_ invalidatePages];
   [modelRows_ release]; modelRows_ = rows;
-  [modelTableView_ reloadData];
-  [self selectModelTableRowWithIdentifier:identifier];
+  if (!modelCollectionAdapter_) modelCollectionAdapter_ = [[AICollectionTableAdapter alloc]
+    initWithTableView:modelTableView_];
+  BOOL restoreFallback=![[modelCollectionAdapter_ snapshot] hasCompleteIdentities] ||
+    ![[result objectForKey:@"flatCollection"] hasCompleteIdentities];
+  [modelCollectionAdapter_ applySnapshot:[result objectForKey:@"flatCollection"]];
+  NSNumber *selection=[result objectForKey:@"selectionIndex"];
+  if (restoreFallback && selection && [selection unsignedLongValue]<[modelRows_ count]) {
+    [modelTableView_ selectRowIndexes:[NSIndexSet indexSetWithIndex:[selection unsignedLongValue]] byExtendingSelection:NO];
+    [modelTableView_ scrollRowToVisible:[selection integerValue]];
+  }
   [self refreshModelStatus];
-}
-
-- (void)modelPageLoaded:(NSNotification *)notification
-{
-  if ([notification object] == modelRows_) [modelTableView_ reloadData];
 }
 
 - (void)modelListReadFailed:(NSNotification *)notification
@@ -1442,8 +1442,9 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
     return nil;
   }
 
-  return StrappyStringForModelRow([modelRows_ objectAtIndex:(NSUInteger)row],
-                                  @"id");
+  NSDictionary *value=[modelRows_ isKindOfClass:[AIPagedRows class]] ?
+    [(AIPagedRows *)modelRows_ cachedObjectAtIndex:(NSUInteger)row] : [modelRows_ objectAtIndex:(NSUInteger)row];
+  return StrappyStringForModelRow(value,@"id");
 }
 
 - (void)selectModelTableRowWithIdentifier:(NSString *)modelIdentifier
@@ -1494,6 +1495,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 {
   (void)sender;
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyModelRows) object:nil];
+  [modelCollectionController_ cancel];
   [self performSelector:@selector(applyModelRows) withObject:nil afterDelay:0.15];
 }
 
@@ -2546,6 +2548,9 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 
 - (void)dealloc
 {
+  [modelCollectionController_ invalidate]; [modelCollectionController_ release];
+  [modelCollectionAdapter_ invalidate]; [modelCollectionAdapter_ release];
+  if ([modelRows_ isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)modelRows_ invalidatePages];
   NSToolbar *toolbar;
 
   [[NSNotificationCenter defaultCenter] removeObserver:self];

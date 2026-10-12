@@ -1,3 +1,5 @@
+#import <AICollectionController.h>
+#import <AICollectionTableAdapter.h>
 #import "StrappyAsync.h"
 #import "StrappyPreferencesModelWhitelistTableViewController.h"
 
@@ -45,6 +47,8 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 }
 
 @interface StrappyPreferencesModelWhitelistTableViewController ()
+@property (nonatomic, strong) AICollectionController *collectionController;
+@property (nonatomic, strong) AICollectionTableAdapter *collectionAdapter;
 @property (nonatomic, assign) BOOL hasConfiguredAccounts;
 @property (nonatomic, copy) NSArray *modelSections;
 - (void)loadModelRowsUsingSnapshot:(BOOL)reuse;
@@ -100,7 +104,6 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
          object:nil];
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelListReadFailed:)
     name:StrappyModelListReadFailedNotification object:nil];
-  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelPageLoaded:) name:AIPagedRowsDidLoadNotification object:nil];
   [self setRefreshingModels:[StrappySession isModelCatalogRefreshInFlight]];
 }
 
@@ -124,6 +127,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText
 {
   (void)searchBar; (void)searchText;
+  [[self collectionController] cancel];
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyRows) object:nil];
   [self performSelector:@selector(applyRows) withObject:nil afterDelay:0.15];
 }
@@ -146,35 +150,30 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
     [[NSSortDescriptor alloc] initWithKey:@"model_prompt_price" ascending:YES],nil];
   [self setStatusMessage:NSLocalizedString(@"Loading…",nil)];
   [self refreshStatusToolbar];
-  [[StrappyAsync queryTarget:[StrappySession class] receiver:self completion:@selector(modelRowsLoaded:) context:[self currentSearchText] ? [self currentSearchText] : @""]
-    modelPreferenceSnapshotMatchingSearch:[self currentSearchText] sortDescriptors:sort error:NULL];
+  if (![self collectionController]) [self setCollectionController:
+    [[AICollectionController alloc] initWithTarget:self selector:@selector(modelRowsLoaded:)
+      builder:[StrappySession class]]];
+  [[self collectionController] request:[NSDictionary dictionaryWithObjectsAndKeys:
+    [self currentSearchText] ?: @"",@"search",sort,@"sort",nil]];
 }
 
-- (void)modelRowsLoaded:(StrappyAsyncResult *)result
+- (void)modelRowsLoaded:(NSDictionary *)result
 {
-  NSString *search = [self currentSearchText] ? [self currentSearchText] : @"";
-  if (![search isEqual:[result context]]) return;
-  NSError *error = [result error];
-  StrappyModelRows *rows = [[result value] objectForKey:@"rows"];
-  NSArray *sections = [[result value] objectForKey:@"sections"];
-  if ([[self rows] isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)[self rows] invalidatePages];
-  if (sections == nil) {
-    [self setRows:[NSArray array]];
-    [self setModelSections:[NSArray array]];
-    [self setStatusMessage:[error localizedDescription]];
-  } else {
-    [self setRows:rows];
-    [self setModelSections:sections];
-    [self setHasConfiguredAccounts:[rows hasConfiguredAccounts]];
-    [self setStatusMessage:nil];
+  StrappyModelRows *rows = [result objectForKey:@"rows"];
+  if (!rows) {
+    [self setStatusMessage:[[result objectForKey:@"error"] localizedDescription]];
+    [self refreshStatusToolbar];
+    return;
   }
-  [[self tableView] reloadData];
+  if ([[self rows] isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)[self rows] invalidatePages];
+  [self setRows:rows];
+  [self setModelSections:[result objectForKey:@"sections"]];
+  [self setHasConfiguredAccounts:[rows hasConfiguredAccounts]];
+  [self setStatusMessage:nil];
+  if (![self collectionAdapter]) [self setCollectionAdapter:
+    [[AICollectionTableAdapter alloc] initWithTableView:[self tableView]]];
+  [[self collectionAdapter] applySnapshot:[result objectForKey:@"collection"]];
   [self refreshStatusToolbar];
-}
-
-- (void)modelPageLoaded:(NSNotification *)notification
-{
-  if ([notification object] == [self rows]) [[self tableView] reloadData];
 }
 
 - (void)modelListReadFailed:(NSNotification *)notification
@@ -279,7 +278,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 {
   _refreshingModels = refreshingModels;
   [self setWorking:refreshingModels];
-  [[self tableView] reloadData];
+  [[self collectionAdapter] refreshVisibleRows];
   [self refreshStatusToolbar];
 }
 
@@ -301,7 +300,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
   if ([errorMessage isKindOfClass:[NSString class]] &&
       ([errorMessage length] > 0U)) {
     [self setStatusMessage:errorMessage];
-    [[self tableView] reloadData];
+    [[self collectionAdapter] refreshVisibleRows];
     [self refreshStatusToolbar];
     return;
   }
@@ -342,7 +341,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView
 {
   (void)tableView;
-  return (NSInteger)MAX([[self modelSections] count],1U);
+  return (NSInteger)[[self modelSections] count];
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
@@ -399,6 +398,9 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
 - (void)dealloc
 {
+  [_collectionController invalidate];
+  [_collectionAdapter invalidate];
+  if ([[self rows] isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)[self rows] invalidatePages];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [[self updateButton] setTarget:nil];
 }

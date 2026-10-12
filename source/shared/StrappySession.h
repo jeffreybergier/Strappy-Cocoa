@@ -222,6 +222,8 @@ enum {
 + (NSArray *)modelCatalogWithError:(NSError **)error;
 /* Worker creates a private reader and warms the first page; ownership transfers
  * exclusively to the UI on completion. No snapshot is shared between queries. */
+/* AICollectionController worker entry point for model preference lists. */
++ (NSDictionary *)buildList:(NSDictionary *)request;
 + (NSDictionary *)modelPreferenceSnapshotMatchingSearch:(NSString *)search
   sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
 + (StrappyModelRows *)modelPreferenceRowsMatchingSearch:(NSString *)search

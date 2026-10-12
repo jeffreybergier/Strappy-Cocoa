@@ -5789,3 +5789,18 @@ size_t strappy_db_catalog_allowed_count(const strappy_catalog_reader *reader) { 
 size_t strappy_db_model_list_total_count(const strappy_model_reader *reader) { return reader->total_count; }
 size_t strappy_db_model_list_allowed_count(const strappy_model_reader *reader) { return reader->allowed_count; }
 size_t strappy_db_catalog_hidden_count(const strappy_catalog_reader *reader) { return reader->hidden_count; }
+
+int strappy_db_model_list_ids(strappy_model_reader *reader, size_t limit,
+  strappy_model_list_id_callback callback, void *context, char **error_out)
+{
+  sqlite3_stmt *stmt = NULL;
+  int rc = sqlite3_prepare_v2(reader->db,
+    "SELECT model_id FROM model_order ORDER BY rowid LIMIT ?",-1,&stmt,NULL);
+  if (rc == SQLITE_OK) {
+    sqlite3_bind_int64(stmt,1,(sqlite3_int64)limit);
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW)
+      callback(context,(const char *)sqlite3_column_text(stmt,0));
+  }
+  sqlite3_finalize(stmt);
+  return rc == SQLITE_DONE ? 1 : strappy_model_list_error(reader,error_out);
+}

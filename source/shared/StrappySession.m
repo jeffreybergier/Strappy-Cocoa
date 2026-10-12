@@ -1,3 +1,5 @@
+#import <AICollectionController.h>
+#import <AICollectionSnapshot.h>
 #import <AIStoreObserver.h>
 #import "StrappyAsync.h"
 #include "strappy_run.h"
@@ -2364,15 +2366,50 @@ static void StrappyStoreChanged(unsigned int topics, long long session)
   return [StrappySession modelCatalogMatchingSearchText:nil error:error];
 }
 
++ (NSDictionary *)buildList:(NSDictionary *)request
+{
+  NSError *error = nil;
+  NSDictionary *result = [self modelPreferenceSnapshotMatchingSearch:
+    [request objectForKey:@"search"] sortDescriptors:[request objectForKey:@"sort"] error:&error];
+  if (result && [request objectForKey:@"selection"]) {
+    NSMutableDictionary *selected = [[result mutableCopy] autorelease];
+    NSUInteger index = [[result objectForKey:@"rows"] indexForModelIdentifier:[request objectForKey:@"selection"]];
+    [selected setObject:[NSNumber numberWithUnsignedLong:index] forKey:@"selectionIndex"];
+    return selected;
+  }
+  return result ? result : [NSDictionary dictionaryWithObject:
+    error ? error : [NSError errorWithDomain:@"Strappy.ModelList" code:1 userInfo:nil] forKey:@"error"];
+}
+
 + (NSDictionary *)modelPreferenceSnapshotMatchingSearch:(NSString *)search
   sortDescriptors:(NSArray *)descriptors error:(NSError **)error
 {
   StrappyModelRows *rows = [self modelPreferenceRowsMatchingSearch:search sortDescriptors:descriptors error:error];
   NSArray *sections = rows ? [rows providerSectionsWithError:error] : nil;
-  if (!sections) return nil;
+  if (!sections || [[AICollectionController currentController] isCancelled]) return nil;
+  NSArray *ids = [rows collectionIdentifiersWithError:error];
+  if (error && *error) return nil;
+  NSMutableDictionary *flat = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+    @"models",@"id",rows,@"rows",nil];
+  if (ids) [flat setObject:ids forKey:@"identifiers"];
+  AICollectionSnapshot *flatSnapshot = [[[AICollectionSnapshot alloc] initWithSections:
+    [NSArray arrayWithObject:flat]] autorelease];
+  NSMutableArray *groups = [NSMutableArray array];
+  NSEnumerator *e = [sections objectEnumerator]; NSDictionary *section;
+  while ((section = [e nextObject])) {
+    NSMutableDictionary *group = [[section mutableCopy] autorelease];
+    [group setObject:[section objectForKey:@"provider_id"] forKey:@"id"];
+    [group setObject:rows forKey:@"rows"];
+    NSUInteger offset = [[section objectForKey:@"offset"] unsignedLongValue];
+    NSUInteger count = [[section objectForKey:@"count"] unsignedLongValue];
+    if (ids) [group setObject:[ids subarrayWithRange:NSMakeRange(offset,count)] forKey:@"identifiers"];
+    [groups addObject:group];
+  }
+  AICollectionSnapshot *snapshot = [[[AICollectionSnapshot alloc] initWithSections:groups] autorelease];
   if ([rows count]) (void)[rows objectAtIndex:0];
   if ([rows readError]) { if (error) *error = [rows readError]; return nil; }
-  return [NSDictionary dictionaryWithObjectsAndKeys:rows,@"rows",sections,@"sections",nil];
+  return [NSDictionary dictionaryWithObjectsAndKeys:rows,@"rows",sections,@"sections",
+    snapshot,@"collection",flatSnapshot,@"flatCollection",nil];
 }
 
 + (StrappyModelRows *)modelPreferenceRowsMatchingSearch:(NSString *)search
@@ -4195,7 +4232,22 @@ static BOOL StrappyModelListSort(NSArray *descriptors, strappy_catalog_sort *sor
   }
   return YES;
 }
+static void StrappyModelListIdentifier(void *context, const char *identifier)
+{ [(NSMutableArray *)context addObject:[NSString stringWithUTF8String:identifier]]; }
 @implementation StrappyModelListSource
+- (NSArray *)collectionIdentifiersWithError:(NSError **)error
+{
+  if ([self count] > AICollectionIdentityLimit) return nil;
+  NSMutableArray *ids = [NSMutableArray array];
+  char *message = NULL;
+  if (!strappy_db_model_list_ids(reader_,AICollectionIdentityLimit,
+      StrappyModelListIdentifier,ids,&message)) {
+    if (error) *error = [StrappySession errorFromCString:message];
+    strappy_free_string(message); return nil;
+  }
+  return ids;
+}
+
 - (id)initWithPath:(NSString *)path search:(NSString *)search
   sortDescriptors:(NSArray *)descriptors error:(NSError **)error
 {

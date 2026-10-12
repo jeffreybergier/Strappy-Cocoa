@@ -428,6 +428,10 @@ typedef void (*strappy_model_list_group_callback)(void *context, const char *pro
 /* Requires provider as the leading sort key. */
 int strappy_db_model_list_groups(strappy_model_reader *reader,
   strappy_model_list_group_callback callback, void *context, char **error_out);
+/* Reads only identity metadata, at most limit rows, without fetching payloads. */
+typedef void (*strappy_model_list_id_callback)(void *context, const char *identifier);
+int strappy_db_model_list_ids(strappy_model_reader *reader, size_t limit,
+  strappy_model_list_id_callback callback, void *context, char **error_out);
 unsigned long long strappy_db_model_list_page_steps(const strappy_model_reader *reader);
 
 /* Source compatibility while Cocoa call sites move to the generic names. */

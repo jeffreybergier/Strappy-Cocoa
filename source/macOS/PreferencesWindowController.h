@@ -1,3 +1,4 @@
+@class AICollectionController, AICollectionTableAdapter;
 #import <AppKit/AppKit.h>
 #import "XPAppKit.h"
 
@@ -37,6 +38,8 @@
   NSProgressIndicator *scanProgressIndicator_;
   NSTextField         *databaseStatusLabel_;
   NSArray             *modelRows_;
+  AICollectionController *modelCollectionController_;
+  AICollectionTableAdapter *modelCollectionAdapter_;
   NSArray             *databaseRows_;
   NSArray             *allDatabaseStudyRows_;
   NSArray             *databaseStudyRows_;

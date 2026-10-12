@@ -13,8 +13,11 @@ extern NSString * const StrappyModelListReadFailedNotification;
 - (NSUInteger)allowedCount;
 - (BOOL)filterWithSearch:(NSString *)search sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
 - (NSArray *)pageAtOffset:(NSUInteger)offset error:(NSError **)error;
+
 - (NSArray *)providerSectionsWithError:(NSError **)error;
 - (NSUInteger)indexForModelIdentifier:(NSString *)identifier error:(NSError **)error;
+@optional
+- (NSArray *)collectionIdentifiersWithError:(NSError **)error;
 @end
 
 @interface StrappyModelRows : AIPagedRows {
@@ -27,6 +30,7 @@ extern NSString * const StrappyModelListReadFailedNotification;
 - (NSUInteger)totalCount;
 - (NSUInteger)allowedCount;
 - (BOOL)filterWithSearch:(NSString *)search sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
+- (NSArray *)collectionIdentifiersWithError:(NSError **)error;
 - (NSArray *)providerSectionsWithError:(NSError **)error;
 - (NSUInteger)indexForModelIdentifier:(NSString *)identifier;
 - (NSError *)readError;

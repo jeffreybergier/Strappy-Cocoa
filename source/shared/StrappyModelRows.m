@@ -4,6 +4,10 @@
 NSString * const StrappyModelListReadFailedNotification = @"StrappyModelListReadFailedNotification";
 
 @implementation StrappyModelRows
+- (NSArray *)collectionIdentifiersWithError:(NSError **)error
+{ return [source_ respondsToSelector:@selector(collectionIdentifiersWithError:)] ?
+    [source_ collectionIdentifiersWithError:error] : nil; }
+
 - (id)initWithModelSource:(id<StrappyModelListSource>)source
 {
   if ((self = [super init])) {

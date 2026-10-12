@@ -50,6 +50,14 @@ static int compare(const void *a,const void *b)
   if(left->allowed!=right->allowed) return right->allowed-left->allowed;
   return strcasecmp(left->wire_model_id,right->wire_model_id);
 }
+static size_t identity_count;
+static strappy_model_record_list *identity_reference;
+static void identity(void *context, const char *identifier)
+{
+  (void)context;
+  require(!strcmp(identifier,identity_reference->records[identity_count].model_id),"identity metadata order");
+  ++identity_count;
+}
 static size_t sort_key;
 static int sort_direction;
 static int compare_column(const void *a,const void *b)
@@ -132,6 +140,10 @@ int main(void)
   require(strappy_db_model_list_groups(reader,group,NULL,&error) && groups==3U && group_rows==21000U,"metadata groups");
   require(strappy_db_list_models_for_configured_providers(path,&eager,&error) && eager.count==21000U,"legacy reference");
   qsort(eager.records,eager.count,sizeof(*eager.records),compare);
+  identity_reference=&eager; identity_count=0;
+  before=strappy_db_model_list_page_steps(reader);
+  require(strappy_db_model_list_ids(reader,4096,identity,NULL,&error),"bounded identity query");
+  require(identity_count==4096 && before==strappy_db_model_list_page_steps(reader),"IDs do not fetch row payloads");
   for(offset=0U;offset<eager.count;offset+=32U) {
     before=strappy_db_model_list_page_steps(reader);
     require(strappy_db_model_list_page(reader,offset,&page,&error),"page");
