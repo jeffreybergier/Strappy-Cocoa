@@ -16,12 +16,14 @@ extern NSString * const FileScannerCatalogReadFailedNotification;
 
 @interface FileScannerCatalogRows : AIPagedRows {
  @private
+  NSArray *collectionIdentifiers_;
   void *reader_;
   NSError *readError_;
 }
 /* Reorders the existing snapshot atomically and clears its row cache. */
 - (BOOL)filterWithSearch:(NSString *)search showHidden:(BOOL)showHidden
   sortDescriptors:(NSArray *)descriptors error:(NSError **)error;
+- (NSArray *)collectionIdentifiers;
 - (NSArray *)applicationSectionsWithError:(NSError **)error;
 - (NSUInteger)indexForCatalogIdentifier:(NSNumber *)identifier;
 - (NSError *)readError;

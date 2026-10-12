@@ -46,6 +46,10 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 @end
 
 @implementation StrappyAccountTableViewController
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  return [self collectionFixedIdentifiersForSection:section];
+}
 
 - (id)initWithProviderAccountIdentifier:(NSString *)identifier
 {
@@ -171,7 +175,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
         [self providerAccountIdentifier]];
     [authentication refreshChatGPTCredentialsIfNeeded];
   }
-  [[self tableView] reloadData];
+  [self refreshCollection];
 }
 
 - (void)showError:(NSError *)error title:(NSString *)title
@@ -295,7 +299,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   if ([[notification object] isEqual:[StrappyAuthentication
       authenticationForProviderAccountIdentifier:
         [self providerAccountIdentifier]]]) {
-    [[self tableView] reloadData];
+    [self refreshCollection];
   }
 }
 
@@ -575,6 +579,11 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 @end
 
 @implementation StrappyProviderPickerTableViewController
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  (void)section;
+  return [[StrappySession providerCatalog] valueForKey:@"id"];
+}
 
 - (id)init
 {

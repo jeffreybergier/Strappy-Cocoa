@@ -14,7 +14,7 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
   return [value isKindOfClass:[NSNumber class]] ? [value stringValue] : @"";
 }
 
-@interface StrappyManualModelsTableViewController : UITableViewController
+@interface StrappyManualModelsTableViewController : AICollectionTableViewController
 @property (nonatomic, copy) NSString *providerIdentifier;
 @property (nonatomic, strong) NSArray *models;
 @property (nonatomic, strong) NSArray *bundledModels;
@@ -22,7 +22,7 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 - (BOOL)isBuiltInModel:(NSDictionary *)model;
 @end
 
-@interface StrappyManualModelTableViewController : UITableViewController
+@interface StrappyManualModelTableViewController : AICollectionTableViewController
   <UITextFieldDelegate, UIAlertViewDelegate>
 @property (nonatomic, copy) NSString *providerIdentifier;
 @property (nonatomic, strong) NSDictionary *model;
@@ -40,6 +40,11 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 @end
 
 @implementation StrappyModelProvidersTableViewController
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  (void)section;
+  return [[self providers] valueForKey:@"id"];
+}
 
 - (id)init
 {
@@ -73,7 +78,7 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
       otherButtonTitles:nil];
     [alert show];
   }
-  [[self tableView] reloadData];
+  [self refreshCollection];
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section
@@ -158,6 +163,11 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 @end
 
 @implementation StrappyManualModelsTableViewController
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  (void)section;
+  return [[self models] valueForKey:@"wire_model_id"];
+}
 
 - (id)initWithProviderIdentifier:(NSString *)providerIdentifier title:(NSString *)title
 {
@@ -204,7 +214,7 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
           isEqualToString:[self providerIdentifier]]) [rows addObject:model];
   }
   [self setModels:rows];
-  [[self tableView] reloadData];
+  [self refreshCollection];
 }
 
 - (BOOL)isBuiltInModel:(NSDictionary *)model
@@ -298,6 +308,10 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 @end
 
 @implementation StrappyManualModelTableViewController
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  return [self collectionFixedIdentifiersForSection:section];
+}
 
 - (id)initWithProviderIdentifier:(NSString *)providerIdentifier model:(NSDictionary *)model
 {

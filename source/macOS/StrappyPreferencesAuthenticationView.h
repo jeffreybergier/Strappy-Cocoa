@@ -1,9 +1,12 @@
+#import <AltivecCocoa/AICollectionTableAdapter.h>
 #import <AppKit/AppKit.h>
 
 #import "XPAppKit.h"
 
 @interface StrappyPreferencesAuthenticationView : NSView
     <XPTableViewDataSource, XPTableViewDelegate> {
+  AICollectionTableAdapter *accountTableView_collection_;
+  AICollectionTableAdapter *providerCollection_;
  @private
   NSScrollView *accountScrollView_;
   NSTableView *accountTableView_;

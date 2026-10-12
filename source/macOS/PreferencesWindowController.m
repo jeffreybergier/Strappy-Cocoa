@@ -353,6 +353,18 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 @end
 
 @implementation PreferencesWindowController
+- (void)refreshDatabaseCollection;
+{
+  [databaseTableView_collection_ refreshVisibleRows];
+}
+
+- (void)refreshDatabaseStudyCollection;
+{
+  if (!databaseStudyTableView_) return;
+  if (!databaseStudyTableView_collection_) databaseStudyTableView_collection_ = [[AICollectionTableAdapter alloc] initWithTableView:databaseStudyTableView_];
+  [databaseStudyTableView_collection_ applyRowCount:(NSUInteger)[self numberOfRowsInTableView:databaseStudyTableView_] identifiers:([self numberOfRowsInTableView:databaseStudyTableView_] <= (NSInteger)AICollectionIdentityLimit ? [databaseStudyRows_ valueForKey:@"database_id"] : nil)];
+}
+
 
 - (id)init
 {
@@ -781,7 +793,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
     [expandedDatabaseStudyIdentifier_ release];
     expandedDatabaseStudyIdentifier_ = nil;
     [databaseStudyTableView_ deselectAll:self];
-    [databaseStudyTableView_ reloadData];
+    [self refreshDatabaseStudyCollection];
     [self updateDatabaseStudyActionButtonForAllStudied:NO];
     message = StrappyPreferencesErrorMessage(
       error,
@@ -893,7 +905,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
     [expandedDatabaseStudyIdentifier_ release];
     expandedDatabaseStudyIdentifier_ = nil;
   }
-  [databaseStudyTableView_ reloadData];
+  [self refreshDatabaseStudyCollection];
   [self selectDatabaseStudyRowWithIdentifier:selectedIdentifier];
   [selectedIdentifier release];
 }
@@ -1046,7 +1058,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
     [expandedDatabaseStudyIdentifier_ release];
     expandedDatabaseStudyIdentifier_ = [databaseIdentifier copy];
   }
-  [databaseStudyTableView_ reloadData];
+  [self refreshDatabaseStudyCollection];
 }
 
 - (void)databaseStudySearchTextDidChange:(NSNotification *)notification
@@ -1502,6 +1514,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 - (void)databaseSearchChanged:(id)sender
 {
   (void)sender;
+  [catalogCollection_ cancel];
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyDatabaseRows) object:nil];
   [self performSelector:@selector(applyDatabaseRows) withObject:nil afterDelay:0.15];
 }
@@ -1528,6 +1541,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 - (void)databaseSearchTextDidChange:(NSNotification *)notification
 {
   if ([notification object] != databaseSearchField_) return;
+  [catalogCollection_ cancel];
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyDatabaseRows) object:nil];
   [self performSelector:@selector(applyDatabaseRows) withObject:nil afterDelay:0.15];
 }
@@ -1670,23 +1684,23 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 - (void)applyDatabaseRows
 {
   [databaseStatusLabel_ setStringValue:NSLocalizedString(@"Loading…",nil)];
-  NSArray *selectedIdentifiers = [self selectedDatabaseTableRowIdentifiers];
   NSArray *descriptors = [databaseWhitelistView_ effectiveSortDescriptorsForSortDescriptors:
     [databaseTableView_ sortDescriptors]];
+  [catalogCollection_ cancel];
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyDatabaseRows) object:nil];
-  [[StrappyAsync queryTarget:[FileScanner sharedScanner] receiver:self completion:@selector(databaseRowsLoaded:)
-    context:[NSDictionary dictionaryWithObjectsAndKeys:[self currentDatabaseSearchText] ? [self currentDatabaseSearchText] : @"",@"search",
-      selectedIdentifiers ? selectedIdentifiers : [NSArray array],@"selection",nil]]
-    catalogSnapshotMatchingSearch:[self currentDatabaseSearchText] showHidden:([showHiddenDatabasesButton_ state] == XPControlStateValueOn) sortDescriptors:descriptors error:NULL];
+  if (!catalogCollection_) catalogCollection_ = [[AICollectionController alloc]
+      initWithTarget:self selector:@selector(databaseRowsLoaded:) builder:[FileScanner class]];
+  [catalogCollection_ request:[NSDictionary dictionaryWithObjectsAndKeys:
+      [self currentDatabaseSearchText] ?: @"",@"search",
+      [NSNumber numberWithBool:[showHiddenDatabasesButton_ state] == XPControlStateValueOn],@"hidden",
+      descriptors,@"sort",nil]];
 }
 
-- (void)databaseRowsLoaded:(StrappyAsyncResult *)result
+- (void)databaseRowsLoaded:(NSDictionary *)result
 {
-  NSString *search = [self currentDatabaseSearchText] ? [self currentDatabaseSearchText] : @"";
-  if (![search isEqual:[[result context] objectForKey:@"search"]]) return;
-  NSError *error = [result error];
+  NSError *error = [result objectForKey:@"error"];
   NSArray *selectedIdentifiers = [self selectedDatabaseTableRowIdentifiers];
-  FileScannerCatalogRows *rows = [[result value] objectForKey:@"rows"];
+  FileScannerCatalogRows *rows = [result objectForKey:@"rows"];
   if (rows == nil) {
     [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(error,
       NSLocalizedString(@"Rows could not be loaded.",nil))];
@@ -1694,9 +1708,11 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
   }
   databaseCatalogDirty_ = NO;
   [rows retain];
+  if ([databaseRows_ isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)databaseRows_ invalidatePages];
   [databaseRows_ release];
   databaseRows_ = rows;
-  [databaseTableView_ reloadData];
+  if (!databaseTableView_collection_) databaseTableView_collection_ = [[AICollectionTableAdapter alloc] initWithTableView:databaseTableView_];
+  [databaseTableView_collection_ applySnapshot:[result objectForKey:@"flatCollection"]];
   [self selectDatabaseTableRowsWithIdentifiers:selectedIdentifiers];
   [self refreshDatabaseStatus];
 }
@@ -2310,7 +2326,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
       [modelRows_ objectAtIndex:(NSUInteger)row];
     if ([self modelRowIsDefault:model] && !checked) {
-      [modelTableView_ reloadData];
+      [modelCollectionAdapter_ refreshVisibleRows];
       [self setModelStatusErrorMessage:
         NSLocalizedString(@"Default model is always allowed.", nil)];
       return;
@@ -2324,7 +2340,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
                       forModelIdentifier:modelId
                                    error:&error]) {
       updatingModelWhitelist_ = NO;
-      [modelTableView_ reloadData];
+      [modelCollectionAdapter_ refreshVisibleRows];
       [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage(
         error,
         NSLocalizedString(@"Your changes could not be saved.", nil))];
@@ -2353,7 +2369,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       validationError =
         NSLocalizedString(@"This file is not a valid SQLite database.", nil);
     }
-    [databaseTableView_ reloadData];
+    [self refreshDatabaseCollection];
     [self setDatabaseStatusErrorMessage:validationError];
     return;
   }
@@ -2364,7 +2380,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       ![[StrappyAsync commandTarget:[FileScanner sharedScanner] title:NSLocalizedString(@"Update database approval",nil) receiver:nil completion:NULL context:nil] setCatalogedDatabaseAllowed:checked
                                             forCatalogIdentifier:catalogId
                                                            error:&error]) {
-    [databaseTableView_ reloadData];
+    [self refreshDatabaseCollection];
     [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(
       error,
       NSLocalizedString(@"Your changes could not be saved.", nil))];
@@ -2374,7 +2390,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       ![[StrappyAsync commandTarget:[FileScanner sharedScanner] title:NSLocalizedString(@"Update database visibility",nil) receiver:nil completion:NULL context:nil] setCatalogedDatabaseHidden:checked
                                            forCatalogIdentifier:catalogId
                                                           error:&error]) {
-    [databaseTableView_ reloadData];
+    [self refreshDatabaseCollection];
     [self setDatabaseStatusErrorMessage:StrappyPreferencesErrorMessage(
       error,
       NSLocalizedString(@"Your changes could not be saved.", nil))];
@@ -2548,6 +2564,9 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 
 - (void)dealloc
 {
+  [catalogCollection_ invalidate]; [catalogCollection_ release];
+  [databaseStudyTableView_collection_ invalidate]; [databaseStudyTableView_collection_ release];
+  [databaseTableView_collection_ invalidate]; [databaseTableView_collection_ release];
   [modelCollectionController_ invalidate]; [modelCollectionController_ release];
   [modelCollectionAdapter_ invalidate]; [modelCollectionAdapter_ release];
   if ([modelRows_ isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)modelRows_ invalidatePages];

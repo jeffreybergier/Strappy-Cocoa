@@ -1,4 +1,5 @@
+#import <AltivecCocoa/AICollectionTableViewController.h>
 #import <UIKit/UIKit.h>
 
-@interface PreferencesTableViewController : UITableViewController
+@interface PreferencesTableViewController : AICollectionTableViewController
 @end

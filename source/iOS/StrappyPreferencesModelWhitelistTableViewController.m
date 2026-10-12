@@ -48,7 +48,6 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 
 @interface StrappyPreferencesModelWhitelistTableViewController ()
 @property (nonatomic, strong) AICollectionController *collectionController;
-@property (nonatomic, strong) AICollectionTableAdapter *collectionAdapter;
 @property (nonatomic, assign) BOOL hasConfiguredAccounts;
 @property (nonatomic, copy) NSArray *modelSections;
 - (void)loadModelRowsUsingSnapshot:(BOOL)reuse;
@@ -57,6 +56,8 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 @property (nonatomic, strong) UIBarButtonItem *updateButton;
 @end
 @implementation StrappyPreferencesModelWhitelistTableViewController
+- (void)refreshCollection
+{ [[self collectionTableAdapter] refreshVisibleRows]; }
 
 - (instancetype)init
 {
@@ -170,9 +171,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
   [self setModelSections:[result objectForKey:@"sections"]];
   [self setHasConfiguredAccounts:[rows hasConfiguredAccounts]];
   [self setStatusMessage:nil];
-  if (![self collectionAdapter]) [self setCollectionAdapter:
-    [[AICollectionTableAdapter alloc] initWithTableView:[self tableView]]];
-  [[self collectionAdapter] applySnapshot:[result objectForKey:@"collection"]];
+  [[self collectionTableAdapter] applySnapshot:[result objectForKey:@"collection"]];
   [self refreshStatusToolbar];
 }
 
@@ -278,7 +277,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 {
   _refreshingModels = refreshingModels;
   [self setWorking:refreshingModels];
-  [[self collectionAdapter] refreshVisibleRows];
+  [[self collectionTableAdapter] refreshVisibleRows];
   [self refreshStatusToolbar];
 }
 
@@ -300,7 +299,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
   if ([errorMessage isKindOfClass:[NSString class]] &&
       ([errorMessage length] > 0U)) {
     [self setStatusMessage:errorMessage];
-    [[self collectionAdapter] refreshVisibleRows];
+    [[self collectionTableAdapter] refreshVisibleRows];
     [self refreshStatusToolbar];
     return;
   }
@@ -399,7 +398,6 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 - (void)dealloc
 {
   [_collectionController invalidate];
-  [_collectionAdapter invalidate];
   if ([[self rows] isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)[self rows] invalidatePages];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [[self updateButton] setTarget:nil];

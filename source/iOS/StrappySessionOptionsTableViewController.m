@@ -197,6 +197,13 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
 @end
 
 @implementation StrappySessionOptionsTableViewController
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  if (section == kStrappyPromptOptionsSectionAccounts) return [[self accounts] valueForKey:@"id"];
+  if (section == kStrappyPromptOptionsSectionAssistantSet) return [[self assistantSets] valueForKey:@"id"];
+  if (section == kStrappyPromptOptionsSectionModels) return [[self modelsForSelectedAccount] valueForKey:@"id"];
+  return [self collectionFixedIdentifiersForSection:section];
+}
 
 - (instancetype)initWithOptionsDelegate:
     (id<StrappySessionOptionsTableViewControllerDelegate>)optionsDelegate
@@ -364,7 +371,7 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
     setOn:[[self sessionOptions] answerQualityEnabled]
   animated:NO];
   [self updateRoundLimitControlValues];
-  [[self tableView] reloadData];
+  [self refreshCollection];
 }
 
 - (NSString *)selectedProviderIdentifier
@@ -447,9 +454,7 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
     [self setSessionOptions:[optionsDelegate sessionOptions]];
   }
   [sender setOn:[[self sessionOptions] webSearchEnabled] animated:YES];
-  [[self tableView] reloadSections:[NSIndexSet indexSetWithIndex:
-    kStrappyPromptOptionsSectionSearchProvider]
-    withRowAnimation:UITableViewRowAnimationNone];
+  [self refreshCollection];
 }
 
 - (void)bashSwitchChanged:(UISwitch *)sender
@@ -1005,10 +1010,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
                                                   StrappySessionOptionWebProvider]) {
       [self setSessionOptions:
         [[self optionsDelegate] sessionOptions]];
-      [[self tableView] reloadSections:
-        [NSIndexSet indexSetWithIndex:
-          kStrappyPromptOptionsSectionSearchProvider]
-                    withRowAnimation:UITableViewRowAnimationNone];
+      [self refreshCollection];
     } else {
       [self refreshOptionValues];
     }

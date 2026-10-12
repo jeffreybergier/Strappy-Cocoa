@@ -123,6 +123,11 @@ int main(void)
   require(strappy_db_catalog_query(reader,"FILE-19999",0,sort,5,&error),"case-insensitive contains search");
   search_time=seconds()-start;
   require(strappy_db_catalog_count(reader)==1,"search count");
+  { long long ids[1];
+    require(strappy_db_catalog_ids(reader,ids,1,&error) && ids[0]==19999,"filtered identity projection");
+    require(!strappy_db_catalog_ids(reader,ids,0,&error),"identity projection rejects truncation");
+    free(error); error=NULL;
+  }
   require(strappy_db_catalog_total_count(reader)==20000U && strappy_db_catalog_allowed_count(reader)==5000U,"search retains footer totals");
   require(strappy_db_catalog_page(reader,0,&page,&error) && page.records[0].catalog_id==19999,"search result");
   strappy_discovered_database_record_list_destroy(&page);

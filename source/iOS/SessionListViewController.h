@@ -1,3 +1,5 @@
+#import <AltivecCocoa/AICollectionController.h>
+#import <AltivecCocoa/AICollectionTableViewController.h>
 #import <UIKit/UIKit.h>
 
 @class SessionListViewController;
@@ -8,7 +10,8 @@
                  didSelectSession:(StrappySession *)session;
 @end
 
-@interface SessionListViewController : UITableViewController {
+@interface SessionListViewController : AICollectionTableViewController {
+  AICollectionController *sidebarCollection_;
   BOOL pendingSelectionNotification_;
 }
 

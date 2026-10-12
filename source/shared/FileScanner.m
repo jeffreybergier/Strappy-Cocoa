@@ -1,5 +1,6 @@
 #import "StrappyAsync.h"
 #import "FileScanner.h"
+#import <AICollectionSnapshot.h>
 
 #import "StrappySession.h"
 #import "XPFoundation.h"
@@ -46,6 +47,16 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
 }
 
 @implementation FileScanner
+
++ (NSDictionary *)buildList:(NSDictionary *)request
+{
+  NSError *error = nil;
+  NSDictionary *result = [[self sharedScanner] catalogSnapshotMatchingSearch:[request objectForKey:@"search"]
+      showHidden:[[request objectForKey:@"hidden"] boolValue]
+      sortDescriptors:[request objectForKey:@"sort"] error:&error];
+  return result ?: [NSDictionary dictionaryWithObject:error ?:
+      [NSError errorWithDomain:@"StrappyCatalog" code:1 userInfo:nil] forKey:@"error"];
+}
 
 + (FileScanner *)sharedScanner
 {
@@ -383,7 +394,19 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
   if (!sections) return nil;
   if ([rows count]) (void)[rows objectAtIndex:0];
   if ([rows readError]) { if (error) *error = [rows readError]; return nil; }
-  return [NSDictionary dictionaryWithObjectsAndKeys:rows,@"rows",sections,@"sections",nil];
+  NSMutableArray *groups = [NSMutableArray array];
+  NSEnumerator *enumerator = [sections objectEnumerator]; NSDictionary *section;
+  while ((section = [enumerator nextObject])) {
+    NSMutableDictionary *metadata = [[section mutableCopy] autorelease];
+    [metadata setObject:[section objectForKey:@"app_group_key"] forKey:@"id"];
+    [groups addObject:metadata];
+  }
+  AICollectionSnapshot *collection = [[[AICollectionSnapshot alloc] initWithSections:groups] autorelease];
+  NSMutableDictionary *flat = [NSMutableDictionary dictionaryWithObjectsAndKeys:@"catalog",@"id",rows,@"rows",nil];
+  if ([rows collectionIdentifiers]) [flat setObject:[rows collectionIdentifiers] forKey:@"identifiers"];
+  AICollectionSnapshot *flatCollection = [[[AICollectionSnapshot alloc] initWithSections:[NSArray arrayWithObject:flat]] autorelease];
+  return [NSDictionary dictionaryWithObjectsAndKeys:rows,@"rows",sections,@"sections",
+      collection,@"collection",flatCollection,@"flatCollection",nil];
 }
 
 - (FileScannerCatalogRows *)catalogRowsMatchingSearch:(NSString *)search
@@ -532,11 +555,32 @@ static void FileScannerCatalogGroup(void *context, const char *name,
     offset:(NSUInteger)offset count:(NSUInteger)count] autorelease];
   if (disambiguate && bundle != NULL && *bundle != '\0')
     title = [NSString stringWithFormat:@"%@ (%@)",title,FileScannerCatalogString(bundle)];
-  [groups->sections addObject:[NSDictionary dictionaryWithObjectsAndKeys:
-    title,@"title",FileScannerCatalogString(group),@"app_group_key",rows,@"rows",nil]];
+  NSMutableDictionary *section = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+    title,@"title",FileScannerCatalogString(group),@"app_group_key",rows,@"rows",nil];
+  NSArray *ids = [groups->source collectionIdentifiers];
+  if (ids) [section setObject:[ids subarrayWithRange:NSMakeRange(offset,count)] forKey:@"identifiers"];
+  [section setObject:groups->source forKey:@"pageSource"];
+  [section setObject:[NSNumber numberWithUnsignedLong:offset] forKey:@"pageOffset"];
+  [groups->sections addObject:section];
 }
 
 @implementation FileScannerCatalogRows
+- (BOOL)loadCollectionIdentifiers:(NSError **)error
+{
+  [collectionIdentifiers_ release]; collectionIdentifiers_ = nil;
+  if ([self count] > AICollectionIdentityLimit) return YES;
+  long long values[AICollectionIdentityLimit]; char *message = NULL;
+  if (!strappy_db_catalog_ids(reader_,values,AICollectionIdentityLimit,&message)) {
+    if (error) *error = [FileScanner errorFromCString:message];
+    strappy_free_string(message); return NO;
+  }
+  NSMutableArray *ids = [NSMutableArray array]; NSUInteger index;
+  for (index = 0; index < [self count]; ++index)
+    [ids addObject:[NSNumber numberWithLongLong:values[index]]];
+  collectionIdentifiers_ = [ids copy]; return YES;
+}
+- (NSArray *)collectionIdentifiers { return collectionIdentifiers_; }
+
 - (id)initWithPath:(NSString *)path search:(NSString *)search showHidden:(BOOL)showHidden
   descriptors:(NSArray *)descriptors error:(NSError **)error
 {
@@ -562,10 +606,12 @@ static void FileScannerCatalogGroup(void *context, const char *name,
     strappy_free_string(message); [self release]; return nil;
   }
   reader_ = reader;
+  if (![self loadCollectionIdentifiers:error]) { [self release]; return nil; }
   return self;
 }
 - (void)dealloc
 {
+  [collectionIdentifiers_ release];
   strappy_db_catalog_close(reader_);
   [readError_ release]; [super dealloc];
 }
@@ -627,7 +673,7 @@ static void FileScannerCatalogGroup(void *context, const char *name,
   }
   [self invalidatePages];
   [readError_ release]; readError_ = nil;
-  return YES;
+  return [self loadCollectionIdentifiers:error];
 }
 - (NSArray *)applicationSectionsWithError:(NSError **)error
 {

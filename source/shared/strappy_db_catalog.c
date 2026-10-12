@@ -5804,3 +5804,22 @@ int strappy_db_model_list_ids(strappy_model_reader *reader, size_t limit,
   sqlite3_finalize(stmt);
   return rc == SQLITE_DONE ? 1 : strappy_model_list_error(reader,error_out);
 }
+
+int strappy_db_catalog_ids(strappy_catalog_reader *reader, long long *ids,
+                          size_t capacity, char **error_out)
+{
+  sqlite3_stmt *statement = NULL;
+  size_t index = 0;
+  int rc;
+  if (!reader || reader->count > capacity || (reader->count && !ids)) {
+    strappy_set_error(error_out,"Invalid catalog identity capacity."); return 0;
+  }
+  rc = sqlite3_prepare_v2(reader->db,"SELECT catalog_id FROM catalog_order ORDER BY rowid LIMIT ?1",-1,&statement,NULL);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_int64(statement,1,(sqlite3_int64)capacity);
+  if (rc == SQLITE_OK)
+    while ((rc = sqlite3_step(statement)) == SQLITE_ROW)
+      ids[index++] = (long long)sqlite3_column_int64(statement,0);
+  if (rc != SQLITE_DONE) strappy_set_error(error_out,"Could not read catalog identities.");
+  sqlite3_finalize(statement);
+  return rc == SQLITE_DONE && index == reader->count;
+}

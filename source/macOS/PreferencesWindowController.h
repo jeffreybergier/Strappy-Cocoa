@@ -1,3 +1,4 @@
+#import <AltivecCocoa/AICollectionTableAdapter.h>
 @class AICollectionController, AICollectionTableAdapter;
 #import <AppKit/AppKit.h>
 #import "XPAppKit.h"
@@ -12,6 +13,8 @@
 
 @interface PreferencesWindowController : NSWindowController
     <XPTableViewDataSource, XPTableViewDelegate, XPToolbarDelegate> {
+  AICollectionTableAdapter *databaseTableView_collection_;
+  AICollectionTableAdapter *databaseStudyTableView_collection_;
  @private
   NSView              *contentPaneView_;
   StrappyPreferencesAuthenticationView *authenticationPaneView_;
@@ -38,6 +41,7 @@
   NSProgressIndicator *scanProgressIndicator_;
   NSTextField         *databaseStatusLabel_;
   NSArray             *modelRows_;
+  AICollectionController *catalogCollection_;
   AICollectionController *modelCollectionController_;
   AICollectionTableAdapter *modelCollectionAdapter_;
   NSArray             *databaseRows_;

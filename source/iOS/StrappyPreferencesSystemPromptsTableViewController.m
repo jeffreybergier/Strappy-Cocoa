@@ -8,6 +8,8 @@
 @end
 
 @implementation StrappyPreferencesSystemPromptsTableViewController
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{ return [self collectionFixedIdentifiersForSection:section]; }
 
 - (instancetype)init
 {

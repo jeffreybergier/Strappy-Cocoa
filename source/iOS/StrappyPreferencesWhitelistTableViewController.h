@@ -1,9 +1,10 @@
+#import <AltivecCocoa/AICollectionTableViewController.h>
 #import <UIKit/UIKit.h>
 
 @class StrappyPreferencesStatusToolbarView;
 
 @interface StrappyPreferencesWhitelistTableViewController :
-    UITableViewController <UISearchBarDelegate>
+    AICollectionTableViewController <UISearchBarDelegate>
 
 @property (nonatomic, copy) NSArray *allRows;
 @property (nonatomic, copy) NSArray *rows;

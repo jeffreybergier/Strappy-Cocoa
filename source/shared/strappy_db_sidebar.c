@@ -332,3 +332,26 @@ int strappy_db_sidebar_read(strappy_session_reader *reader, size_t offset,
   }
   return 1;
 }
+
+int strappy_db_sidebar_ids(strappy_session_reader *reader, long long *ids,
+                           size_t capacity, char **error_out)
+{
+  sqlite3_stmt *statement = NULL;
+  size_t index = 0;
+  int rc;
+  if (!reader || capacity < reader->count || (reader->count && !ids)) {
+    strappy_set_error(error_out, "Invalid sidebar identity capacity.");
+    return 0;
+  }
+  rc = sqlite3_prepare_v2(reader->db,
+      "SELECT session_id FROM session_activity ORDER BY last_activity_at_ms DESC,session_id DESC LIMIT ?1",
+      -1, &statement, NULL);
+  if (rc == SQLITE_OK) rc = sqlite3_bind_int64(statement, 1, (sqlite3_int64)capacity);
+  if (rc == SQLITE_OK) {
+    while ((rc = sqlite3_step(statement)) == SQLITE_ROW)
+      ids[index++] = (long long)sqlite3_column_int64(statement, 0);
+  }
+  if (rc != SQLITE_DONE) strappy_sidebar_error(reader, error_out);
+  sqlite3_finalize(statement);
+  return rc == SQLITE_DONE && index == reader->count;
+}

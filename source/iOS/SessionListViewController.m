@@ -100,6 +100,10 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 @end
 
 @implementation SessionListViewController
+- (id)collectionIdentifierForSection:(NSInteger)section
+{ return [[[self sections] objectAtIndex:(NSUInteger)section] objectForKey:@"title"]; }
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{ return [[[self sections] objectAtIndex:(NSUInteger)section] objectForKey:@"identifiers"]; }
 
 - (instancetype)init
 {
@@ -189,25 +193,18 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   [[self settingsButton] setEnabled:enabled];
 }
 
-- (NSDictionary *)loadSidebarWithError:(NSError **)error
-{
-  StrappySessionRows *sessions = [StrappySession sidebarRowsWithError:error];
-  NSArray *sections = sessions ? [StrappySessionSections sectionsForSessions:sessions] : nil;
-  if (!sections) { if (error && !*error) *error = [sessions readError]; return nil; }
-  return [NSDictionary dictionaryWithObjectsAndKeys:sessions,@"sessions",sections,@"sections",nil];
-}
-
 - (void)reloadData
 {
-  [[StrappyAsync queryTarget:self receiver:self completion:@selector(sidebarLoaded:) context:nil]
-    loadSidebarWithError:NULL];
+  if (!sidebarCollection_) sidebarCollection_ = [[AICollectionController alloc]
+      initWithTarget:self selector:@selector(sidebarLoaded:) builder:[StrappySession class]];
+  [sidebarCollection_ request:[NSDictionary dictionaryWithObject:@"sidebar" forKey:@"kind"]];
 }
 
-- (void)sidebarLoaded:(StrappyAsyncResult *)result
+- (void)sidebarLoaded:(NSDictionary *)result
 {
-  NSError *error = [result error];
-  StrappySessionRows *sessions = [[result value] objectForKey:@"sessions"];
-  NSArray *sections = [[result value] objectForKey:@"sections"];
+  NSError *error = [result objectForKey:@"error"];
+  StrappySessionRows *sessions = [result objectForKey:@"sessions"];
+  NSArray *sections = [result objectForKey:@"sections"];
   if (sections == nil) {
     [self showError:error != nil ? error : [sessions readError]
               title:NSLocalizedString(@"Could not load conversations", nil)];
@@ -215,7 +212,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   }
   [self setSessions:sessions];
   [self setSections:sections];
-  [[self tableView] reloadData];
+  [self refreshCollection];
   [self selectSessionIdentifier:[self selectedSessionId]];
   if (pendingSelectionNotification_) { pendingSelectionNotification_ = NO; [self notifySelectedSession]; }
 }
@@ -242,7 +239,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 {
   (void)notification;
   if (![self rebuildSections]) return;
-  [[self tableView] reloadData];
+  [self refreshCollection];
   [self selectSessionIdentifier:[self selectedSessionId]];
 }
 
@@ -706,6 +703,7 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 
 - (void)dealloc
 {
+  [sidebarCollection_ invalidate];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 

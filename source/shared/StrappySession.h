@@ -7,6 +7,7 @@ extern NSString * const StrappySessionListReadFailedNotification;
 /* Main-thread, immutable DB snapshot with a bounded cache of sidebar rows. */
 @interface StrappySessionRows : NSArray <StrappySessionListSource> {
  @private
+  NSArray *collectionIdentifiers_;
   void *reader_;
   NSMutableDictionary *pages_;
   NSMutableArray *pageOrder_;
@@ -15,6 +16,7 @@ extern NSString * const StrappySessionListReadFailedNotification;
 - (id)initWithDatabasePath:(NSString *)path error:(NSError **)error;
 - (NSUInteger)countSinceTimestamp:(long long)timestamp;
 - (NSUInteger)indexForSessionIdentifier:(NSNumber *)identifier;
+- (NSArray *)collectionIdentifiers;
 - (NSError *)readError;
 @end
 

@@ -1,8 +1,11 @@
+#import <AltivecCocoa/AICollectionTableAdapter.h>
 #import <AppKit/AppKit.h>
 #import "XPAppKit.h"
 
 @interface StrappyModelProviderEditor : NSObject
     <XPTableViewDataSource, XPTableViewDelegate> {
+  AICollectionTableAdapter *providerTableView_collection_;
+  AICollectionTableAdapter *otherTableView_collection_;
  @private
   id                   target_;
   NSPanel              *sheet_;

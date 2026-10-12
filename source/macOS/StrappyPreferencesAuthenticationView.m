@@ -316,6 +316,13 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 @end
 
 @implementation StrappyPreferencesAuthenticationView
+- (void)refreshAccountCollection;
+{
+  if (!accountTableView_) return;
+  if (!accountTableView_collection_) accountTableView_collection_ = [[AICollectionTableAdapter alloc] initWithTableView:accountTableView_];
+  [accountTableView_collection_ applyRowCount:(NSUInteger)[self numberOfRowsInTableView:accountTableView_] identifiers:([self numberOfRowsInTableView:accountTableView_] <= (NSInteger)AICollectionIdentityLimit ? [accounts_ valueForKey:@"id"] : nil)];
+}
+
 
 - (id)initWithFrame:(NSRect)frame
 {
@@ -531,7 +538,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   }
   [accounts_ release];
   accounts_ = [accounts copy];
-  [accountTableView_ reloadData];
+  [self refreshAccountCollection];
   row = [self rowForAccountIdentifier:selectedAccountIdentifier_];
   suppressSelectionNotification_ = YES;
   if (row >= 0) {
@@ -611,6 +618,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
                 name:NSControlTextDidBeginEditingNotification
               object:maxOutputTokensField_];
   }
+  [providerCollection_ invalidate]; [providerCollection_ release]; providerCollection_ = nil;
   subviews = [[rightPaneView_ subviews] copy];
   for (index = 0U; index < [subviews count]; index++) {
     [[subviews objectAtIndex:index] removeFromSuperview];
@@ -709,6 +717,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   [scrollView setDocumentView:providerTableView_];
   [rightPaneView_ addSubview:scrollView];
   [providerTableView_ sizeLastColumnToFit];
+  providerCollection_ = [[AICollectionTableAdapter alloc] initWithTableView:providerTableView_];
+  [providerCollection_ applyRowCount:[providers_ count] identifiers:[providers_ valueForKey:@"id"]];
 
   instruction = StrappyAccountsLabel(
     NSMakeRect(kStrappyAccountsInset,
@@ -1361,6 +1371,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 
 - (void)dealloc
 {
+  [providerCollection_ invalidate]; [providerCollection_ release];
+  [accountTableView_collection_ invalidate]; [accountTableView_collection_ release];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [accountTableView_ setDataSource:nil];
   [accountTableView_ setDelegate:nil];

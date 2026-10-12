@@ -29,6 +29,9 @@ typedef struct strappy_sidebar_page {
 int strappy_db_sidebar_open(const char *path, strappy_session_reader **out,
                             char **error_out);
 void strappy_db_sidebar_close(strappy_session_reader *reader);
+/* Identity-only projection in snapshot order; fails if capacity is too small. */
+int strappy_db_sidebar_ids(strappy_session_reader *reader, long long *ids,
+                           size_t capacity, char **error_out);
 size_t strappy_db_sidebar_count(const strappy_session_reader *reader);
 int strappy_db_sidebar_count_since(strappy_session_reader *reader, long long timestamp,
                                    size_t *count, char **error_out);
@@ -637,6 +640,9 @@ int strappy_db_catalog_open(const char *path, const char *search, int show_hidde
 int strappy_db_catalog_query(strappy_catalog_reader *reader, const char *search,
   int show_hidden, const strappy_catalog_sort *sort, size_t sort_count, char **error_out);
 void strappy_db_catalog_close(strappy_catalog_reader *reader);
+/* Bounded catalog identity projection; does not read database row payloads. */
+int strappy_db_catalog_ids(strappy_catalog_reader *reader, long long *ids,
+                          size_t capacity, char **error_out);
 size_t strappy_db_catalog_count(const strappy_catalog_reader *reader);
 size_t strappy_db_catalog_total_count(const strappy_catalog_reader *reader);
 size_t strappy_db_catalog_allowed_count(const strappy_catalog_reader *reader);

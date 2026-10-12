@@ -358,6 +358,13 @@ static void StrappyDrawTintedImage(NSImage *image,
 @end
 
 @implementation SessionListViewController
+- (void)refreshTableCollection;
+{
+  if (!tableView_) return;
+  if (!tableView_collection_) tableView_collection_ = [[AICollectionTableAdapter alloc] initWithTableView:tableView_];
+  [tableView_collection_ applyRowCount:(NSUInteger)[self numberOfRowsInTableView:tableView_] identifiers:[rows_ collectionIdentifiers]];
+}
+
 
 - (void)setDelegate:(id<SessionListViewControllerDelegate>)delegate
 {
@@ -654,25 +661,18 @@ static void StrappyDrawTintedImage(NSImage *image,
   return rows_ == nil || index == NSNotFound ? -1 : (NSInteger)index;
 }
 
-- (NSDictionary *)loadSidebarWithError:(NSError **)error
-{
-  StrappySessionRows *sessions = [StrappySession sidebarRowsWithError:error];
-  NSArray *sections = sessions ? [StrappySessionSections sectionsForSessions:sessions] : nil;
-  if (!sections) { if (error && !*error) *error = [sessions readError]; return nil; }
-  return [NSDictionary dictionaryWithObjectsAndKeys:sessions,@"sessions",sections,@"sections",nil];
-}
-
 - (void)reloadData
 {
-  [[StrappyAsync queryTarget:self receiver:self completion:@selector(sidebarLoaded:) context:nil]
-    loadSidebarWithError:NULL];
+  if (!sidebarCollection_) sidebarCollection_ = [[AICollectionController alloc]
+      initWithTarget:self selector:@selector(sidebarLoaded:) builder:[StrappySession class]];
+  [sidebarCollection_ request:[NSDictionary dictionaryWithObject:@"sidebar" forKey:@"kind"]];
 }
 
-- (void)sidebarLoaded:(StrappyAsyncResult *)result
+- (void)sidebarLoaded:(NSDictionary *)result
 {
-  NSError *error = [result error];
-  StrappySessionRows *sessions = [[result value] objectForKey:@"sessions"];
-  NSArray *sections = [[result value] objectForKey:@"sections"];
+  NSError *error = [result objectForKey:@"error"];
+  StrappySessionRows *sessions = [result objectForKey:@"sessions"];
+  NSArray *sections = [result objectForKey:@"sections"];
   StrappySessionTableRows *rows;
   if (sections == nil) {
     [self showError:error != nil ? error : [sessions readError]
@@ -686,7 +686,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   [sessionRows_ release];
   sessionRows_ = [sessions retain];
   suppressSelectionNotification_ = YES;
-  [tableView_ reloadData];
+  [self refreshTableCollection];
   suppressSelectionNotification_ = NO;
   [self selectSessionIdentifier:selectedSessionId_];
   if (pendingSelectionNotification_ || [self rowForSessionIdentifier:selectedSessionId_] < 0) {
@@ -731,7 +731,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   [rows_ release];
   rows_ = rows;
   suppressSelectionNotification_ = YES;
-  [tableView_ reloadData];
+  [self refreshTableCollection];
   suppressSelectionNotification_ = NO;
   [self selectSessionIdentifier:selectedSessionId_];
 }
@@ -1125,6 +1125,8 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 - (void)dealloc
 {
+  [sidebarCollection_ invalidate]; [sidebarCollection_ release];
+  [tableView_collection_ invalidate]; [tableView_collection_ release];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [scrollView_ release];
   [tableView_ release];

@@ -129,6 +129,15 @@ NSString * const StrappySessionDateBoundariesDidChangeNotification =
     }
     offset = end;
   }
+  NSArray *identifiers = [sessions respondsToSelector:@selector(collectionIdentifiers)] ? [sessions collectionIdentifiers] : nil;
+  if (identifiers) {
+    for (NSUInteger section = 0; section < [sections count]; ++section) {
+      NSMutableDictionary *metadata = [[[sections objectAtIndex:section] mutableCopy] autorelease];
+      NSRange range = NSMakeRange([[metadata objectForKey:@"offset"] unsignedLongValue], [[metadata objectForKey:@"sessions"] count]);
+      [metadata setObject:[identifiers subarrayWithRange:range] forKey:@"identifiers"];
+      [sections replaceObjectAtIndex:section withObject:metadata];
+    }
+  }
   return sections;
 }
 @end
@@ -148,6 +157,20 @@ NSString * const StrappySessionDateBoundariesDidChangeNotification =
 - (NSUInteger)count
 {
   return [source_ count] == 0 ? 1 : [source_ count] + [sections_ count];
+}
+- (NSArray *)collectionIdentifiers
+{
+  if ([source_ count] == 0) return [NSArray arrayWithObject:@"empty"];
+  if ([self count] > 4096) return nil;
+  NSMutableArray *ids = [NSMutableArray array];
+  NSEnumerator *enumerator = [sections_ objectEnumerator]; NSDictionary *section;
+  while ((section = [enumerator nextObject])) {
+    NSArray *rows = [section objectForKey:@"identifiers"];
+    if (!rows) return nil;
+    [ids addObject:[section objectForKey:@"title"]];
+    [ids addObjectsFromArray:rows];
+  }
+  return ids;
 }
 - (BOOL)isSectionAtIndex:(NSUInteger)index
 {

@@ -238,7 +238,7 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
     if ([[self statusMessage] length] == 0U) {
       [self setStatusMessage:NSLocalizedString(@"Rows could not be loaded.", nil)];
     }
-    [[self tableView] reloadData];
+    [self refreshCollection];
     [self refreshStatusToolbar];
     return;
   }
@@ -269,7 +269,7 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   }
 
   [self setRows:[self sortedRows:matchingRows]];
-  [[self tableView] reloadData];
+  [self refreshCollection];
   [self refreshStatusToolbar];
 }
 

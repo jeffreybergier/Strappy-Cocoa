@@ -9,6 +9,8 @@ extern NSString * const StrappySessionDateBoundariesDidChangeNotification;
 - (NSDictionary *)objectAtIndex:(NSUInteger)index;
 - (NSUInteger)countSinceTimestamp:(long long)timestamp;
 - (NSUInteger)indexForSessionIdentifier:(NSNumber *)identifier;
+@optional
+- (NSArray *)collectionIdentifiers;
 @end
 
 /* Section dictionaries hold title, offset and a lazy sessions slice. */
@@ -26,6 +28,7 @@ extern NSString * const StrappySessionDateBoundariesDidChangeNotification;
   NSArray *sections_;
 }
 - (id)initWithSessions:(id<StrappySessionListSource>)sessions sections:(NSArray *)sections;
+- (NSArray *)collectionIdentifiers;
 - (BOOL)isSectionAtIndex:(NSUInteger)index;
 - (NSUInteger)indexForSessionIdentifier:(NSNumber *)identifier;
 @end

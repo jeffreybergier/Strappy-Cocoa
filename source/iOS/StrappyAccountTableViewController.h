@@ -1,6 +1,7 @@
+#import <AltivecCocoa/AICollectionTableViewController.h>
 #import <UIKit/UIKit.h>
 
-@interface StrappyAccountTableViewController : UITableViewController
+@interface StrappyAccountTableViewController : AICollectionTableViewController
 
 - (id)initWithProviderAccountIdentifier:(NSString *)identifier;
 - (id)initWithProviderAccountIdentifier:(NSString *)identifier
@@ -8,5 +9,5 @@
 
 @end
 
-@interface StrappyProviderPickerTableViewController : UITableViewController
+@interface StrappyProviderPickerTableViewController : AICollectionTableViewController
 @end

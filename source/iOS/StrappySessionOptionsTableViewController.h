@@ -1,3 +1,4 @@
+#import <AltivecCocoa/AICollectionTableViewController.h>
 #import <UIKit/UIKit.h>
 
 #import "StrappySession.h"
@@ -14,7 +15,7 @@
 - (void)dismissOptionsControllerAnimated:(BOOL)animated;
 @end
 
-@interface StrappySessionOptionsTableViewController : UITableViewController
+@interface StrappySessionOptionsTableViewController : AICollectionTableViewController
 
 - (instancetype)initWithOptionsDelegate:
     (id<StrappySessionOptionsTableViewControllerDelegate>)optionsDelegate

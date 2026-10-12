@@ -2368,6 +2368,15 @@ static void StrappyStoreChanged(unsigned int topics, long long session)
 
 + (NSDictionary *)buildList:(NSDictionary *)request
 {
+  if ([[request objectForKey:@"kind"] isEqual:@"sidebar"]) {
+    NSError *error = nil;
+    StrappySessionRows *sessions = [self sidebarRowsWithError:&error];
+    NSArray *sections = sessions ? [StrappySessionSections sectionsForSessions:sessions] : nil;
+    if (sections) return [NSDictionary dictionaryWithObjectsAndKeys:
+        sessions,@"sessions",sections,@"sections",nil];
+    return [NSDictionary dictionaryWithObject:error ?: [sessions readError] ?:
+        [NSError errorWithDomain:@"StrappySidebar" code:1 userInfo:nil] forKey:@"error"];
+  }
   NSError *error = nil;
   NSDictionary *result = [self modelPreferenceSnapshotMatchingSearch:
     [request objectForKey:@"search"] sortDescriptors:[request objectForKey:@"sort"] error:&error];
@@ -4054,6 +4063,17 @@ NSString * const StrappySessionListReadFailedNotification =
     return nil;
   }
   reader_ = reader;
+  if (strappy_db_sidebar_count(reader) <= AICollectionIdentityLimit) {
+    long long identities[AICollectionIdentityLimit];
+    if (!strappy_db_sidebar_ids(reader, identities, AICollectionIdentityLimit, &message)) {
+      if (error) *error = [StrappySession errorFromCString:message];
+      strappy_free_string(message); [self release]; return nil;
+    }
+    NSMutableArray *ids = [NSMutableArray array]; NSUInteger index;
+    for (index = 0; index < strappy_db_sidebar_count(reader); ++index)
+      [ids addObject:[NSNumber numberWithLongLong:identities[index]]];
+    collectionIdentifiers_ = [ids copy];
+  }
   pages_ = [[NSMutableDictionary alloc] init];
   pageOrder_ = [[NSMutableArray alloc] init];
   return self;
@@ -4061,6 +4081,7 @@ NSString * const StrappySessionListReadFailedNotification =
 
 - (void)dealloc
 {
+  [collectionIdentifiers_ release];
   strappy_db_sidebar_close((strappy_session_reader *)reader_);
   [pages_ release];
   [pageOrder_ release];
@@ -4079,6 +4100,7 @@ NSString * const StrappySessionListReadFailedNotification =
   return (NSUInteger)strappy_db_sidebar_count((strappy_session_reader *)reader_);
 }
 
+- (NSArray *)collectionIdentifiers { return collectionIdentifiers_; }
 - (NSError *)readError { return readError_; }
 
 - (void)recordReadError:(char *)message

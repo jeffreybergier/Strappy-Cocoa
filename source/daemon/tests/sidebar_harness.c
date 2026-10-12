@@ -104,12 +104,21 @@ int main(void)
   sql(db,"UPDATE sessions SET created_at_ms=110 WHERE id=1;"); activity(db,110);
   require(strappy_db_sidebar_open(path,&reader,&error),"open read snapshot");
   require(strappy_db_sidebar_count(reader)==2,"snapshot count");
+  {
+    long long ids[2] = {0,0};
+    require(strappy_db_sidebar_ids(reader,ids,2,&error) && ids[0]==2 && ids[1]==1,
+            "identity projection preserves order");
+    require(!strappy_db_sidebar_ids(reader,ids,1,&error),"identity projection rejects truncation");
+    free(error); error=NULL;
+  }
   sql(db,"UPDATE sessions SET name='Changed',created_at_ms=500 WHERE id=1;");
   require(strappy_db_sidebar_read(reader,0,&page,&error),"read old snapshot after write");
   require(page.count==2 && page.records[0].session_id==2 &&
     strcmp(page.records[1].name,"Renamed")==0,"snapshot preserves order and values");
   strappy_db_sidebar_page_destroy(&page);
   require(strappy_db_sidebar_count_since(reader,200,&count,&error) && count==1,"snapshot counts remain consistent");
+  { long long ids[2]; require(strappy_db_sidebar_ids(reader,ids,2,&error) && ids[0]==2 && ids[1]==1,
+      "identity projection shares original snapshot after writes"); }
   require(strappy_db_sidebar_open(path,&new_reader,&error),"refresh snapshot");
   require(strappy_db_sidebar_read(new_reader,0,&page,&error) && page.records[0].session_id==1 &&
     strcmp(page.records[0].name,"Changed")==0,"new snapshot sees new order and title");

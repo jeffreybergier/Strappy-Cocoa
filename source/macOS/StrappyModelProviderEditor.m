@@ -174,6 +174,25 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 @end
 
 @implementation StrappyModelProviderEditor
+- (void)refreshProviderCollection;
+{
+  if (!providerTableView_) return;
+  if (!providerTableView_collection_) providerTableView_collection_ = [[AICollectionTableAdapter alloc] initWithTableView:providerTableView_];
+  [providerTableView_collection_ applyRowCount:(NSUInteger)[self numberOfRowsInTableView:providerTableView_] identifiers:([self numberOfRowsInTableView:providerTableView_] <= (NSInteger)AICollectionIdentityLimit ? [providers_ valueForKey:@"id"] : nil)];
+}
+
+- (void)refreshOtherModelsCollection;
+{
+  if (!otherTableView_) return;
+  if (!otherTableView_collection_) otherTableView_collection_ = [[AICollectionTableAdapter alloc] initWithTableView:otherTableView_];
+  NSMutableArray *ids = [NSMutableArray array];
+  if ([otherModels_ count] <= AICollectionIdentityLimit) {
+    [ids addObjectsFromArray:[otherModels_ valueForKey:@"wire_model_id"] ?: [NSArray array]];
+    if (draftOtherModel_) [ids addObject:@"draft"];
+  }
+  [otherTableView_collection_ applyRowCount:(NSUInteger)[self numberOfRowsInTableView:otherTableView_] identifiers:ids];
+}
+
 
 - (id)initWithTarget:(id)target
 {
@@ -281,7 +300,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [bundledChatGPTModels_ release];
   bundledChatGPTModels_ = [bundledChatGPTModels copy];
 
-  [providerTableView_ reloadData];
+  [self refreshProviderCollection];
   if (([selectedProviderIdentifier_ length] == 0U) &&
       ([providers_ count] > 0U)) {
     [selectedProviderIdentifier_ release];
@@ -298,6 +317,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   NSArray *subviews;
   NSUInteger index;
 
+  [otherTableView_collection_ invalidate]; [otherTableView_collection_ release]; otherTableView_collection_ = nil;
   subviews = [[detailView_ subviews] copy];
   for (index = 0U; index < [subviews count]; index++) {
     [[subviews objectAtIndex:index] removeFromSuperview];
@@ -388,7 +408,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   }
   [otherModels_ release];
   otherModels_ = [rows copy];
-  [otherTableView_ reloadData];
+  [self refreshOtherModelsCollection];
   [self updateOtherModelActions];
 }
 
@@ -454,6 +474,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   [otherTableView_ setDelegate:self];
   [scrollView setDocumentView:otherTableView_];
   [detailView_ addSubview:scrollView];
+  [self refreshOtherModelsCollection];
 
   otherModelActionsSegmented_ = [[[NSSegmentedControl alloc]
     initWithFrame:NSMakeRect(kStrappyEditorInset, 14.0, 168.0, 28.0)]
@@ -640,7 +661,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     priceValid = YES;
     price = StrappyEditorPricePerToken(object, &priceValid);
     if (!priceValid) {
-      [otherTableView_ reloadData];
+      [self refreshOtherModelsCollection];
       [self showError:nil
                 title:NSLocalizedString(@"Price Must Be Zero or Greater", nil)];
       return;
@@ -658,7 +679,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   }
   error = nil;
   if (![self saveOtherModel:updated creating:draft error:&error]) {
-    [otherTableView_ reloadData];
+    [self refreshOtherModelsCollection];
     [self showError:error title:NSLocalizedString(@"Could Not Save Model", nil)];
   }
 }
@@ -738,7 +759,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   }
   savingModel_ = YES;
   [self updateOtherModelActions];
-  [otherTableView_ reloadData];
+  [self refreshOtherModelsCollection];
   if (creating) {
     [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save model",nil) receiver:self completion:@selector(otherModelSaved:) context:model]
       createManualModelForProviderIdentifier:selectedProviderIdentifier_
@@ -828,7 +849,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
       @"", @"pricing_input_cache_read",
       @"", @"pricing_input_cache_write",
       nil];
-    [otherTableView_ reloadData];
+    [self refreshOtherModelsCollection];
     [self updateOtherModelActions];
   }
   row = (NSInteger)[otherModels_ count];
@@ -896,7 +917,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   if ([self otherRowIsDraft:[otherTableView_ selectedRow]]) {
     [draftOtherModel_ release];
     draftOtherModel_ = nil;
-    [otherTableView_ reloadData];
+    [self refreshOtherModelsCollection];
     [self updateOtherModelActions];
     return;
   }
@@ -908,7 +929,7 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 
   savingModel_ = YES;
   [self updateOtherModelActions];
-  [otherTableView_ reloadData];
+  [self refreshOtherModelsCollection];
   [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete model",nil) receiver:self completion:@selector(otherModelSaved:) context:nil]
       archiveManualModelForProviderIdentifier:selectedProviderIdentifier_
       wireModelID:StrappyEditorString(model, @"wire_model_id") error:NULL];
@@ -1012,6 +1033,8 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
 
 - (void)dealloc
 {
+  [otherTableView_collection_ invalidate]; [otherTableView_collection_ release];
+  [providerTableView_collection_ invalidate]; [providerTableView_collection_ release];
   [NSObject cancelPreviousPerformRequestsWithTarget:self];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [providerTableView_ setDataSource:nil];

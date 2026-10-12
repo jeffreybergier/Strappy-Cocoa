@@ -328,6 +328,13 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
 @end
 
 @implementation StrappyPreferencesDatabaseStudyViewController
+- (id)collectionIdentifierForSection:(NSInteger)section
+{ return [[studySections_ objectAtIndex:(NSUInteger)section] objectForKey:@"title"]; }
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  NSArray *rows = [[studySections_ objectAtIndex:(NSUInteger)section] objectForKey:@"rows"];
+  return [rows count] <= AICollectionIdentityLimit ? [rows valueForKey:@"database_id"] : nil;
+}
 
 - (id)init
 {
@@ -440,7 +447,7 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
     expandedDatabaseIdentifier_ = nil;
   }
   [self invalidateExpandedStudyMeasurement];
-  [[self tableView] reloadData];
+  [self refreshCollection];
 }
 
 - (void)updateStudyProgress

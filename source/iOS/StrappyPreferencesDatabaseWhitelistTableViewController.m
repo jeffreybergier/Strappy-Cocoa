@@ -1,5 +1,6 @@
 #import "StrappyAsync.h"
 #import "StrappyPreferencesDatabaseWhitelistTableViewController.h"
+#import <AltivecCocoa/AICollectionController.h>
 
 #import "AIFontAwesome.h"
 #import "FileScanner.h"
@@ -175,6 +176,7 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
 
 @interface StrappyPreferencesDatabaseWhitelistTableViewController ()
   <UIActionSheetDelegate>
+@property (nonatomic, strong) AICollectionController *catalogCollection;
 @property (nonatomic, assign) BOOL scanning;
 @property (nonatomic, assign) BOOL hiddenMode;
 @property (nonatomic, copy) NSArray *databaseSections;
@@ -189,6 +191,16 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
 @end
 
 @implementation StrappyPreferencesDatabaseWhitelistTableViewController
+- (NSArray *)collectionSections
+{
+  NSMutableArray *sections = [NSMutableArray array];
+  for (NSDictionary *section in [self databaseSections]) {
+    NSMutableDictionary *metadata = [section mutableCopy];
+    [metadata setObject:[section objectForKey:@"app_group_key"] forKey:@"id"];
+    [sections addObject:metadata];
+  }
+  return sections;
+}
 
 - (instancetype)init
 {
@@ -271,6 +283,7 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
 - (void)searchBar:(UISearchBar *)searchBar textDidChange:(NSString *)searchText
 {
   (void)searchBar; (void)searchText;
+  [[self catalogCollection] cancel];
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyRows) object:nil];
   [self performSelector:@selector(applyRows) withObject:nil afterDelay:0.15];
 }
@@ -293,27 +306,29 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
     [[NSSortDescriptor alloc] initWithKey:@"name" ascending:YES],nil];
   [self setStatusMessage:NSLocalizedString(@"Loading…",nil)];
   [self refreshStatusToolbar];
-  [[StrappyAsync queryTarget:[FileScanner sharedScanner] receiver:self completion:@selector(catalogRowsLoaded:) context:[self currentSearchText] ? [self currentSearchText] : @""]
-    catalogSnapshotMatchingSearch:[self currentSearchText] showHidden:[self hiddenMode] sortDescriptors:descriptors error:NULL];
+  if (![self catalogCollection]) [self setCatalogCollection:[[AICollectionController alloc]
+      initWithTarget:self selector:@selector(catalogRowsLoaded:) builder:[FileScanner class]]];
+  [[self catalogCollection] request:[NSDictionary dictionaryWithObjectsAndKeys:
+      [self currentSearchText] ?: @"",@"search",[NSNumber numberWithBool:[self hiddenMode]],@"hidden",
+      descriptors,@"sort",nil]];
 }
 
-- (void)catalogRowsLoaded:(StrappyAsyncResult *)result
+- (void)catalogRowsLoaded:(NSDictionary *)result
 {
-  NSString *search = [self currentSearchText] ? [self currentSearchText] : @"";
-  if (![search isEqual:[result context]]) return;
-  NSError *error = [result error];
-  FileScannerCatalogRows *rows = [[result value] objectForKey:@"rows"];
-  NSArray *sections = [[result value] objectForKey:@"sections"];
+  NSError *error = [result objectForKey:@"error"];
+  FileScannerCatalogRows *rows = [result objectForKey:@"rows"];
+  NSArray *sections = [result objectForKey:@"sections"];
   if (sections == nil) {
     [self setRows:[NSArray array]];
     [self setDatabaseSections:[NSArray array]];
-    [[self tableView] reloadData];
+    [self refreshCollection];
     [self setStatusMessage:[error localizedDescription]];
   } else {
     [self setStatusMessage:nil];
+    if ([[self rows] isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)[self rows] invalidatePages];
     [self setRows:rows];
     [self setDatabaseSections:sections];
-    [[self tableView] reloadData];
+    [[self collectionTableAdapter] applySnapshot:[result objectForKey:@"collection"]];
   }
   [self refreshStatusToolbar];
 }
@@ -361,7 +376,7 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
   _scanning = scanning;
   [[self scanButton] setEnabled:_scanning ? NO : YES];
   [self setWorking:_scanning];
-  [[self tableView] reloadData];
+  [self refreshCollection];
   [self refreshStatusToolbar];
 }
 
@@ -666,6 +681,7 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 
 - (void)dealloc
 {
+  [_catalogCollection invalidate];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [[self scanButton] setTarget:nil];
 }

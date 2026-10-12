@@ -110,6 +110,15 @@ enum {
 @end
 
 @implementation PreferencesTableViewController
+- (NSArray *)collectionIdentifiersForSection:(NSInteger)section
+{
+  if (section != kStrappyPreferencesSectionAccounts)
+    return [self collectionFixedIdentifiersForSection:section];
+  NSMutableArray *ids = [[[self accounts] valueForKey:@"id"] mutableCopy];
+  if (!ids) ids = [NSMutableArray array];
+  [ids addObject:@"add-account"];
+  return ids;
+}
 
 - (instancetype)init
 {
@@ -203,7 +212,7 @@ enum {
   } else {
     [self setAccounts:accounts];
   }
-  [[self tableView] reloadData];
+  [self refreshCollection];
 }
 
 - (void)providerAccountsDidChange:(NSNotification *)notification
@@ -215,7 +224,7 @@ enum {
 - (void)longRunningPreferenceWorkDidChange:(NSNotification *)notification
 {
   (void)notification;
-  [[self tableView] reloadData];
+  [self refreshCollection];
 }
 
 - (void)doneAction:(id)sender

@@ -1,8 +1,9 @@
+#import <AltivecCocoa/AICollectionTableViewController.h>
 #import <UIKit/UIKit.h>
 
 @class StrappyPreferencesStatusToolbarView;
 
-@interface StrappyPreferencesDatabaseStudyViewController : UITableViewController
+@interface StrappyPreferencesDatabaseStudyViewController : AICollectionTableViewController
   <UIAlertViewDelegate, UIActionSheetDelegate> {
  @private
   NSArray *studyRows_;

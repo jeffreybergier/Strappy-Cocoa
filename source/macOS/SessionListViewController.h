@@ -1,3 +1,5 @@
+#import <AltivecCocoa/AICollectionController.h>
+#import <AltivecCocoa/AICollectionTableAdapter.h>
 #import <AppKit/AppKit.h>
 #import "AICookieCutterWindowController.h"
 #import "XPAppKit.h"
@@ -14,7 +16,9 @@
 
 @interface SessionListViewController : AIViewController
     <XPTableViewDataSource, XPTableViewDelegate> {
+  AICollectionTableAdapter *tableView_collection_;
  @private
+  AICollectionController *sidebarCollection_;
   NSScrollView *scrollView_;
   NSTableView  *tableView_;
   NSView       *toolbarView_;
