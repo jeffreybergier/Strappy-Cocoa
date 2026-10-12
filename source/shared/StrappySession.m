@@ -1,3 +1,4 @@
+#import <AIStoreObserver.h>
 #import "StrappyAsync.h"
 #include "strappy_run.h"
 #import "strappy_store_client.h"
@@ -743,42 +744,22 @@ static void StrappyMergeOptions(StrappySessionOptions *target,
   if (mask & StrappySessionOptionRoundLimit) [target setRoundLimit:[source roundLimit]];
 }
 
-static unsigned int StrappyPendingStoreTopics;
-static unsigned int StrappyPendingGlobalTopics;
-static NSMutableDictionary *StrappyPendingStoreScopes;
+static AIStoreObserver *StrappyStoreObserver;
 static void StrappyStoreChanged(unsigned int topics, long long session)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-  BOOL schedule;
-  @synchronized([StrappySession class]) {
-    schedule = StrappyPendingStoreTopics == 0;
-    StrappyPendingStoreTopics |= topics;
-    if (!session) StrappyPendingGlobalTopics |= topics;
-    else {
-      NSNumber *key = [NSNumber numberWithLongLong:session];
-      if (!StrappyPendingStoreScopes) StrappyPendingStoreScopes = [[NSMutableDictionary alloc] init];
-      [StrappyPendingStoreScopes setObject:[NSNumber numberWithUnsignedInt:
-        topics | [[StrappyPendingStoreScopes objectForKey:key] unsignedIntValue]] forKey:key];
-    }
-  }
-  if (schedule) [StrappySession performSelectorOnMainThread:@selector(serviceStoreChanged:)
-                                 withObject:nil waitUntilDone:NO];
+  [StrappyStoreObserver publishTopics:topics
+    scope:[NSNumber numberWithLongLong:session] generation:0];
   [pool release];
 }
 
 @implementation StrappySession
 
-+ (void)serviceStoreChanged:(id)ignored
++ (void)serviceStoreChanged:(NSDictionary *)change
 {
-  unsigned int topics, globalTopics;
-  NSDictionary *scopes;
-  (void)ignored;
-  @synchronized(self) {
-    topics = StrappyPendingStoreTopics; StrappyPendingStoreTopics = 0;
-    globalTopics = StrappyPendingGlobalTopics; StrappyPendingGlobalTopics = 0;
-    scopes = [[StrappyPendingStoreScopes copy] autorelease];
-    [StrappyPendingStoreScopes removeAllObjects];
-  }
+  unsigned int topics = [[change objectForKey:@"topics"] unsignedIntValue];
+  unsigned int globalTopics = [[change objectForKey:@"globalTopics"] unsignedIntValue];
+  NSDictionary *scopes = [change objectForKey:@"scopes"];
   if (topics & (STRAPPY_STORE_CATALOG | STRAPPY_STORE_RUN)) {
     unsigned int active, last, result;
     strappy_store_client_work_status(&active,&last,&result);
@@ -1143,6 +1124,9 @@ static void StrappyStoreChanged(unsigned int topics, long long session)
   } else {
     socketDirectory = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/Strappy"];
   }
+  if (!StrappyStoreObserver) StrappyStoreObserver = [[AIStoreObserver alloc]
+    initWithStoreIdentity:[self sessionsDatabasePath] target:self
+    selector:@selector(serviceStoreChanged:)];
   if (!strappy_store_client_start([[socketDirectory stringByAppendingPathComponent:@"service.sock"] fileSystemRepresentation],
       [[self sessionsDatabasePath] fileSystemRepresentation], StrappyStoreChanged)) {
     [NSException raise:NSInternalInconsistencyException format:@"Could not start the service monitor."];

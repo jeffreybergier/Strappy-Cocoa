@@ -1,4 +1,5 @@
 #include "strappy_store_client.h"
+#include <ai_store.h>
 #include "strappy_db.h"
 #include "strappy_ipc.h"
 #include "XPFoundation/strappy_ipc_platform.h"
@@ -60,41 +61,27 @@ void strappy_store_client_work_status(unsigned int *active, unsigned int *last, 
     pthread_mutex_unlock(&strappy_status_mutex);
 }
 
-#define STRAPPY_STORE_JOURNAL 256U
-static struct { uint64_t revision; unsigned int topics; long long session, request; }
-    strappy_changes[STRAPPY_STORE_JOURNAL];
-static uint64_t strappy_change_revision;
+static ai_store_feed *strappy_changes;
+static pthread_once_t strappy_changes_once = PTHREAD_ONCE_INIT;
+static void strappy_changes_create(void)
+{
+    strappy_changes = ai_store_feed_create("strappy.sqlite", 256);
+}
 static void strappy_store_record_change(unsigned int topics, long long session, long long request)
 {
-    unsigned int index;
-    pthread_mutex_lock(&strappy_status_mutex);
-    ++strappy_change_revision;
-    index=(unsigned int)(strappy_change_revision % STRAPPY_STORE_JOURNAL);
-    strappy_changes[index].revision=strappy_change_revision;
-    strappy_changes[index].topics=topics;
-    strappy_changes[index].session=session; strappy_changes[index].request=request;
-    pthread_mutex_unlock(&strappy_status_mutex);
+    pthread_once(&strappy_changes_once, strappy_changes_create);
+    ai_store_feed_publish(strappy_changes, topics, session, request, !request);
 }
 int strappy_store_client_changes(long long session, uint64_t after,
     uint64_t *next, long long requests[STRAPPY_STORE_MAX_CHANGES])
 {
-    uint64_t revision;
-    int count=0, i;
-    pthread_mutex_lock(&strappy_status_mutex);
-    *next=strappy_change_revision;
-    if (!after || after>*next || *next-after>STRAPPY_STORE_JOURNAL) count=-1;
-    else for (revision=after+1; revision<=*next; ++revision) {
-        unsigned int index=(unsigned int)(revision % STRAPPY_STORE_JOURNAL);
-        if (!(strappy_changes[index].topics & STRAPPY_STORE_LEDGER) ||
-            (strappy_changes[index].session && strappy_changes[index].session!=session)) continue;
-        if (!strappy_changes[index].request) { count=-1; break; }
-        for (i=0;i<count;++i) if (requests[i]==strappy_changes[index].request) break;
-        if (i==count) {
-            if (count==STRAPPY_STORE_MAX_CHANGES) { count=-1; break; }
-            requests[count++]=strappy_changes[index].request;
-        }
-    }
-    pthread_mutex_unlock(&strappy_status_mutex);
+    ai_store_change changes[STRAPPY_STORE_MAX_CHANGES];
+    int count, i;
+    pthread_once(&strappy_changes_once, strappy_changes_create);
+    *next = 0;
+    count = ai_store_feed_read(strappy_changes, after, STRAPPY_STORE_LEDGER,
+        session, next, changes, STRAPPY_STORE_MAX_CHANGES);
+    for (i = 0; i < count; ++i) requests[i] = changes[i].record;
     return count;
 }
 typedef struct strappy_store_monitor {

@@ -100,6 +100,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
          object:nil];
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelListReadFailed:)
     name:StrappyModelListReadFailedNotification object:nil];
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelPageLoaded:) name:AIPagedRowsDidLoadNotification object:nil];
   [self setRefreshingModels:[StrappySession isModelCatalogRefreshInFlight]];
 }
 
@@ -156,6 +157,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
   NSError *error = [result error];
   StrappyModelRows *rows = [[result value] objectForKey:@"rows"];
   NSArray *sections = [[result value] objectForKey:@"sections"];
+  if ([[self rows] isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)[self rows] invalidatePages];
   if (sections == nil) {
     [self setRows:[NSArray array]];
     [self setModelSections:[NSArray array]];
@@ -168,6 +170,11 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
   }
   [[self tableView] reloadData];
   [self refreshStatusToolbar];
+}
+
+- (void)modelPageLoaded:(NSNotification *)notification
+{
+  if ([notification object] == [self rows]) [[self tableView] reloadData];
 }
 
 - (void)modelListReadFailed:(NSNotification *)notification
@@ -189,6 +196,9 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
   NSUInteger count = [[section objectForKey:@"count"] unsignedIntegerValue];
   NSUInteger offset = [[section objectForKey:@"offset"] unsignedIntegerValue];
   if ([indexPath row] < 0 || (NSUInteger)[indexPath row] >= count) return nil;
+  if ([[self rows] isKindOfClass:[AIPagedRows class]])
+    return [(AIPagedRows *)[self rows] requestObjectAtIndex:offset + (NSUInteger)[indexPath row]
+      placeholder:[NSDictionary dictionary]];
   return [[self rows] objectAtIndex:offset + (NSUInteger)[indexPath row]];
 }
 
@@ -372,7 +382,7 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
   willSelectRowAtIndexPath:(NSIndexPath *)indexPath
 {
   (void)tableView;
-  return ([self modelRowAtIndexPath:indexPath] != nil) ? indexPath : nil;
+  return [[[self modelRowAtIndexPath:indexPath] objectForKey:@"id"] length] ? indexPath : nil;
 }
 
 - (void)tableView:(UITableView *)tableView
@@ -382,7 +392,7 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
   row = [self modelRowAtIndexPath:indexPath];
-  if (row != nil) {
+  if ([[row objectForKey:@"id"] length]) {
     [self useRow:row atIndexPath:indexPath];
   }
 }

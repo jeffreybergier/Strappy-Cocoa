@@ -438,6 +438,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       name:FileScannerDatabaseCatalogScanDidFinishNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelListReadFailed:)
       name:StrappyModelListReadFailedNotification object:nil];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelPageLoaded:) name:AIPagedRowsDidLoadNotification object:nil];
     [self buildContentView];
     [self loadSystemPrompt];
     [self setModelCatalogRefreshing:[StrappySession isModelCatalogRefreshInFlight]];
@@ -1342,10 +1343,17 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
   }
   modelCatalogDirty_ = NO;
   noAvailableModelAccounts_ = ![rows hasConfiguredAccounts];
-  [rows retain]; [modelRows_ release]; modelRows_ = rows;
+  [rows retain];
+  if ([modelRows_ isKindOfClass:[AIPagedRows class]]) [(AIPagedRows *)modelRows_ invalidatePages];
+  [modelRows_ release]; modelRows_ = rows;
   [modelTableView_ reloadData];
   [self selectModelTableRowWithIdentifier:identifier];
   [self refreshModelStatus];
+}
+
+- (void)modelPageLoaded:(NSNotification *)notification
+{
+  if ([notification object] == modelRows_) [modelTableView_ reloadData];
 }
 
 - (void)modelListReadFailed:(NSNotification *)notification
@@ -2030,7 +2038,9 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return @"";
     }
 
-    model = [modelRows_ objectAtIndex:(NSUInteger)row];
+    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
+      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
+      [modelRows_ objectAtIndex:(NSUInteger)row];
     identifier = [tableColumn identifier];
     if ([identifier isEqualToString:@"model_allowed"]) {
       return [self allowedValueForModelRow:model];
@@ -2133,7 +2143,9 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return @"";
     }
 
-    model = [modelRows_ objectAtIndex:(NSUInteger)row];
+    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
+      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
+      [modelRows_ objectAtIndex:(NSUInteger)row];
     identifier = [tableColumn identifier];
     if ([identifier isEqualToString:@"model_allowed"]) {
       if ([self modelRowIsDefault:model]) {
@@ -2292,7 +2304,9 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return;
     }
 
-    model = [modelRows_ objectAtIndex:(NSUInteger)row];
+    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
+      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
+      [modelRows_ objectAtIndex:(NSUInteger)row];
     if ([self modelRowIsDefault:model] && !checked) {
       [modelTableView_ reloadData];
       [self setModelStatusErrorMessage:
@@ -2389,8 +2403,10 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return NO;
     }
 
-    model = [modelRows_ objectAtIndex:(NSUInteger)row];
-    return [self modelRowIsDefault:model] ? NO : YES;
+    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
+      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
+      [modelRows_ objectAtIndex:(NSUInteger)row];
+    return [StrappyStringForModelRow(model, @"id") length] && ![self modelRowIsDefault:model];
   }
 
   if (![[tableColumn identifier] isEqualToString:@"allowed"] &&
@@ -2465,8 +2481,10 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return;
     }
 
-    model = [modelRows_ objectAtIndex:(NSUInteger)row];
-    [cell setEnabled:([self modelRowIsDefault:model] ? NO : YES)];
+    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
+      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
+      [modelRows_ objectAtIndex:(NSUInteger)row];
+    [cell setEnabled:([StrappyStringForModelRow(model, @"id") length] && ![self modelRowIsDefault:model])];
     return;
   }
 

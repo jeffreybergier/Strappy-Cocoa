@@ -8,14 +8,12 @@ NSString * const StrappyModelListReadFailedNotification = @"StrappyModelListRead
 {
   if ((self = [super init])) {
     source_ = [source retain];
-    pages_ = [[NSMutableDictionary alloc] init];
-    pageOrder_ = [[NSMutableArray alloc] init];
   }
   return self;
 }
 - (void)dealloc
 {
-  [source_ release]; [pages_ release]; [pageOrder_ release]; [readError_ release];
+  [source_ release]; [readError_ release];
   [super dealloc];
 }
 - (id)copyWithZone:(NSZone *)zone { (void)zone; return [self retain]; }
@@ -27,6 +25,7 @@ NSString * const StrappyModelListReadFailedNotification = @"StrappyModelListRead
 - (void)recordReadError:(NSError *)error
 {
   if (readError_ != nil || error == nil) return;
+  [super recordReadError:error];
   readError_ = [error retain];
   [[NSNotificationQueue defaultQueue] enqueueNotification:
     [NSNotification notificationWithName:StrappyModelListReadFailedNotification object:self
@@ -35,48 +34,37 @@ NSString * const StrappyModelListReadFailedNotification = @"StrappyModelListRead
 }
 - (BOOL)filterWithSearch:(NSString *)search sortDescriptors:(NSArray *)descriptors error:(NSError **)error
 {
-  if (![source_ filterWithSearch:search sortDescriptors:descriptors error:error]) return NO;
-  [pages_ removeAllObjects]; [pageOrder_ removeAllObjects];
+  BOOL ok;
+  [pageReadLock_ lock];
+  ok = [source_ filterWithSearch:search sortDescriptors:descriptors error:error];
+  [pageReadLock_ unlock];
+  if (!ok) return NO;
+  [self invalidatePages];
   [readError_ release]; readError_ = nil;
   return YES;
 }
 - (NSArray *)providerSectionsWithError:(NSError **)error
 {
-  return [source_ providerSectionsWithError:error];
+  NSArray *sections;
+  [pageReadLock_ lock];
+  sections = [[source_ providerSectionsWithError:error] retain];
+  [pageReadLock_ unlock];
+  return [sections autorelease];
 }
 - (NSUInteger)indexForModelIdentifier:(NSString *)identifier
 {
   NSError *error = nil;
   NSUInteger index;
   if (![identifier isKindOfClass:[NSString class]] || [identifier length] == 0U) return NSNotFound;
+  [pageReadLock_ lock];
   index = [source_ indexForModelIdentifier:identifier error:&error];
+  [pageReadLock_ unlock];
   [self recordReadError:error];
   return index;
 }
-- (id)objectAtIndex:(NSUInteger)index
+- (NSArray *)pageAtOffset:(NSUInteger)offset error:(NSError **)error
 {
-  NSUInteger offset = (index / 32U) * 32U;
-  NSNumber *key = [NSNumber XP_numberWithUnsignedInteger:offset];
-  NSArray *page = [pages_ objectForKey:key];
-  if (index >= [self count]) [NSException raise:NSRangeException format:@"Model index outside snapshot"];
-  if (page == nil && readError_ == nil) {
-    NSError *error = nil;
-    page = [source_ pageAtOffset:offset error:&error];
-    if (page == nil) [self recordReadError:error];
-    else {
-      if ([pageOrder_ count] >= 4U) {
-        [pages_ removeObjectForKey:[pageOrder_ objectAtIndex:0U]];
-        [pageOrder_ removeObjectAtIndex:0U];
-      }
-      [pages_ setObject:page forKey:key];
-    }
-  }
-  if (page != nil) {
-    [pageOrder_ removeObject:key]; [pageOrder_ addObject:key];
-    if (index - offset < [page count]) return [page objectAtIndex:index - offset];
-  }
-  /* No model ID on failure, so a checkbox cannot modify a different model. */
-  return [NSDictionary dictionaryWithObject:NSLocalizedString(@"Model list could not be loaded.",nil) forKey:@"name"];
+  return [source_ pageAtOffset:offset error:error];
 }
 + (NSString *)searchTextForValues:(NSArray *)values
 {

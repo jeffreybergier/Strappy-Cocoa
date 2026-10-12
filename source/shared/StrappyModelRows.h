@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#import <AIPagedRows.h>
 
 extern NSString * const StrappyModelListReadFailedNotification;
 
@@ -16,11 +17,9 @@ extern NSString * const StrappyModelListReadFailedNotification;
 - (NSUInteger)indexForModelIdentifier:(NSString *)identifier error:(NSError **)error;
 @end
 
-@interface StrappyModelRows : NSArray {
+@interface StrappyModelRows : AIPagedRows {
  @private
   id<StrappyModelListSource> source_;
-  NSMutableDictionary *pages_;
-  NSMutableArray *pageOrder_;
   NSError *readError_;
 }
 - (id)initWithModelSource:(id<StrappyModelListSource>)source;

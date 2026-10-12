@@ -1,3 +1,4 @@
+#import <AIPagedRows.h>
 #import <Foundation/Foundation.h>
 
 extern NSString * const FileScannerDatabaseCatalogScanDidStartNotification;
@@ -13,11 +14,9 @@ typedef enum FileScannerDatabaseScanMode {
 
 extern NSString * const FileScannerCatalogReadFailedNotification;
 
-@interface FileScannerCatalogRows : NSArray {
+@interface FileScannerCatalogRows : AIPagedRows {
  @private
   void *reader_;
-  NSMutableDictionary *pages_;
-  NSMutableArray *pageOrder_;
   NSError *readError_;
 }
 /* Reorders the existing snapshot atomically and clears its row cache. */

@@ -60,6 +60,7 @@ Strappy_RESOURCES = $(filter-out Resources/Info.plist,$(wildcard Resources/*)) $
 Strappy_LOCALIZATIONS = $(BUNDLE_LOCALIZATION_DIRS)
 Strappy_GENERATED = $(FONTAWESOME_GENERATED)
 Strappy_COCOA = static
+Strappy_SQLITE = 1
 strappyd_TYPE = daemon
 strappyd_SOURCES = ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES)
 strappyd_CORE = static

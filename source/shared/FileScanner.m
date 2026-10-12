@@ -562,14 +562,12 @@ static void FileScannerCatalogGroup(void *context, const char *name,
     strappy_free_string(message); [self release]; return nil;
   }
   reader_ = reader;
-  pages_ = [[NSMutableDictionary alloc] init];
-  pageOrder_ = [[NSMutableArray alloc] init];
   return self;
 }
 - (void)dealloc
 {
   strappy_db_catalog_close(reader_);
-  [pages_ release]; [pageOrder_ release]; [readError_ release]; [super dealloc];
+  [readError_ release]; [super dealloc];
 }
 - (id)copyWithZone:(NSZone *)zone { (void)zone; return [self retain]; }
 - (NSUInteger)count { return (NSUInteger)strappy_db_catalog_count(reader_); }
@@ -577,24 +575,29 @@ static void FileScannerCatalogGroup(void *context, const char *name,
 - (NSUInteger)allowedCount { return (NSUInteger)strappy_db_catalog_allowed_count(reader_); }
 - (NSUInteger)hiddenCount { return (NSUInteger)strappy_db_catalog_hidden_count(reader_); }
 - (NSError *)readError { return readError_; }
-- (void)recordReadError:(char *)message
+- (void)recordReadError:(NSError *)error
 {
-  if (readError_ == nil) {
-    readError_ = [[FileScanner errorFromCString:message] retain];
+  [super recordReadError:error];
+  if (readError_ == nil && error != nil) {
+    readError_ = [error retain];
     [[NSNotificationQueue defaultQueue] enqueueNotification:
       [NSNotification notificationWithName:FileScannerCatalogReadFailedNotification object:self
         userInfo:[NSDictionary dictionaryWithObject:readError_ forKey:@"error"]]
       postingStyle:NSPostASAP];
   }
-  strappy_free_string(message);
 }
 - (NSUInteger)indexForCatalogIdentifier:(NSNumber *)identifier
 {
   size_t index;
   char *message = NULL;
   if (![identifier isKindOfClass:[NSNumber class]]) return NSNotFound;
-  if (!strappy_db_catalog_index(reader_,[identifier longLongValue],&index,&message)) {
-    [self recordReadError:message]; return NSNotFound;
+  int ok;
+  [pageReadLock_ lock];
+  ok = strappy_db_catalog_index(reader_,[identifier longLongValue],&index,&message);
+  [pageReadLock_ unlock];
+  if (!ok) {
+    [self recordReadError:[FileScanner errorFromCString:message]];
+    strappy_free_string(message); return NSNotFound;
   }
   return index == (size_t)-1 ? NSNotFound : (NSUInteger)index;
 }
@@ -613,12 +616,16 @@ static void FileScannerCatalogGroup(void *context, const char *name,
     sort[index].key = [[descriptor key] UTF8String];
     sort[index].ascending = [descriptor ascending] ? 1 : 0;
   }
-  if (!strappy_db_catalog_query(reader_,[search UTF8String],showHidden ? 1 : 0,
-      sort,(size_t)[descriptors count],&message)) {
+  int ok;
+  [pageReadLock_ lock];
+  ok = strappy_db_catalog_query(reader_,[search UTF8String],showHidden ? 1 : 0,
+      sort,(size_t)[descriptors count],&message);
+  [pageReadLock_ unlock];
+  if (!ok) {
     if (error != NULL) *error = [FileScanner errorFromCString:message];
     strappy_free_string(message); return NO;
   }
-  [pages_ removeAllObjects]; [pageOrder_ removeAllObjects];
+  [self invalidatePages];
   [readError_ release]; readError_ = nil;
   return YES;
 }
@@ -628,42 +635,30 @@ static void FileScannerCatalogGroup(void *context, const char *name,
   char *message = NULL;
   groups.source = self;
   groups.sections = [NSMutableArray array];
-  if (!strappy_db_catalog_groups(reader_,FileScannerCatalogGroup,&groups,&message)) {
+  int ok;
+  [pageReadLock_ lock];
+  ok = strappy_db_catalog_groups(reader_,FileScannerCatalogGroup,&groups,&message);
+  [pageReadLock_ unlock];
+  if (!ok) {
     if (error != NULL) *error = [FileScanner errorFromCString:message];
     strappy_free_string(message); return nil;
   }
   return groups.sections;
 }
-- (id)objectAtIndex:(NSUInteger)index
+- (NSArray *)pageAtOffset:(NSUInteger)offset error:(NSError **)error
 {
-  NSUInteger offset = (index / 32U) * 32U;
-  NSNumber *key = [NSNumber XP_numberWithUnsignedInteger:offset];
-  NSArray *page = [pages_ objectForKey:key];
-  if (index >= [self count]) [NSException raise:NSRangeException format:@"Catalog index outside snapshot"];
-  if (page == nil && readError_ == nil) {
-    strappy_discovered_database_record_list records;
-    char *message = NULL;
-    if (!strappy_db_catalog_page(reader_,(size_t)offset,&records,&message)) {
-      [self recordReadError:message];
-    } else {
-      NSMutableArray *rows = [NSMutableArray arrayWithCapacity:records.count];
-      size_t row;
-      for (row = 0U; row < records.count; row++)
-        [rows addObject:[FileScanner dictionaryFromDiscoveredDatabaseRecord:&records.records[row]]];
-      strappy_discovered_database_record_list_destroy(&records);
-      if ([pageOrder_ count] >= 4U) {
-        [pages_ removeObjectForKey:[pageOrder_ objectAtIndex:0]];
-        [pageOrder_ removeObjectAtIndex:0];
-      }
-      page = rows;
-      [pages_ setObject:page forKey:key];
-    }
+  strappy_discovered_database_record_list records;
+  char *message = NULL;
+  NSMutableArray *rows;
+  size_t row;
+  if (!strappy_db_catalog_page(reader_,(size_t)offset,&records,&message)) {
+    if (error) *error = [FileScanner errorFromCString:message];
+    strappy_free_string(message); return nil;
   }
-  if (page != nil) {
-    [pageOrder_ removeObject:key]; [pageOrder_ addObject:key];
-    if (index - offset < [page count]) return [page objectAtIndex:index - offset];
-  }
-  /* No catalog ID: an unreadable row cannot accidentally authorize a database. */
-  return [NSDictionary dictionaryWithObject:NSLocalizedString(@"Rows could not be loaded.",nil) forKey:@"path"];
+  rows = [NSMutableArray arrayWithCapacity:records.count];
+  for (row = 0; row < records.count; ++row)
+    [rows addObject:[FileScanner dictionaryFromDiscoveredDatabaseRecord:&records.records[row]]];
+  strappy_discovered_database_record_list_destroy(&records);
+  return rows;
 }
 @end

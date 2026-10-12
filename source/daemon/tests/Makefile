@@ -44,6 +44,7 @@ FONTAWESOME_FONT_FILES := \
 	$(FONTAWESOME_FONT_DIR)/FA7-Regular-400.otf \
 	$(FONTAWESOME_FONT_DIR)/FA7-Brands-400.otf
 
+CPPFLAGS += -I$(ALTIVEC_ROOT)/libs/cocoa-sqlite
 CPPFLAGS += -DSTRAPPY_DB_WRITER=1 -I$(SHARED_DIR) -I.. -I$(CJSON_DIR)
 CFLAGS ?= -std=c99 -Wall -Wextra -Wconversion -Wsign-conversion -Wfloat-conversion
 SQLITE_LIBS ?= -lsqlite3
@@ -478,8 +479,8 @@ store-test: $(BUILD_DIR)/store_harness $(BUILD_DIR)/store_reader_harness
 
 test: store-test
 
-$(BUILD_DIR)/store_monitor_harness: store_monitor_harness.c $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+$(BUILD_DIR)/store_monitor_harness: store_monitor_harness.c $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c $(ALTIVEC_ROOT)/libs/cocoa-sqlite/ai_store.c $(ALTIVEC_ROOT)/libs/cocoa-sqlite/ai_store.h | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c $(ALTIVEC_ROOT)/libs/cocoa-sqlite/ai_store.c -lsqlite3 -pthread -o $@
 
 .PHONY: store-monitor-test
 store-monitor-test: $(BUILD_DIR)/strappyd $(BUILD_DIR)/store_monitor_harness
@@ -510,8 +511,8 @@ mutation-test: $(BUILD_DIR)/strappyd
 
 test: mutation-test
 
-$(BUILD_DIR)/control_client_harness: control_client_harness.c $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c ../../shared/strappy_ipc.c ../../shared/strappy_ipc.h | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -Wl,--wrap=strappy_ipc_send -o $@
+$(BUILD_DIR)/control_client_harness: control_client_harness.c $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c ../../shared/strappy_ipc.c ../../shared/strappy_ipc.h $(ALTIVEC_ROOT)/libs/cocoa-sqlite/ai_store.c $(ALTIVEC_ROOT)/libs/cocoa-sqlite/ai_store.h | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c $(ALTIVEC_ROOT)/libs/cocoa-sqlite/ai_store.c -lsqlite3 -pthread -Wl,--wrap=strappy_ipc_send -o $@
 .PHONY: control-client-test
 control-client-test: $(BUILD_DIR)/control_client_harness
 	python3 control_client_harness.py $(BUILD_DIR)/control_client_harness
@@ -529,8 +530,8 @@ auth-test: $(BUILD_DIR)/auth_harness
 	$(BUILD_DIR)/auth_harness
 test: auth-test
 
-$(BUILD_DIR)/store_changes_harness: store_changes_harness.c $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c | $(BUILD_DIR)
-	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+$(BUILD_DIR)/store_changes_harness: store_changes_harness.c $(STRAPPY_STORE_SOURCES) ../../shared/strappy_store_client.c $(ALTIVEC_ROOT)/libs/cocoa-sqlite/ai_store.c $(ALTIVEC_ROOT)/libs/cocoa-sqlite/ai_store.h | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) -USTRAPPY_DB_WRITER -DSTRAPPY_DB_UI=1 $(CFLAGS) -D_GNU_SOURCE $< $(STRAPPY_STORE_SOURCES) ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c $(CJSON_DIR)/cJSON.c $(ALTIVEC_ROOT)/libs/cocoa-sqlite/ai_store.c -lsqlite3 -pthread -o $@
 .PHONY: store-changes-test
 store-changes-test: $(BUILD_DIR)/store_changes_harness
 	$(BUILD_DIR)/store_changes_harness
