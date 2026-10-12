@@ -171,6 +171,7 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
 @interface StrappySessionOptionsTableViewController ()
 @property (nonatomic, assign) id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;
 @property (nonatomic, copy) NSArray *assistantSets;
+@property (nonatomic, strong) NSMutableDictionary *accessoryCells;
 @property (nonatomic, copy) NSArray *accounts;
 @property (nonatomic, copy) NSArray *models;
 @property (nonatomic, copy) StrappySessionOptions *sessionOptions;
@@ -197,6 +198,19 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
 @end
 
 @implementation StrappySessionOptionsTableViewController
+/* UIKit can create a replacement row before retiring the old cell. Keep one
+ * owner for each controller-owned control, even before its view is attached.
+ * Otherwise two cells repeatedly reclaim the same accessory during layout. */
+- (void)bindAccessory:(UIView *)control toCell:(UITableViewCell *)cell;
+{
+  if (![self accessoryCells]) [self setAccessoryCells:[NSMutableDictionary dictionary]];
+  NSValue *key = [NSValue valueWithNonretainedObject:control];
+  UITableViewCell *old = [[self accessoryCells] objectForKey:key];
+  if (old != cell) [old setAccessoryView:nil];
+  [cell setAccessoryView:control];
+  [[self accessoryCells] setObject:cell forKey:key];
+}
+
 - (NSArray *)collectionIdentifiersForSection:(NSInteger)section
 {
   if (section == kStrappyPromptOptionsSectionAccounts) return [[self accounts] valueForKey:@"id"];
@@ -728,7 +742,7 @@ titleForHeaderInSection:(NSInteger)section
         setOn:capabilityEnabled && [[self sessionOptions] webSearchEnabled]
       animated:NO];
       [[self webSearchSwitch] setEnabled:capabilityEnabled];
-      [cell setAccessoryView:[self webSearchSwitch]];
+      [self bindAccessory:[self webSearchSwitch] toCell:cell];
       return cell;
     }
 
@@ -750,7 +764,7 @@ titleForHeaderInSection:(NSInteger)section
       setOn:capabilityEnabled && [[self sessionOptions] bashEnabled]
     animated:NO];
     [[self bashSwitch] setEnabled:capabilityEnabled];
-    [cell setAccessoryView:[self bashSwitch]];
+    [self bindAccessory:[self bashSwitch] toCell:cell];
     return cell;
   }
 
@@ -771,7 +785,7 @@ titleForHeaderInSection:(NSInteger)section
       setOn:[[self sessionOptions] limitToOneTool]
     animated:NO];
     [cell setAccessoryType:UITableViewCellAccessoryNone];
-    [cell setAccessoryView:[self limitToOneToolSwitch]];
+    [self bindAccessory:[self limitToOneToolSwitch] toCell:cell];
     return cell;
   }
 
@@ -793,7 +807,7 @@ titleForHeaderInSection:(NSInteger)section
       setOn:[[self sessionOptions] answerQualityEnabled]
     animated:NO];
     [cell setAccessoryType:UITableViewCellAccessoryNone];
-    [cell setAccessoryView:[self answerQualitySwitch]];
+    [self bindAccessory:[self answerQualitySwitch] toCell:cell];
     return cell;
   }
 
@@ -813,7 +827,7 @@ titleForHeaderInSection:(NSInteger)section
     [[cell textLabel] setTextColor:[UIColor blackColor]];
     [[self roundLimitSlider] setAccessibilityLabel:title];
     [cell setAccessoryType:UITableViewCellAccessoryNone];
-    [cell setAccessoryView:[self roundLimitControlView]];
+    [self bindAccessory:[self roundLimitControlView] toCell:cell];
     return cell;
   }
 
