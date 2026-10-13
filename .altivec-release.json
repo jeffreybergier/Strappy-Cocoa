@@ -1,0 +1,58 @@
+{
+  "app_name": "Strappy",
+  "tag_prefix": "v",
+  "version": {
+    "source": "source/macOS/Info.plist",
+    "keys": [
+      "CFBundleShortVersionString",
+      "CFBundleVersion"
+    ],
+    "plists": [
+      "source/macOS/Info.plist",
+      "source/iOS/Info.plist"
+    ]
+  },
+  "release": {
+    "commit_message": "chore(release): release {version}"
+  },
+  "targets": [
+    {
+      "name": "macOS",
+      "workdir": "source/macOS",
+      "build": [
+        {
+          "shell": "make clean"
+        },
+        {
+          "shell": "make release"
+        }
+      ],
+      "artifact": "build/macOS/release/Strappy/Strappy.zip",
+      "asset_name": "Strappy-{version}-macOS.zip"
+    },
+    {
+      "name": "iOS",
+      "workdir": "source/iOS",
+      "build": [
+        {
+          "shell": "make clean"
+        },
+        {
+          "shell": "make release"
+        }
+      ],
+      "artifacts": [
+        {
+          "path": "build/iOS/release/Strappy/Strappy-rootful.deb",
+          "asset_name": "Strappy-{version}-iOS-rootful.deb"
+        },
+        {
+          "path": "build/iOS/release/Strappy/Strappy-rootless.deb",
+          "asset_name": "Strappy-{version}-iOS-rootless.deb"
+        }
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "stage_dir": "dist"
+}
