@@ -300,8 +300,6 @@ enum {
   UIViewController *editor = [[self navigationController] topViewController];
   [self setDefaultSessionOptions:options];
   [self setDefaultSessionOptionsLoaded:YES];
-  [[editor view] setUserInteractionEnabled:NO];
-  [[editor navigationItem] setPrompt:NSLocalizedString(@"Saving…",nil)];
   [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save session defaults",nil) receiver:self completion:@selector(defaultsSaved:) context:editor] updateDefaultSessionOptions:options changedFields:changedFields error:NULL];
   return YES;
 }
@@ -309,8 +307,6 @@ enum {
 - (void)defaultsSaved:(StrappyAsyncResult *)result
 {
   UIViewController *editor = [result context];
-  [[editor view] setUserInteractionEnabled:YES];
-  [[editor navigationItem] setPrompt:nil];
   [self setDefaultSessionOptions:nil];
   [self setDefaultSessionOptionsLoaded:NO];
   if ([editor respondsToSelector:@selector(reloadOptionsFromDelegate)])

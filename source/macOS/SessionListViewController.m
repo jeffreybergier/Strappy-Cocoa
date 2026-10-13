@@ -967,7 +967,6 @@ static void StrappyDrawTintedImage(NSImage *image,
   }
 
   creatingSession_ = YES;
-  [self updateToolbarSegments];
 
   [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Create conversation",nil) receiver:self completion:@selector(sessionCreated:) context:nil] createSessionWithError:NULL];
 }
@@ -978,7 +977,6 @@ static void StrappyDrawTintedImage(NSImage *image,
   NSNumber *identifier;
 
   creatingSession_ = NO;
-  [self updateToolbarSegments];
 
   identifier = [session sessionIdentifier];
   if (![result succeeded] || ![identifier isKindOfClass:[NSNumber class]]) return;

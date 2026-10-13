@@ -94,7 +94,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 - (void)configureSessionCell:(UITableViewCell *)cell
                      session:(NSDictionary *)session;
 - (void)notifySelectedSession;
-- (void)setControlsEnabled:(BOOL)enabled;
 - (void)showDeleteError:(NSError *)error;
 - (void)showError:(NSError *)error title:(NSString *)title;
 @end
@@ -185,12 +184,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   navigationController =
     [[UINavigationController alloc] initWithRootViewController:preferences];
   [self XP_presentViewController:navigationController animated:YES];
-}
-
-- (void)setControlsEnabled:(BOOL)enabled
-{
-  [[self addButton] setEnabled:enabled];
-  [[self settingsButton] setEnabled:enabled];
 }
 
 - (void)reloadData
@@ -308,7 +301,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   }
 
   [self setCreatingSession:YES];
-  [self setControlsEnabled:NO];
 
   [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Create conversation",nil) receiver:self completion:@selector(sessionCreated:) context:nil] createSessionWithError:NULL];
 }
@@ -319,7 +311,6 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   NSNumber *identifier;
 
   [self setCreatingSession:NO];
-  [self setControlsEnabled:YES];
 
   identifier = [session sessionIdentifier];
   if (![result succeeded] || ![identifier isKindOfClass:[NSNumber class]]) return;

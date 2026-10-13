@@ -428,8 +428,6 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
   readPrice = valid ? [self priceForFieldAtIndex:6U valid:&valid] : nil;
   writePrice = valid ? [self priceForFieldAtIndex:7U valid:&valid] : nil;
   if (!valid) { [self showMessage:NSLocalizedString(@"Prices must be numbers greater than or equal to zero.", nil) title:NSLocalizedString(@"Invalid Price", nil)]; return; }
-  [[[self navigationItem] rightBarButtonItem] setEnabled:NO];
-  [[self view] setUserInteractionEnabled:NO];
   if ([self model] == nil) {
     [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save model",nil) receiver:self completion:@selector(modelSaved:) context:nil] createManualModelForProviderIdentifier:[self providerIdentifier]
       wireModelID:wireID displayName:name
@@ -451,8 +449,6 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
 
 - (void)modelSaved:(StrappyAsyncResult *)result
 {
-  [[[self navigationItem] rightBarButtonItem] setEnabled:YES];
-  [[self view] setUserInteractionEnabled:YES];
   if ([result succeeded] && [[self view] window] != nil) [self XP_dismissViewControllerAnimated:YES];
 }
 

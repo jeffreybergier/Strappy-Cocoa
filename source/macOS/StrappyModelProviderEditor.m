@@ -758,8 +758,6 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
     return NO;
   }
   savingModel_ = YES;
-  [self updateOtherModelActions];
-  [self refreshOtherModelsCollection];
   if (creating) {
     [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save model",nil) receiver:self completion:@selector(otherModelSaved:) context:model]
       createManualModelForProviderIdentifier:selectedProviderIdentifier_
@@ -928,8 +926,6 @@ static NSTableColumn *StrappyEditorCheckboxColumn(NSString *identifier,
   }
 
   savingModel_ = YES;
-  [self updateOtherModelActions];
-  [self refreshOtherModelsCollection];
   [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete model",nil) receiver:self completion:@selector(otherModelSaved:) context:nil]
       archiveManualModelForProviderIdentifier:selectedProviderIdentifier_
       wireModelID:StrappyEditorString(model, @"wire_model_id") error:NULL];

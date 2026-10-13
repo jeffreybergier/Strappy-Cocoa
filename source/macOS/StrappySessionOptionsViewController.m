@@ -1360,8 +1360,6 @@ static CGFloat StrappyDefaultsMinimumDocumentHeight(void)
   if (editsSessionDefaults_) {
     [defaultOptions_ release];
     defaultOptions_ = [options copy];
-    [statusLabel_ setStringValue:NSLocalizedString(@"Saving…",nil)];
-    [self updateControlEnabledStates];
     [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Save session defaults",nil) receiver:self completion:@selector(defaultsSaved:) context:nil] updateDefaultSessionOptions:options changedFields:changedFields error:NULL];
     return YES;
   }

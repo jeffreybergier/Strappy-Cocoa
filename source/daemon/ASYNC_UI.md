@@ -7,6 +7,10 @@ The C client sends and receives on that same thread through its permanent contro
 connection. UI event order supplies FIFO ordering; the next event cannot submit
 another command before the current reply returns. The main thread intentionally
 waits for the daemon acknowledgment, including bounded failure/reconnect waits.
+Short commands leave the current UI presentation intact: do not show temporary
+loading prompts, dim or disable controls, or refresh a collection into a pending
+state around the call. Apply committed values or report errors in the inline
+completion. Long-running jobs retain their asynchronous progress presentation.
 
 Bootstrap establishes the control socket on the GUI main thread. Each background
 thread has an independent persistent connection, closed when that thread exits.

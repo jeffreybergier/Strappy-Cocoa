@@ -629,7 +629,6 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 
   [tableView deselectRowAtIndexPath:indexPath animated:YES];
   provider = [[StrappySession providerCatalog] objectAtIndex:(NSUInteger)[indexPath row]];
-  [[self view] setUserInteractionEnabled:NO];
   [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Add account",nil) receiver:self completion:@selector(accountCreated:) context:nil] createProviderAccountForProviderIdentifier:StrappyAccountString(provider,@"id") error:NULL];
 }
 
@@ -637,7 +636,6 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 {
   NSDictionary *account = [result value];
   StrappyAccountTableViewController *controller;
-  [[self view] setUserInteractionEnabled:YES];
   if (![result succeeded] || [[self navigationController] topViewController] != self) return;
   controller = [[StrappyAccountTableViewController alloc]
     initWithProviderAccountIdentifier:StrappyAccountString(account, @"id")];
