@@ -38,6 +38,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
 @property (nonatomic, assign) BOOL dirty;
 @property (nonatomic, assign) BOOL presentedModally;
 - (void)reloadAccount;
+- (void)updateTokenPlaceholder;
+- (void)credentialStatusDidChange:(NSNotification *)notification;
 - (void)authenticationDidChange:(NSNotification *)notification;
 - (void)cancelAction:(id)sender;
 - (void)saveAction:(id)sender;
@@ -92,8 +94,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   [self setEndpointField:[self fieldWithPlaceholder:
     NSLocalizedString(@"https://example.com/v1/responses", nil) secure:NO]];
   [[self endpointField] setKeyboardType:UIKeyboardTypeURL];
-  [self setTokenField:[self fieldWithPlaceholder:
-    NSLocalizedString(@"Paste API key", nil) secure:YES]];
+  [self setTokenField:[self fieldWithPlaceholder:@"" secure:YES]];
   [self setMaxOutputField:[self fieldWithPlaceholder:@"14286" secure:NO]];
   [[self maxOutputField] setKeyboardType:UIKeyboardTypeNumberPad];
   [self setMaxOutputSwitch:[[UISwitch alloc] initWithFrame:CGRectZero]];
@@ -114,6 +115,9 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   [[NSNotificationCenter defaultCenter] addObserver:self
     selector:@selector(authenticationDidChange:)
     name:StrappyAuthenticationDidChangeNotification object:nil];
+  [[NSNotificationCenter defaultCenter] addObserver:self
+    selector:@selector(credentialStatusDidChange:)
+    name:StrappyCredentialStatusDidChangeNotification object:nil];
   [self reloadAccount];
 }
 
@@ -152,7 +156,7 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   [[self endpointField] setText:StrappyAccountString(account,
     @"responses_endpoint")];
   [[self tokenField] setText:@""];
-  [[self tokenField] setPlaceholder:NSLocalizedString(@"Leave unchanged to keep saved key", nil)];
+  [self updateTokenPlaceholder];
   [self setTokenEdited:NO];
   maximum = [[account objectForKey:@"max_output_tokens"] longLongValue];
   [[self maxOutputSwitch] setOn:(maximum > 0LL)];
@@ -285,6 +289,22 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
     [self XP_dismissViewControllerAnimated:YES];
   } else {
     [self reloadAccount];
+  }
+}
+
+- (void)updateTokenPlaceholder
+{
+  NSDictionary *status = [StrappySession
+    credentialStatusForProviderAccountIdentifier:[self providerAccountIdentifier]
+    error:NULL];
+  [[self tokenField] setPlaceholder:[[status objectForKey:@"present"] boolValue]
+    ? NSLocalizedString(@"Leave unchanged to keep saved key", nil) : @""];
+}
+
+- (void)credentialStatusDidChange:(NSNotification *)notification
+{
+  if ([[notification object] isEqual:[self providerAccountIdentifier]]) {
+    [self updateTokenPlaceholder];
   }
 }
 

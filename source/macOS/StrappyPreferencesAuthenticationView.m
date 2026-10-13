@@ -293,6 +293,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
 - (void)buildView;
 - (void)layoutAccountsView;
 - (void)reloadAccountsPreservingSelection;
+- (void)updateTokenPlaceholder;
+- (void)credentialStatusDidChange:(NSNotification *)notification;
 - (NSDictionary *)selectedAccount;
 - (NSInteger)rowForAccountIdentifier:(NSString *)identifier;
 - (void)selectAccountIdentifier:(NSString *)identifier;
@@ -338,6 +340,11 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     providers_ = [[StrappySession providerCatalog] copy];
     [self buildView];
     [self reloadAccountsPreservingSelection];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(credentialStatusDidChange:)
+             name:StrappyCredentialStatusDidChangeNotification
+           object:nil];
     [[NSNotificationCenter defaultCenter]
       addObserver:self
          selector:@selector(authenticationDidChange:)
@@ -800,7 +807,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
       autorelease];
     [tokenField_ setStringValue:@""];
     tokenEdited_ = NO;
-    [[tokenField_ cell] setPlaceholderString:NSLocalizedString(@"Leave unchanged to keep saved key",nil)];
+    [self updateTokenPlaceholder];
     [[NSNotificationCenter defaultCenter]
       addObserver:self
          selector:@selector(controlTextDidBeginEditing:)
@@ -882,7 +889,7 @@ static NSButton *StrappyAccountsButton(NSRect frame,
       autorelease];
     [tokenField_ setStringValue:@""];
     tokenEdited_ = NO;
-    [[tokenField_ cell] setPlaceholderString:NSLocalizedString(@"Leave unchanged to keep saved key",nil)];
+    [self updateTokenPlaceholder];
     [tokenField_ setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
     [rightPaneView_ addSubview:tokenField_];
     [[NSNotificationCenter defaultCenter]
@@ -1012,6 +1019,24 @@ static NSButton *StrappyAccountsButton(NSRect frame,
   if (tokenField_) [[NSNotificationCenter defaultCenter] addObserver:self
     selector:@selector(controlTextDidChange:) name:NSControlTextDidChangeNotification object:tokenField_];
   [self configureKeyViewLoopForProvider:provider];
+}
+
+- (void)updateTokenPlaceholder;
+{
+  if (tokenField_ == nil) return;
+  NSDictionary *status = [StrappySession
+    credentialStatusForProviderAccountIdentifier:selectedAccountIdentifier_
+    error:NULL];
+  [[tokenField_ cell] setPlaceholderString:
+    [[status objectForKey:@"present"] boolValue]
+      ? NSLocalizedString(@"Leave unchanged to keep saved key", nil) : @""];
+}
+
+- (void)credentialStatusDidChange:(NSNotification *)notification;
+{
+  if ([[notification object] isEqual:selectedAccountIdentifier_]) {
+    [self updateTokenPlaceholder];
+  }
 }
 
 - (void)controlTextDidChange:(NSNotification *)notification
