@@ -1,7 +1,6 @@
 #import "StrappySessionOptionsTableViewController.h"
 
 #import "StrappyAppearance.h"
-#import "StrappyAuthentication.h"
 #import "StrappyModelCellFormatter.h"
 #import "XPUIKit.h"
 
@@ -108,14 +107,29 @@ static BOOL StrappyPromptModelBoolean(NSDictionary *model,
 static BOOL StrappyPromptModelIsUsable(NSDictionary *model)
 {
   NSString *providerIdentifier;
+  NSString *accountIdentifier;
+  NSDictionary *credentialStatus;
 
   providerIdentifier =
     StrappyMessageModelStringForRow(model, @"provider_id");
   if (![providerIdentifier isEqualToString:@"openai_chatgpt"]) {
     return YES;
   }
-  return [StrappyAuthentication isChatGPTProviderEnabled] &&
-    [[StrappyAuthentication sharedAuthentication] hasStoredCredentials];
+  if (![StrappySession isChatGPTProviderEnabled]) {
+    return NO;
+  }
+  accountIdentifier = [StrappySession
+    designatedProviderAccountIdentifierForProviderIdentifier:providerIdentifier
+    error:NULL];
+  if ([accountIdentifier length] == 0U) {
+    return NO;
+  }
+  credentialStatus = [StrappySession
+    credentialStatusForProviderAccountIdentifier:accountIdentifier error:NULL];
+  /* A catalog invalidation starts a new credential read. Pending is not
+   * signed out; the completion notification refreshes confirmed availability. */
+  return (credentialStatus == nil) ||
+    [[credentialStatus objectForKey:@"present"] boolValue];
 }
 
 static NSDictionary *StrappyPromptFirstUsableModelForProvider(
@@ -228,6 +242,11 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
     [self setPresentedModally:presentedModally];
     [[self navigationItem] setTitle:NSLocalizedString(@"Session Options", nil)];
     [self reloadOptionsSnapshot];
+    [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(credentialStatusDidChange:)
+             name:StrappyCredentialStatusDidChangeNotification
+           object:nil];
   }
   return self;
 }
@@ -345,6 +364,14 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
 {
   [self reloadOptionsSnapshot];
   [self refreshOptionValues];
+}
+
+- (void)credentialStatusDidChange:(NSNotification *)notification
+{
+  (void)notification;
+  if ([self isViewLoaded]) {
+    [self refreshCollection];
+  }
 }
 
 - (void)refreshOptionValues
@@ -1073,6 +1100,11 @@ didSelectRowAtIndexPath:(NSIndexPath *)indexPath
       updateSessionOptions:options changedFields:changedFields];
     [self refreshOptionValues];
   }
+}
+
+- (void)dealloc
+{
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 @end
