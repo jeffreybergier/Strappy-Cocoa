@@ -405,8 +405,12 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   (void)tableView;
   provider = StrappyAccountString([self account], @"provider_id");
   if (section == 0) return StrappyAccountProviderName(provider);
-  if (section == 1) return [provider isEqualToString:@"openai_chatgpt"] ?
-    NSLocalizedString(@"Authentication", nil) : NSLocalizedString(@"Connection", nil);
+  if (section == 1) {
+    if ([provider isEqualToString:@"openrouter"])
+      return NSLocalizedString(@"API Key", nil);
+    return [provider isEqualToString:@"openai_chatgpt"] ?
+      NSLocalizedString(@"Authentication", nil) : NSLocalizedString(@"Connection", nil);
+  }
   if (section == 2) return NSLocalizedString(@"Limits", nil);
   return nil;
 }
