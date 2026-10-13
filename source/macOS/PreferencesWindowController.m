@@ -268,6 +268,8 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 }
 
 @interface PreferencesWindowController ()
+- (void)modelRowsLoaded:(NSDictionary *)result;
+- (void)databaseRowsLoaded:(NSDictionary *)result;
 - (void)buildContentView;
 - (void)setupToolbar;
 - (NSArray *)toolbarPaneIdentifiers;
@@ -1337,9 +1339,12 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyModelRows) object:nil];
   if (!modelCollectionController_) modelCollectionController_ = [[AICollectionController alloc]
     initWithTarget:self selector:@selector(modelRowsLoaded:) builder:[StrappySession class]];
-  [modelCollectionController_ request:[NSDictionary dictionaryWithObjectsAndKeys:
+  NSDictionary *request=[NSDictionary dictionaryWithObjectsAndKeys:
     [self currentModelSearchText] ?: @"",@"search",sort,@"sort",
-    [self selectedModelTableRowIdentifier] ?: @"",@"selection",nil]];
+    [self selectedModelTableRowIdentifier] ?: @"",@"selection",nil];
+  if (![modelCollectionAdapter_ snapshot])
+    [self modelRowsLoaded:[modelCollectionController_ buildResultForRequest:request]];
+  else [modelCollectionController_ request:request];
 }
 
 - (void)modelRowsLoaded:(NSDictionary *)result
@@ -1454,8 +1459,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
     return nil;
   }
 
-  NSDictionary *value=[modelRows_ isKindOfClass:[AIPagedRows class]] ?
-    [(AIPagedRows *)modelRows_ cachedObjectAtIndex:(NSUInteger)row] : [modelRows_ objectAtIndex:(NSUInteger)row];
+  NSDictionary *value=[modelRows_ objectAtIndex:(NSUInteger)row];
   return StrappyStringForModelRow(value,@"id");
 }
 
@@ -1690,10 +1694,13 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
   [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(applyDatabaseRows) object:nil];
   if (!catalogCollection_) catalogCollection_ = [[AICollectionController alloc]
       initWithTarget:self selector:@selector(databaseRowsLoaded:) builder:[FileScanner class]];
-  [catalogCollection_ request:[NSDictionary dictionaryWithObjectsAndKeys:
+  NSDictionary *request=[NSDictionary dictionaryWithObjectsAndKeys:
       [self currentDatabaseSearchText] ?: @"",@"search",
       [NSNumber numberWithBool:[showHiddenDatabasesButton_ state] == XPControlStateValueOn],@"hidden",
-      descriptors,@"sort",nil]];
+      descriptors,@"sort",nil];
+  if (![databaseTableView_collection_ snapshot])
+    [self databaseRowsLoaded:[catalogCollection_ buildResultForRequest:request]];
+  else [catalogCollection_ request:request];
 }
 
 - (void)databaseRowsLoaded:(NSDictionary *)result
@@ -2056,9 +2063,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return @"";
     }
 
-    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
-      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
-      [modelRows_ objectAtIndex:(NSUInteger)row];
+    model = [modelRows_ objectAtIndex:(NSUInteger)row];
     identifier = [tableColumn identifier];
     if ([identifier isEqualToString:@"model_allowed"]) {
       return [self allowedValueForModelRow:model];
@@ -2161,9 +2166,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return @"";
     }
 
-    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
-      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
-      [modelRows_ objectAtIndex:(NSUInteger)row];
+    model = [modelRows_ objectAtIndex:(NSUInteger)row];
     identifier = [tableColumn identifier];
     if ([identifier isEqualToString:@"model_allowed"]) {
       if ([self modelRowIsDefault:model]) {
@@ -2322,9 +2325,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return;
     }
 
-    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
-      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
-      [modelRows_ objectAtIndex:(NSUInteger)row];
+    model = [modelRows_ objectAtIndex:(NSUInteger)row];
     if ([self modelRowIsDefault:model] && !checked) {
       [modelCollectionAdapter_ refreshVisibleRows];
       [self setModelStatusErrorMessage:
@@ -2421,9 +2422,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return NO;
     }
 
-    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
-      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
-      [modelRows_ objectAtIndex:(NSUInteger)row];
+    model = [modelRows_ objectAtIndex:(NSUInteger)row];
     return [StrappyStringForModelRow(model, @"id") length] && ![self modelRowIsDefault:model];
   }
 
@@ -2499,9 +2498,7 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
       return;
     }
 
-    model = [modelRows_ isKindOfClass:[AIPagedRows class]] ?
-      [(AIPagedRows *)modelRows_ requestObjectAtIndex:(NSUInteger)row placeholder:[NSDictionary dictionary]] :
-      [modelRows_ objectAtIndex:(NSUInteger)row];
+    model = [modelRows_ objectAtIndex:(NSUInteger)row];
     [cell setEnabled:([StrappyStringForModelRow(model, @"id") length] && ![self modelRowIsDefault:model])];
     return;
   }

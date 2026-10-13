@@ -197,7 +197,10 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 {
   if (!sidebarCollection_) sidebarCollection_ = [[AICollectionController alloc]
       initWithTarget:self selector:@selector(sidebarLoaded:) builder:[StrappySession class]];
-  [sidebarCollection_ request:[NSDictionary dictionaryWithObject:@"sidebar" forKey:@"kind"]];
+  NSDictionary *request=[NSDictionary dictionaryWithObject:@"sidebar" forKey:@"kind"];
+  if (![[self collectionTableAdapter] snapshot])
+    [self sidebarLoaded:[sidebarCollection_ buildResultForRequest:request]];
+  else [sidebarCollection_ request:request];
 }
 
 - (void)sidebarLoaded:(NSDictionary *)result

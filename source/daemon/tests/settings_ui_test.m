@@ -3,6 +3,42 @@
 #import <UIKit/UIKit.h>
 #import "../../iOS/StrappySessionOptionsTableViewController.h"
 #include <assert.h>
+#import "../../iOS/StrappyPreferencesModelWhitelistTableViewController.h"
+#import <AIPagedRows.h>
+@interface StrappyPreferencesModelWhitelistTableViewController (LoadingFixture)
+- (NSDictionary *)modelRowAtIndexPath:(NSIndexPath *)path;
+@end
+@interface ModelFixtureRows : AIPagedRows
+@property(nonatomic, assign) NSUInteger reads;
+@end
+@implementation ModelFixtureRows
+- (NSUInteger)count { return 100000; }
+- (id)copyWithZone:(NSZone *)zone { (void)zone; return self; }
+- (NSArray *)pageAtOffset:(NSUInteger)offset error:(NSError **)error {
+  (void)error; [self setReads:[self reads]+1];
+  NSMutableArray *page=[NSMutableArray array];
+  for(NSUInteger i=offset;i<MIN(offset+32,[self count]);++i)
+    [page addObject:@{@"id":[NSString stringWithFormat:@"model-%lu",(unsigned long)i],@"name":@"Complete model text"}];
+  return page;
+}
+@end
+static void CheckModelLoading(void) {
+  ModelFixtureRows *rows=[[ModelFixtureRows alloc] init];
+  StrappyPreferencesModelWhitelistTableViewController *controller=[[StrappyPreferencesModelWhitelistTableViewController alloc] init];
+  [controller setRows:rows];
+  [controller setValue:@[@{@"offset":@0,@"count":@100000}] forKey:@"modelSections"];
+  assert([rows count]==100000 && [rows reads]==0);
+  NSUInteger jumps[]={0,99999,128,512,1024,4096,0};
+  for(NSUInteger i=0;i<7;++i) {
+    NSDictionary *row=[controller modelRowAtIndexPath:[NSIndexPath indexPathForRow:jumps[i] inSection:0]];
+    NSString *identity=[NSString stringWithFormat:@"model-%lu",(unsigned long)jumps[i]];
+    assert([[row objectForKey:@"id"] isEqual:identity]);
+    assert([[row objectForKey:@"name"] isEqual:@"Complete model text"]);
+    assert([rows reads]==i+1);
+    if(i==5) assert([rows cachedObjectAtIndex:0]==nil);
+  }
+}
+
 
 @interface SettingsFixture : UIResponder
     <UIApplicationDelegate, StrappySessionOptionsTableViewControllerDelegate>
@@ -11,6 +47,7 @@
 @property(nonatomic, strong) StrappySessionOptions *options;
 @property(nonatomic, strong) StrappySessionOptionsTableViewController *controller;
 @property(nonatomic, assign) NSUInteger refreshes;
+@property(nonatomic, assign) NSUInteger optionReads;
 @end
 
 @implementation SettingsFixture
@@ -26,7 +63,7 @@
            @{@"id":@"world", @"name":@"World", @"available":@YES}];
 }
 - (StrappySessionOptions *)sessionOptions;
-{ return [self options]; }
+{ [self setOptionReads:[self optionReads]+1]; return [self options]; }
 - (BOOL)updateSessionOptions:(StrappySessionOptions *)options
               changedFields:(StrappySessionOptionMask)fields;
 { (void)fields; [self setOptions:options]; return YES; }
@@ -47,6 +84,9 @@
 }
 - (void)checkAccessories;
 {
+  NSUInteger reads=[self optionReads];
+  [[self controller] viewWillAppear:NO];
+  assert([self optionReads]==reads);
   UITableView *table = [[self controller] tableView];
   NSUInteger controls = 0;
   /* Force two simultaneously live cells for every controller-owned control,
@@ -72,7 +112,7 @@
 - (void)tick;
 {
   if ([self refreshes] == 6) {
-    [self writeResult:@"PASS: five controls transfer ownership; navigation and repeated incremental refreshes remain responsive\n"];
+    [self writeResult:@"PASS: complete bounded model rows; appearance does not reload options; five controls transfer ownership; repeated refreshes remain responsive\n"];
     return;
   }
   [self setRefreshes:[self refreshes] + 1];
@@ -88,6 +128,7 @@
 {
   (void)application; (void)launchOptions;
   [self writeResult:@"RUNNING\n"];
+  CheckModelLoading();
   [self setOptions:[[StrappySessionOptions alloc] init]];
   [[self options] setProviderAccountIdentifier:@"fixture"];
   [self setWindow:[[UIWindow alloc] initWithFrame:[[UIScreen mainScreen] bounds]]];

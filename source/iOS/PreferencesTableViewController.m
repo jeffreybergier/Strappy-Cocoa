@@ -170,10 +170,7 @@ enum {
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
-  [self setDefaultSessionOptions:nil];
-  [self setDefaultSessionOptionsLoaded:NO];
   [[self navigationController] setToolbarHidden:YES animated:animated];
-  [self reloadAccounts];
 }
 
 - (void)showMessage:(NSString *)message title:(NSString *)title

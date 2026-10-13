@@ -105,7 +105,9 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
          object:nil];
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelListReadFailed:)
     name:StrappyModelListReadFailedNotification object:nil];
-  [self setRefreshingModels:[StrappySession isModelCatalogRefreshInFlight]];
+  _refreshingModels=[StrappySession isModelCatalogRefreshInFlight];
+  [self setWorking:_refreshingModels];
+  [self refreshStatusToolbar];
 }
 
 - (void)reloadRows
@@ -154,8 +156,11 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
   if (![self collectionController]) [self setCollectionController:
     [[AICollectionController alloc] initWithTarget:self selector:@selector(modelRowsLoaded:)
       builder:[StrappySession class]]];
-  [[self collectionController] request:[NSDictionary dictionaryWithObjectsAndKeys:
-    [self currentSearchText] ?: @"",@"search",sort,@"sort",nil]];
+  NSDictionary *request=[NSDictionary dictionaryWithObjectsAndKeys:
+    [self currentSearchText] ?: @"",@"search",sort,@"sort",nil];
+  if (![[self collectionTableAdapter] snapshot])
+    [self modelRowsLoaded:[[self collectionController] buildResultForRequest:request]];
+  else [[self collectionController] request:request];
 }
 
 - (void)modelRowsLoaded:(NSDictionary *)result
@@ -194,9 +199,6 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
   NSUInteger count = [[section objectForKey:@"count"] unsignedIntegerValue];
   NSUInteger offset = [[section objectForKey:@"offset"] unsignedIntegerValue];
   if ([indexPath row] < 0 || (NSUInteger)[indexPath row] >= count) return nil;
-  if ([[self rows] isKindOfClass:[AIPagedRows class]])
-    return [(AIPagedRows *)[self rows] requestObjectAtIndex:offset + (NSUInteger)[indexPath row]
-      placeholder:[NSDictionary dictionary]];
   return [[self rows] objectAtIndex:offset + (NSUInteger)[indexPath row]];
 }
 

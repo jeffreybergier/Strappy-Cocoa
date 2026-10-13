@@ -336,6 +336,7 @@ static void StrappyDrawTintedImage(NSImage *image,
 @end
 
 @interface SessionListViewController ()
+- (void)sidebarLoaded:(NSDictionary *)result;
 - (void)rebuildToolbarSegmentIcons;
 - (void)sidebarReadFailed:(NSNotification *)notification;
 - (void)dateBoundariesDidChange:(NSNotification *)notification;
@@ -665,7 +666,10 @@ static void StrappyDrawTintedImage(NSImage *image,
 {
   if (!sidebarCollection_) sidebarCollection_ = [[AICollectionController alloc]
       initWithTarget:self selector:@selector(sidebarLoaded:) builder:[StrappySession class]];
-  [sidebarCollection_ request:[NSDictionary dictionaryWithObject:@"sidebar" forKey:@"kind"]];
+  NSDictionary *request=[NSDictionary dictionaryWithObject:@"sidebar" forKey:@"kind"];
+  if (![tableView_collection_ snapshot])
+    [self sidebarLoaded:[sidebarCollection_ buildResultForRequest:request]];
+  else [sidebarCollection_ request:request];
 }
 
 - (void)sidebarLoaded:(NSDictionary *)result

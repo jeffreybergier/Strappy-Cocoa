@@ -320,12 +320,6 @@ static NSUInteger StrappyPromptSnapSliderRoundLimit(double value)
   }
 }
 
-- (void)viewWillAppear:(BOOL)animated
-{
-  [super viewWillAppear:animated];
-  [self reloadOptionsFromDelegate];
-}
-
 - (void)reloadOptionsSnapshot
 {
   id<StrappySessionOptionsTableViewControllerDelegate> optionsDelegate;

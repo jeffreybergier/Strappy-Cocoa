@@ -186,11 +186,6 @@ static NSString *StrappyProviderModelString(NSDictionary *row, NSString *key)
     action:@selector(addModel:)]];
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadModels)
     name:StrappySessionModelCatalogDidChangeNotification object:nil];
-}
-
-- (void)viewWillAppear:(BOOL)animated
-{
-  [super viewWillAppear:animated];
   [self reloadModels];
 }
 

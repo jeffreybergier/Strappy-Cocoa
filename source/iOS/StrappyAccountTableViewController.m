@@ -117,12 +117,6 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   [self reloadAccount];
 }
 
-- (void)viewWillAppear:(BOOL)animated
-{
-  [super viewWillAppear:animated];
-  [self reloadAccount];
-}
-
 - (void)reloadAccount
 {
   NSArray *accounts;

@@ -5,6 +5,7 @@
 #import "StrappyAppearance.h"
 #import "StrappyPreferencesStatusToolbarView.h"
 #import "StrappySession.h"
+#import "FileScanner.h"
 #import "XPUIKit.h"
 
 static const CGFloat kStrappyDatabaseStudyCompactRowHeight = 44.0f;
@@ -374,14 +375,19 @@ static NSArray *StrappyStudySectionsForRows(NSArray *rows)
   [self setToolbarItems:[NSArray arrayWithObject:statusToolbarItem_]
               animated:NO];
   [self layoutStatusToolbar];
+  [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(studyDataDidChange:)
+      name:FileScannerDatabaseCatalogDidChangeNotification object:nil];
+  [self reloadStudyRows];
 }
+
+- (void)studyDataDidChange:(NSNotification *)notification
+{ (void)notification; [self reloadStudyRows]; }
 
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
   [[self navigationController] setToolbarHidden:NO animated:animated];
   [self layoutStatusToolbar];
-  [self reloadStudyRows];
 }
 
 - (void)viewDidLayoutSubviews
@@ -920,5 +926,7 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
                            otherButtonTitles:nil];
   [alert show];
 }
+
+- (void)dealloc { [[NSNotificationCenter defaultCenter] removeObserver:self]; }
 
 @end

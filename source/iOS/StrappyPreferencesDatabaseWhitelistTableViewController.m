@@ -241,7 +241,10 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(catalogReadFailed:)
     name:FileScannerCatalogReadFailedNotification object:nil];
   [self updateHiddenModeButton];
-  [self setScanning:[FileScanner isDatabaseCatalogScanInFlight]];
+  _scanning=[FileScanner isDatabaseCatalogScanInFlight];
+  [[self scanButton] setEnabled:!_scanning];
+  [self setWorking:_scanning];
+  [self refreshStatusToolbar];
 }
 
 - (void)setHiddenMode:(BOOL)hiddenMode
@@ -308,9 +311,12 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
   [self refreshStatusToolbar];
   if (![self catalogCollection]) [self setCatalogCollection:[[AICollectionController alloc]
       initWithTarget:self selector:@selector(catalogRowsLoaded:) builder:[FileScanner class]]];
-  [[self catalogCollection] request:[NSDictionary dictionaryWithObjectsAndKeys:
+  NSDictionary *request=[NSDictionary dictionaryWithObjectsAndKeys:
       [self currentSearchText] ?: @"",@"search",[NSNumber numberWithBool:[self hiddenMode]],@"hidden",
-      descriptors,@"sort",nil]];
+      descriptors,@"sort",nil];
+  if (![[self collectionTableAdapter] snapshot])
+    [self catalogRowsLoaded:[[self catalogCollection] buildResultForRequest:request]];
+  else [[self catalogCollection] request:request];
 }
 
 - (void)catalogRowsLoaded:(NSDictionary *)result
