@@ -1029,7 +1029,8 @@ static NSButton *StrappyAccountsButton(NSRect frame,
     error:NULL];
   [[tokenField_ cell] setPlaceholderString:
     [[status objectForKey:@"present"] boolValue]
-      ? NSLocalizedString(@"Leave unchanged to keep saved key", nil) : @""];
+      ? NSLocalizedString(@"Leave unchanged to keep saved key", nil)
+      : NSLocalizedString(@"Enter API Key", nil)];
 }
 
 - (void)credentialStatusDidChange:(NSNotification *)notification;

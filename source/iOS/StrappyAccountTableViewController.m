@@ -94,7 +94,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
   [self setEndpointField:[self fieldWithPlaceholder:
     NSLocalizedString(@"https://example.com/v1/responses", nil) secure:NO]];
   [[self endpointField] setKeyboardType:UIKeyboardTypeURL];
-  [self setTokenField:[self fieldWithPlaceholder:@"" secure:YES]];
+  [self setTokenField:[self fieldWithPlaceholder:
+    NSLocalizedString(@"Enter API Key", nil) secure:YES]];
   [self setMaxOutputField:[self fieldWithPlaceholder:@"14286" secure:NO]];
   [[self maxOutputField] setKeyboardType:UIKeyboardTypeNumberPad];
   [self setMaxOutputSwitch:[[UISwitch alloc] initWithFrame:CGRectZero]];
@@ -298,7 +299,8 @@ static NSString *StrappyAccountProviderName(NSString *providerIdentifier)
     credentialStatusForProviderAccountIdentifier:[self providerAccountIdentifier]
     error:NULL];
   [[self tokenField] setPlaceholder:[[status objectForKey:@"present"] boolValue]
-    ? NSLocalizedString(@"Leave unchanged to keep saved key", nil) : @""];
+    ? NSLocalizedString(@"Leave unchanged to keep saved key", nil)
+      : NSLocalizedString(@"Enter API Key", nil)];
 }
 
 - (void)credentialStatusDidChange:(NSNotification *)notification
