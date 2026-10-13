@@ -9857,10 +9857,10 @@ static int harness_switch_default_account_model(
 static int harness_run_bundled_model_catalog_tests(
   const harness_context *context)
 {
-  static const char *revision_three_json =
+  static const char *revision_two_json =
     "{"
       "\"schema_version\":1,"
-      "\"catalog_revision\":3,"
+      "\"catalog_revision\":2,"
       "\"catalog_source\":\"bundled\","
       "\"models\":[{"
         "\"provider_id\":\"openai_chatgpt\","
@@ -9880,16 +9880,39 @@ static int harness_run_bundled_model_catalog_tests(
         "\"reasoning_level_overrides\":{\"minimal\":\"low\"}"
       "}]"
     "}";
-  static const char *invalid_revision_json =
+  static const char *revision_four_json =
     "{"
       "\"schema_version\":1,"
       "\"catalog_revision\":4,"
+      "\"catalog_source\":\"bundled\","
+      "\"models\":[{"
+        "\"provider_id\":\"openai_chatgpt\","
+        "\"wire_model_id\":\"gpt-6.1-sol\","
+        "\"display_name\":\"GPT-6.1 Sol Updated\","
+        "\"catalog_active\":true,"
+        "\"billing_kind\":\"chatgpt_plan\","
+        "\"input_modalities\":[\"text\",\"image\"],"
+        "\"context_window_tokens\":272000,"
+        "\"max_output_tokens\":128000,"
+        "\"capabilities\":{"
+          "\"reasoning\":true,"
+          "\"local_functions\":true,"
+          "\"hosted_tools\":[]"
+        "},"
+        "\"reasoning_levels\":[\"off\",\"low\",\"high\"],"
+        "\"reasoning_level_overrides\":{\"minimal\":\"low\"}"
+      "}]"
+    "}";
+  static const char *invalid_revision_json =
+    "{"
+      "\"schema_version\":1,"
+      "\"catalog_revision\":5,"
       "\"catalog_source\":\"bundled\","
       "\"unexpected\":true,"
       "\"models\":[]"
     "}";
   static const char *selected_model_id =
-    STRAPPY_PROVIDER_OPENAI_CHATGPT ":gpt-5.4";
+    STRAPPY_PROVIDER_OPENAI_CHATGPT ":gpt-6.1-sol";
   char database_path[1400];
   strappy_model_record_list list;
   strappy_model_route_record route;
@@ -9921,6 +9944,8 @@ static int harness_run_bundled_model_catalog_tests(
   manual_input.local_functions_enabled = 1;
   ok = strappy_db_initialize(database_path, &error) &&
     harness_restore_fixture_provider_accounts_at_path(database_path) &&
+    strappy_db_import_bundled_models_json(database_path, revision_two_json,
+                                          &error) &&
     strappy_model_catalog_import_bundled_models(HARNESS_RESOURCE_DIR,
                                                  database_path,
                                                  &error);
@@ -9934,28 +9959,41 @@ static int harness_run_bundled_model_catalog_tests(
   }
   ok = harness_expect_catalog_integer(
          database_path,
+         "SELECT COUNT(*) FROM models WHERE provider_id='openai_chatgpt' "
+           "AND wire_model_id='gpt-5.4' AND catalog_active=0;",
+         1LL,
+         "retired ChatGPT model after bundled upgrade") &&
+       harness_expect_catalog_integer(
+         database_path,
+         "SELECT COUNT(*) FROM models WHERE provider_id='openai_chatgpt' "
+           "AND wire_model_id IN ('gpt-6-astra','gpt-6-luna','gpt-6-sol',"
+           "'gpt-6.1-sol') AND catalog_active=1;",
+         4LL,
+         "new ChatGPT models after bundled upgrade") &&
+       harness_expect_catalog_integer(
+         database_path,
          "SELECT COUNT(*) FROM models WHERE provider_id = "
            "'" STRAPPY_PROVIDER_OPENAI_CHATGPT
            "' AND catalog_active = 1;",
-         7LL,
+         9LL,
          "initial bundled ChatGPT model count") &&
        harness_expect_catalog_integer(
          database_path,
          "SELECT catalog_revision FROM bundled_model_catalogs WHERE "
            "provider_id = 'openai_chatgpt';",
-         2LL,
+         3LL,
          "initial bundled catalog revision") &&
        harness_expect_catalog_integer(
          database_path,
          "SELECT COUNT(*) FROM model_capabilities WHERE "
            "billing_kind = 'chatgpt_plan' AND hosted_tools_enabled = 1;",
-         7LL,
+         9LL,
          "bundled plan capability count") &&
        harness_expect_catalog_integer(
          database_path,
          "SELECT COUNT(*) FROM model_features WHERE "
            "model_id = '" STRAPPY_PROVIDER_OPENAI_CHATGPT
-             ":gpt-5.4' AND "
+             ":gpt-6.1-sol' AND "
            "feature_kind = 'input_modality' AND feature_value = 'image';",
          1LL,
          "bundled image capability");
@@ -9964,7 +10002,7 @@ static int harness_run_bundled_model_catalog_tests(
     return 0;
   }
 
-  manual_input.wire_model_id = "gpt-5.4";
+  manual_input.wire_model_id = "gpt-6.1-sol";
   if (strappy_db_update_manual_model(database_path,
                                      STRAPPY_PROVIDER_OPENAI_CHATGPT,
                                      &manual_input,
@@ -9979,7 +10017,7 @@ static int harness_run_bundled_model_catalog_tests(
   error = NULL;
   if (strappy_db_archive_manual_model(database_path,
                                       STRAPPY_PROVIDER_OPENAI_CHATGPT,
-                                      "gpt-5.4",
+                                      "gpt-6.1-sol",
                                       &error) ||
       (error == NULL)) {
     fprintf(stderr, "Bundled ChatGPT model was deletable.\n");
@@ -10009,7 +10047,7 @@ static int harness_run_bundled_model_catalog_tests(
                                     1,
                                     &error) ||
       !strappy_db_import_bundled_models_json(database_path,
-                                             revision_three_json,
+                                             revision_four_json,
                                              &error)) {
     fprintf(stderr,
             "Could not update bundled model catalog: %s\n",
@@ -10035,7 +10073,7 @@ static int harness_run_bundled_model_catalog_tests(
        harness_expect_catalog_integer(
          database_path,
          "SELECT COUNT(*) FROM model_preferences WHERE "
-           "provider_id = 'openai_chatgpt' AND wire_model_id = 'gpt-5.4' "
+           "provider_id = 'openai_chatgpt' AND wire_model_id = 'gpt-6.1-sol' "
              "AND allowed = 1;",
          1LL,
          "preserved bundled model preference") &&
@@ -10043,7 +10081,7 @@ static int harness_run_bundled_model_catalog_tests(
          database_path,
          "SELECT catalog_revision FROM bundled_model_catalogs WHERE "
            "provider_id = 'openai_chatgpt';",
-         3LL,
+         4LL,
          "updated bundled catalog revision");
   if (!ok) {
     harness_unlink_sqlite_files(database_path);
@@ -10105,7 +10143,7 @@ static int harness_run_bundled_model_catalog_tests(
         record->reasoning_enabled && record->local_functions_enabled &&
         !record->hosted_tools_enabled && record->allowed &&
         (record->name != NULL) &&
-        (strcmp(record->name, "GPT-5.4 Updated") == 0);
+        (strcmp(record->name, "GPT-6.1 Sol Updated") == 0);
     }
   }
   ok = found_model;
@@ -12221,9 +12259,9 @@ static int harness_run_multi_account_database_tests(
     strappy_db_create_provider_account(path,"openai_chatgpt","Later",NULL,&chat_three,&error) &&
     harness_expect_catalog_integer(path,
       "SELECT COUNT(*) FROM models WHERE provider_id='openai_chatgpt' AND catalog_active=1;",
-      7LL,"provider-owned bundled model count") &&
+      9LL,"provider-owned bundled model count") &&
     harness_expect_catalog_integer(path,
-      "SELECT COUNT(*) FROM bundled_model_catalogs WHERE provider_id='openai_chatgpt' AND catalog_revision=2;",
+      "SELECT COUNT(*) FROM bundled_model_catalogs WHERE provider_id='openai_chatgpt' AND catalog_revision=3;",
       1LL,"provider-level bundled revision") &&
     strappy_db_save_account_models_json(path,router_one,catalog_one,&error) &&
     strappy_db_save_account_models_json(path,router_two,catalog_two,&error) &&
