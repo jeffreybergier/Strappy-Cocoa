@@ -684,13 +684,29 @@ static void StrappyDrawTintedImage(NSImage *image,
     fallbackMessage:NSLocalizedString(@"Could not load conversations", nil)];
     return;
   }
-  rows = [[StrappySessionTableRows alloc] initWithSessions:sessions sections:sections];
+  if (![result objectForKey:@"collection"]) {
+    rows = [[[StrappySessionTableRows alloc] initWithSessions:sessions sections:sections] autorelease];
+    NSMutableDictionary *section = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+        @"rows", @"id", rows, @"rows", nil];
+    NSArray *ids = [rows collectionIdentifiers];
+    if (ids) [section setObject:ids forKey:@"identifiers"];
+    AICollectionSnapshot *snapshot = [[[AICollectionSnapshot alloc]
+        initWithSections:[NSArray arrayWithObject:section]] autorelease];
+    NSMutableDictionary *prepared = [[result mutableCopy] autorelease];
+    [prepared setObject:snapshot forKey:@"collection"];
+    [prepared setObject:rows forKey:@"tableRows"]; result = prepared;
+  }
+  if ([sidebarCollection_ prepareResult:result snapshotKey:@"collection"
+      previousSnapshot:[tableView_collection_ snapshot]]) return;
+  rows = [[result objectForKey:@"tableRows"] retain];
   [rows_ release];
   rows_ = rows;
   [sessionRows_ release];
   sessionRows_ = [sessions retain];
   suppressSelectionNotification_ = YES;
-  [self refreshTableCollection];
+  if (!tableView_collection_) tableView_collection_ = [[AICollectionTableAdapter alloc]
+      initWithTableView:tableView_];
+  [tableView_collection_ applySnapshot:[result objectForKey:@"collection"]];
   suppressSelectionNotification_ = NO;
   [self selectSessionIdentifier:selectedSessionId_];
   if (pendingSelectionNotification_ || [self rowForSessionIdentifier:selectedSessionId_] < 0) {

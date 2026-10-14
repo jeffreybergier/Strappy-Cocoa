@@ -165,6 +165,8 @@ static BOOL StrappyModelRowIsAllowed(NSDictionary *row)
 
 - (void)modelRowsLoaded:(NSDictionary *)result
 {
+  if ([[self collectionController] prepareResult:result snapshotKey:@"collection"
+      previousSnapshot:[[self collectionTableAdapter] snapshot]]) return;
   StrappyModelRows *rows = [result objectForKey:@"rows"];
   if (!rows) {
     [self setStatusMessage:[[result objectForKey:@"error"] localizedDescription]];

@@ -1349,6 +1349,8 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 
 - (void)modelRowsLoaded:(NSDictionary *)result
 {
+  if ([modelCollectionController_ prepareResult:result snapshotKey:@"flatCollection"
+      previousSnapshot:[modelCollectionAdapter_ snapshot]]) return;
   StrappyModelRows *rows = [result objectForKey:@"rows"];
   if (!rows) {
     [self setModelStatusErrorMessage:StrappyPreferencesErrorMessage([result objectForKey:@"error"],
@@ -1705,6 +1707,8 @@ static NSString *StrappyModelPricingString(NSDictionary *row, NSString *key)
 
 - (void)databaseRowsLoaded:(NSDictionary *)result
 {
+  if ([catalogCollection_ prepareResult:result snapshotKey:@"flatCollection"
+      previousSnapshot:[databaseTableView_collection_ snapshot]]) return;
   NSError *error = [result objectForKey:@"error"];
   NSArray *selectedIdentifiers = [self selectedDatabaseTableRowIdentifiers];
   FileScannerCatalogRows *rows = [result objectForKey:@"rows"];

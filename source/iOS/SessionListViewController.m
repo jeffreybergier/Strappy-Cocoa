@@ -206,9 +206,26 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
               title:NSLocalizedString(@"Could not load conversations", nil)];
     return;
   }
+  if (![result objectForKey:@"collection"]) {
+    NSMutableArray *metadata = [NSMutableArray array];
+    for (NSDictionary *section in sections) {
+      NSMutableDictionary *item = [NSMutableDictionary dictionaryWithObjectsAndKeys:
+          [section objectForKey:@"title"], @"id",
+          [section objectForKey:@"title"], @"title",
+          [section objectForKey:@"sessions"], @"rows", nil];
+      if ([section objectForKey:@"identifiers"])
+        [item setObject:[section objectForKey:@"identifiers"] forKey:@"identifiers"];
+      [metadata addObject:item];
+    }
+    NSMutableDictionary *prepared = [result mutableCopy];
+    [prepared setObject:[[AICollectionSnapshot alloc] initWithSections:metadata]
+                 forKey:@"collection"]; result = prepared;
+  }
+  if ([sidebarCollection_ prepareResult:result snapshotKey:@"collection"
+      previousSnapshot:[[self collectionTableAdapter] snapshot]]) return;
   [self setSessions:sessions];
   [self setSections:sections];
-  [self refreshCollection];
+  [[self collectionTableAdapter] applySnapshot:[result objectForKey:@"collection"]];
   [self selectSessionIdentifier:[self selectedSessionId]];
   if (pendingSelectionNotification_) { pendingSelectionNotification_ = NO; [self notifySelectedSession]; }
 }

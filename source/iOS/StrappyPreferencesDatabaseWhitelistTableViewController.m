@@ -321,6 +321,8 @@ static BOOL StrappyDatabaseRowHiddenValue(NSDictionary *row)
 
 - (void)catalogRowsLoaded:(NSDictionary *)result
 {
+  if ([[self catalogCollection] prepareResult:result snapshotKey:@"collection"
+      previousSnapshot:[[self collectionTableAdapter] snapshot]]) return;
   NSError *error = [result objectForKey:@"error"];
   FileScannerCatalogRows *rows = [result objectForKey:@"rows"];
   NSArray *sections = [result objectForKey:@"sections"];
