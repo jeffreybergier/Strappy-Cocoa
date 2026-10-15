@@ -61,6 +61,7 @@ Strappy_SQLITE = 1
 strappyd_TYPE = daemon
 strappyd_SOURCES = ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES)
 strappyd_CORE = static
+strappyd_COCOA = static
 strappyd_FLAGS = -DSTRAPPY_DB_WRITER=1 -I../shared -I../daemon
 strappyd_GENERATED = $(FONTAWESOME_GENERATED)
 strappyd_LDFLAGS = -framework Foundation -framework Security -framework CoreFoundation -framework SystemConfiguration
