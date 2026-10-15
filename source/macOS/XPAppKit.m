@@ -1,7 +1,5 @@
 #import "XPAppKit.h"
 
-#include <dlfcn.h>
-
 static NSInvocation *XPAppKitInvocation(id target, SEL selector)
 {
   NSMethodSignature *signature;
@@ -622,66 +620,6 @@ static id XPAppKitLegacyWebFrameViewForView(NSView *view)
                                 @selector(setSelectionHighlightStyle:),
                                 value);
   }
-}
-
-@end
-
-@implementation XPUserNotificationCenter
-
-+ (XPUserNotificationCenter *)defaultCenter
-{
-  static XPUserNotificationCenter *instance = nil;
-
-  if (instance == nil) {
-    instance = [[XPUserNotificationCenter alloc] init];
-  }
-  return instance;
-}
-
-- (void)postNotificationWithTitle:(NSString *)title body:(NSString *)body
-{
-  Class centerClass;
-  Class notificationClass;
-  id center;
-  id notification;
-
-  if (![body isKindOfClass:[NSString class]] || ([body length] == 0U)) {
-    return;
-  }
-
-  centerClass = NSClassFromString(@"NSUserNotificationCenter");
-  notificationClass = NSClassFromString(@"NSUserNotification");
-  if ((centerClass == Nil) || (notificationClass == Nil)) {
-    return;
-  }
-
-  center = [(id)centerClass
-    performSelector:@selector(defaultUserNotificationCenter)];
-  if (center == nil) {
-    return;
-  }
-
-  notification = [[[notificationClass alloc] init] autorelease];
-  [notification performSelector:@selector(setTitle:)
-                      withObject:[title isKindOfClass:[NSString class]] ?
-                        title : @""];
-  [notification performSelector:@selector(setInformativeText:)
-                      withObject:body];
-#if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && \
-    MAC_OS_X_VERSION_MAX_ALLOWED >= 1080
-  {
-    NSString **defaultSoundName;
-
-    defaultSoundName = (NSString **)dlsym(RTLD_DEFAULT,
-                                          "NSUserNotificationDefaultSoundName");
-    if ((defaultSoundName != NULL) && (*defaultSoundName != nil)) {
-      [notification performSelector:@selector(setSoundName:)
-                          withObject:*defaultSoundName];
-    }
-  }
-#endif
-  [center performSelector:@selector(deliverNotification:)
-               withObject:notification];
 }
 
 @end

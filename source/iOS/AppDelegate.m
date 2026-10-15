@@ -1,4 +1,5 @@
 #import "StrappyAsync.h"
+#import <AILocalNotificationCenter.h>
 #import "AppDelegate.h"
 #import "AIFontAwesome.h"
 #import "FileScanner.h"
@@ -80,6 +81,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)observeLongRunningWorkLifecycle;
 - (void)longRunningWorkLifecycleDidChange:(NSNotification *)notification;
 - (void)configurePromptCompletionNotifications;
+- (AILocalNotificationCenter *)promptCompletionNotificationCenter;
 - (void)postPromptCompletionNotificationIfNeeded:
   (NSNotification *)notification;
 - (BOOL)longRunningWorkIsActive;
@@ -254,22 +256,32 @@ static BOOL StrappyAsyncErrorVisible;
 
 - (void)configurePromptCompletionNotifications
 {
-  XPNotificationAuthStatus status;
-  XPUserNotificationCenter *center;
+  AINotificationAuthorizationStatus status;
+  AILocalNotificationCenter *center;
 
-  center = [XPUserNotificationCenter defaultCenter];
+  center = [self promptCompletionNotificationCenter];
   status = [center authorizationStatus];
   NSLog(@"StrappyNotifications authorizationStatus=%d", (int)status);
-  if (status == XPNotificationAuthStatusNotDetermined) {
-    [center requestAuthorization];
+  if (status == AINotificationAuthorizationUnknown) {
+    @try {
+      [center requestAuthorization];
+    } @catch (NSException *exception) {
+      (void)exception;
+      NSLog(@"StrappyNotifications authorization request failed");
+    }
   }
+}
+
+- (AILocalNotificationCenter *)promptCompletionNotificationCenter;
+{
+  return [AILocalNotificationCenter defaultCenter];
 }
 
 - (void)postPromptCompletionNotificationIfNeeded:
   (NSNotification *)notification
 {
   UIApplication *application;
-  XPUserNotificationCenter *center;
+  AILocalNotificationCenter *center;
   NSString *body;
   NSString *title;
 
@@ -278,13 +290,16 @@ static BOOL StrappyAsyncErrorVisible;
     return;
   }
 
-  center = [XPUserNotificationCenter defaultCenter];
-  if ([center authorizationStatus] != XPNotificationAuthStatusAuthorized) {
+  center = [self promptCompletionNotificationCenter];
+  if ([center authorizationStatus] != AINotificationAuthorizationAuthorized) {
     return;
   }
   title = StrappyPromptCompletionNotificationTitle(notification);
   body = StrappyPromptCompletionNotificationBody(notification);
-  [center postNotificationWithTitle:title body:body];
+  /* Unknown settings are not proof of permission on iOS. Keep the
+   * existing authorized-only policy; submission still cannot prove display
+   * for Strappy's unsandboxed/system-app installation. */
+  [center postNotificationWithTitle:title body:body userInfo:nil];
 }
 
 - (BOOL)longRunningWorkIsActive

@@ -1,8 +1,8 @@
 AGENTS.md
 
 This project is an iOS app and macOS app built using Altivec Intelligence. The
-iOS app supports iOS 4.3 and higher and the macOS App supports Mac OS X and
-higher. The Altivec Intelligence toolchain does the hard work for you so don't
+iOS app supports iOS 5.0 and higher on armv7 (iOS 7.0 on arm64), and the
+macOS App supports Mac OS X and higher. The Altivec Intelligence toolchain does the hard work for you so don't
 worry.
 
 For this project, the iOS app is always built for arm64 and armv7 and the macOS

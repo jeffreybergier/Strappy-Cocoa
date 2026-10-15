@@ -139,6 +139,36 @@ flowchart TB
   fallback. This optional Foundation harness requires `libgnustep-base-dev`
   and an Objective-C compiler on Linux.
 
+### Completion notifications
+
+Mac and iOS use AltivecCocoa's `AILocalNotificationCenter`. Completion wording
+and session titles remain app-owned; alerts are background-only. iOS requires
+Authorized status before submission and requests permission on Unknown status
+(including empty iOS 8 settings). Shared foreground cleanup clears alerts and
+the badge. The permission request includes alert, sound, and badge types.
+
+Build the offline production-delegate test in the container:
+
+```sh
+python3 source/daemon/tests/notifications_test.py macOS
+python3 source/daemon/tests/notifications_test.py iOS
+```
+
+Run the Mac test's `Strappy.app/Contents/MacOS/Strappy` under
+`build/tests/notifications/macOS/output/macOS/release/Strappy/`. The isolated iOS
+IPA lives under `build/tests/notifications/iOS/output/iOS/release/Strappy/`;
+after installation on a test phone, launch it and check its sandbox's
+`Documents/notifications-result.txt` for PASS. No production accounts or daemon
+are started. The recorder verifies wording, permission policy and lifecycle
+behavior, not OS banner presentation.
+
+Final `koolphone5` validation remains TODO: run the isolated test and separately
+check production permission settings, background success/failure alerts,
+foreground suppression, and alert/badge cleanup. Strappy's unsandboxed system-app
+installation can accept requests without displaying notifications; shared API
+submission does not fix or prove display. See the sibling AltivecIntelligence
+`TODO.md` for the deferred device checks.
+
 ### Warning Flags
 
 Because the code is AI generated, I try to use Clang to help me as much as

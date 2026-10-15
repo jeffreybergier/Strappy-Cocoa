@@ -190,14 +190,6 @@
 - (void)XP_setSourceListStyle;
 @end
 
-/* Instant local notifications via the legacy NSUserNotification API on macOS
- * 10.8+. Runtime class lookup preserves Strappy's Tiger/Leopard build and
- * deployment floors; those releases have no Notification Center and no-op. */
-@interface XPUserNotificationCenter : NSObject
-+ (XPUserNotificationCenter *)defaultCenter;
-- (void)postNotificationWithTitle:(NSString *)title body:(NSString *)body;
-@end
-
 /* LaunchAgent compatibility: Tiger has OnDemand and no Aqua session flag. */
 NSArray *XPLaunchAgentArguments(NSString *action, NSString *path);
 void XPConfigurePersistentLaunchAgent(NSMutableDictionary *plist);

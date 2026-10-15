@@ -1,4 +1,5 @@
 #import "StrappyAsync.h"
+#import <AILocalNotificationCenter.h>
 #import "AppDelegate.h"
 #import "StrappyServiceController.h"
 #import "PreferencesWindowController.h"
@@ -46,6 +47,7 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)populateModelMenu:(NSMenu *)menu;
 - (void)strappySessionPromptDidStart:(NSNotification *)notification;
 - (void)strappySessionPromptDidFinish:(NSNotification *)notification;
+- (AILocalNotificationCenter *)promptCompletionNotificationCenter;
 - (void)postPromptCompletionNotificationIfNeeded:
   (NSNotification *)notification;
 - (void)releaseFinishedPromptSession:(StrappySession *)session;
@@ -103,6 +105,7 @@ static NSAlert *StrappyAsyncErrorAlert;
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification
 {
+  [self promptCompletionNotificationCenter];
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(asyncCommandFailed:)
     name:StrappyAsyncCommandFailedNotification object:nil];
   (void)notification;
@@ -628,6 +631,11 @@ static NSAlert *StrappyAsyncErrorAlert;
   [self terminateIfPendingInFlightSessionsFinished];
 }
 
+- (AILocalNotificationCenter *)promptCompletionNotificationCenter;
+{
+  return [AILocalNotificationCenter defaultCenter];
+}
+
 - (void)postPromptCompletionNotificationIfNeeded:
   (NSNotification *)notification
 {
@@ -639,9 +647,8 @@ static NSAlert *StrappyAsyncErrorAlert;
   }
   title = StrappyPromptCompletionNotificationTitle(notification);
   body = StrappyPromptCompletionNotificationBody(notification);
-  [[XPUserNotificationCenter defaultCenter]
-    postNotificationWithTitle:title
-                         body:body];
+  [[self promptCompletionNotificationCenter]
+    postNotificationWithTitle:title body:body userInfo:nil];
 }
 
 - (void)strappySessionPromptDidStart:(NSNotification *)notification
