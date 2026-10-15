@@ -157,14 +157,16 @@ python3 source/daemon/tests/notifications_test.py iOS
 Run the Mac test's `Strappy.app/Contents/MacOS/Strappy` under
 `build/tests/notifications/macOS/output/macOS/release/Strappy/`. The isolated iOS
 IPA lives under `build/tests/notifications/iOS/output/iOS/release/Strappy/`;
-after installation on a test phone, launch it and check its sandbox's
+after installation on a test phone, run `uiopen strappy-notifications-test://`
+as mobile and check its sandbox's
 `Documents/notifications-result.txt` for PASS. No production accounts or daemon
 are started. The recorder verifies wording, permission policy and lifecycle
 behavior, not OS banner presentation.
 
-Final `koolphone5` validation remains TODO: run the isolated test and separately
-check production permission settings, background success/failure alerts,
-foreground suppression, and alert/badge cleanup. Strappy's unsandboxed system-app
+The isolated production-delegate and shared notification tests passed on
+`koolphone5` (iOS 8.4.1, armv7) on 2026-10-15. Production permission settings,
+background success/failure banners, foreground suppression, and visible
+alert/badge cleanup remain separate manual checks. Strappy's unsandboxed system-app
 installation can accept requests without displaying notifications; shared API
 submission does not fix or prove display. See the sibling AltivecIntelligence
 `TODO.md` for the deferred device checks.

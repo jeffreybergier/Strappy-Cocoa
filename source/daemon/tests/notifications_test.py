@@ -2,8 +2,8 @@
 """Build offline production-delegate tests: notifications_test.py [macOS|iOS].
 
 Run the Mac bundle executable directly. Install the isolated iOS IPA only on
-an authorized test phone and launch it; Documents/notifications-result.txt must
-contain PASS. This recording test does not establish native banner display.
+an authorized test phone and launch with uiopen strappy-notifications-test://
+as mobile; Documents/notifications-result.txt must contain PASS. This recording test does not establish native banner display.
 """
 import pathlib
 import plistlib
@@ -20,6 +20,9 @@ out.mkdir(parents=True, exist_ok=True)
 identity = 'com.altivecintelligence.StrappyNotificationsTest'
 plist = plistlib.loads((root / 'source' / platform / 'Info.plist').read_bytes())
 plist.update(CFBundleIdentifier=identity, CFBundleDisplayName='Notifications Test')
+if platform == 'iOS':
+    plist['CFBundleURLTypes'] = [
+        {'CFBundleURLSchemes': ['strappy-notifications-test']}]
 (out / 'Info.plist').write_bytes(plistlib.dumps(plist))
 makefile = (root / 'source' / platform / 'Makefile').read_text().replace('\\\n', ' ')
 sources = re.search(r'^GROUP_ui_SOURCES = (.*)$', makefile, re.M).group(1).split()
