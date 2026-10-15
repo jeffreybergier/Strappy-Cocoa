@@ -205,6 +205,8 @@ enum {
                                     error:(NSError **)error;
 + (StrappySession *)createSessionWithError:(NSError **)error;
 + (NSArray *)codingWorkingDirectoryPaths;
+/* Main thread. Confirmed deletion also discards local option drafts and the
+ * pending submission identity. Failed/uncertain deletion preserves them. */
 + (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier
                                error:(NSError **)error;
 + (StrappySession *)sessionWithIdentifier:(NSNumber *)sessionIdentifier;

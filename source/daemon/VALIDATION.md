@@ -1216,3 +1216,63 @@ Run `sh schema_device_harness.sh ABSOLUTE_FIXTURE_DIRECTORY` as mobile. On a
 rootless phone use the jailbreak prefix for the signed executables. The script
 refuses to reuse fixture stores and starts/stops only its own daemon. An
 uncompressed archive avoids depending on `gzip` in the phone's shell environment.
+
+## Session deletion cleanup (2026-10-15)
+
+Deletion now removes `prompt_runs` and the session in one transaction. This
+works with existing branch stores that have no run/session foreign key; it
+adds no migration, schema change, or `user_version` change. After confirmed
+service deletion, the UI removes that session's process-local option draft and
+pending prompt retry identity. Failed or unacknowledged deletion preserves both.
+
+Regression coverage:
+
+- `session_delete_harness` is part of the offline suite. It checks completed,
+  failed, cancelled and interrupted run cleanup, rollback when session deletion
+  fails after run deletion, preservation of another session, missing-session
+  failure, reuse of the deleted ID, and unchanged schema/version.
+- `session_options_device_probe` exercises the production Cocoa bridge with
+  simulated service replies. Failed and uncertain deletion preserve drafts and
+  retries; successful deletion clears both; a new controller with the reused ID
+  gets defaults; another conversation retains its own edits and retry identity.
+  Existing field-merge, failed-send, 1 MiB Unicode retry and credential-cache
+  checks also passed.
+- The full offline suite and clean iOS armv7/arm64 and Mac
+  PPC/i386/x86_64/arm64 debug builds passed without compiler warnings. Project
+  and both platforms' debug package validation passed. Targeted Clang analysis
+  of the changed Cocoa and database modules (UI and writer configurations)
+  completed without diagnostics.
+
+Native tests were transferred with `scp -O` and run over SSH:
+
+| Host | Runtime | Result |
+| --- | --- | --- |
+| `koolphone5` | iOS 8.4.1, armv7, mobile (UID 501), SQLite 3.43.2 | Both probes passed. |
+| `x4-vm` | Mac OS X 10.4.11, PPC, user me (UID 501), SQLite 3.43.2 | Both probes passed. |
+
+Fixture directories were `/var/mobile/tmp_altivec/strappy-delete-20261015-1`
+and `/Users/me/Desktop/strappy-delete-20261015-1`. Logs were retrieved under
+`build/deletion-fix/{koolphone5,x4-vm}/`. No installed app/service, real
+conversation store, credentials, or live provider was used. The first phone
+launch mistakenly used the unsigned output and was killed before running;
+transferring `Intermediates/signed/` outputs under fresh filenames resolved it.
+These tests establish native storage and Cocoa behavior, not an installed-app
+UI interaction or live-provider test.
+
+Reproduce builds from the repository root:
+
+```sh
+make -C source/daemon/tests session-delete-test
+make -C source/daemon/tests -f native.mk PLATFORM=iOS TEST_PRODUCTS=delete-probe ARCHS=armv7 debug
+make -C source/daemon/tests -f native.mk PLATFORM=macOS TEST_PRODUCTS=delete-probe ARCHS=ppc debug
+make -C source/iOS -f ../daemon/tests/session_options_device_probe.mk ARCHS=armv7 debug
+make -C source/macOS -f ../daemon/tests/session_options_device_probe.mk ARCHS=ppc debug
+```
+
+Transfer the signed phone binaries from
+`build/tests/iOS/daemon/debug/delete-probe/Intermediates/signed/delete-probe`
+and `build/iOS/debug/options-probe/Intermediates/signed/options-probe`.
+Mac outputs are `build/tests/macOS/daemon/debug/delete-probe/delete-probe`
+and `build/macOS/debug/options-probe/options-probe`. Run `delete-probe` with
+an absolute, nonexistent fixture database path and `options-probe` without
+arguments. Keep each run's output logs and use a new staging directory.

@@ -543,3 +543,10 @@ $(BUILD_DIR)/schema_harness: schema_harness.c $(STRAPPY_STORE_SOURCES) | $(BUILD
 schema-test: $(BUILD_DIR)/schema_harness $(BUILD_DIR)/store_reader_harness $(BUILD_DIR)/strappyd
 	python3 schema_harness.py $(BUILD_DIR)/schema_harness $(BUILD_DIR)/store_reader_harness $(BUILD_DIR)/strappyd
 test: schema-test
+
+$(BUILD_DIR)/session_delete_harness: session_delete_harness.c $(STRAPPY_STORE_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) $< $(STRAPPY_STORE_SOURCES) $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+.PHONY: session-delete-test
+session-delete-test: $(BUILD_DIR)/session_delete_harness | $(TEST_DIR)
+	python3 -c 'import subprocess, tempfile; from pathlib import Path; d = tempfile.TemporaryDirectory(prefix="session-delete-", dir="$(TEST_DIR)"); subprocess.run(["$(BUILD_DIR)/session_delete_harness", str(Path(d.name) / "fixture.sqlite")], check=True)'
+test: session-delete-test

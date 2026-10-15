@@ -1,40 +1,20 @@
-# Run from source/iOS or source/macOS after the normal platform build:
-# make -f ../daemon/tests/session_options_device_probe.mk session-options-probe
-# Transport replacements apply only to the test copy of the Cocoa bridge.
-STRAPPY_PHONE_INTERNAL_BUILD = 1
-include Makefile
+# Compatibility entry from source/iOS or source/macOS; common product rules
+# compile the real shared UI code with only the bridge transports replaced.
+PLATFORM ?= $(notdir $(CURDIR))
+OPTIONS_PROJECT_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
 .DEFAULT_GOAL := session-options-probe
-ifeq ($(notdir $(CURDIR)),iOS)
-OPTIONS_PROBE_DIR = $(INT_DIR)/options-probe
-OPTIONS_PROBE_OBJECTS = $(filter-out $(INT_DIR)/main.o $(INT_DIR)/StrappySession.o,$(APP_SOURCE_OBJS) $(APP_EXTRA_OBJS))
-
-.PHONY: session-options-probe
-session-options-probe: $(BUILD_DIR)/session-options-probe
-
-$(OPTIONS_PROBE_DIR):
-	mkdir -p $@
-
-$(OPTIONS_PROBE_DIR)/StrappySession.o: ../shared/StrappySession.m ../shared/StrappySession.h | $(OPTIONS_PROBE_DIR)
-	$(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) -Dstrappy_store_client_credential=strappy_test_credential -Dstrappy_store_client_mutation=strappy_test_mutation -Dstrappy_store_client_command=strappy_test_command -c $< -o $@
-
-$(OPTIONS_PROBE_DIR)/main.o: ../daemon/tests/session_options_device_probe.m | $(OPTIONS_PROBE_DIR)
-	$(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) -c $< -o $@
-
-$(BUILD_DIR)/session-options-probe: $(OPTIONS_PROBE_DIR)/main.o $(OPTIONS_PROBE_DIR)/StrappySession.o $(OPTIONS_PROBE_OBJECTS)
-	$(CLANG) $(IOS_ARCH_FLAGS) $(IOS_FLAGS) $^ $(IOS_FRAMEWORKS) $(LIBS_IPHONE) -o $@
-	$(PHONE_LDID) -S $@
-
-else
-OPTIONS_PROBE_DIR = $(INT_DIR)/options-probe-ppc
-OPTIONS_PROBE_OBJECTS = $(filter-out $(INT_DIR)/ppc/main.o $(INT_DIR)/ppc/StrappySession.o,$(PPC_OBJS))
-.PHONY: session-options-probe
-session-options-probe: $(BUILD_DIR)/session-options-probe-ppc
-$(OPTIONS_PROBE_DIR):
-	mkdir -p $@
-$(OPTIONS_PROBE_DIR)/StrappySession.o: ../shared/StrappySession.m ../shared/StrappySession.h | $(OPTIONS_PROBE_DIR)
-	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_PPC) $(MAC_FLAGS) $(LEGACY_GCC_FLAGS) -arch ppc -isysroot $(SDK_MAC_OLD_PATH) -Dstrappy_store_client_credential=strappy_test_credential -Dstrappy_store_client_mutation=strappy_test_mutation -Dstrappy_store_client_command=strappy_test_command -c $< -o $@
-$(OPTIONS_PROBE_DIR)/main.o: ../daemon/tests/session_options_device_probe.m | $(OPTIONS_PROBE_DIR)
-	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_PPC) $(MAC_FLAGS) $(LEGACY_GCC_FLAGS) -arch ppc -isysroot $(SDK_MAC_OLD_PATH) -c $< -o $@
-$(BUILD_DIR)/session-options-probe-ppc: $(OPTIONS_PROBE_DIR)/main.o $(OPTIONS_PROBE_DIR)/StrappySession.o $(OPTIONS_PROBE_OBJECTS)
-	MACOSX_DEPLOYMENT_TARGET=$(MAC_MIN_OLD) $(COMPILER_PPC) -arch ppc -isysroot $(SDK_MAC_OLD_PATH) $^ $(MAC_LIBS) -lgcc_s.10.4 -o $@
-endif
+.PHONY: session-options-probe debug release
+session-options-probe: debug
+debug release:
+	+$(MAKE) -C $(OPTIONS_PROJECT_ROOT)/source/$(PLATFORM) options-probe CONFIG=$@ \
+	  PRODUCTS=options-probe PACKAGE_PRODUCTS= \
+	  options-probe_TYPE=executable \
+	  'options-probe_GROUPS=options_common options_bridge' \
+	  'GROUP_options_common_SOURCES=$$(filter-out StrappySession.m,$$(GROUP_shared_SOURCES)) ../daemon/tests/session_options_device_probe.m' \
+	  GROUP_options_bridge_SOURCES=../shared/StrappySession.m \
+	  'GROUP_options_bridge_FLAGS=-Dstrappy_store_client_credential=strappy_test_credential -Dstrappy_store_client_mutation=strappy_test_mutation -Dstrappy_store_client_command=strappy_test_command' \
+	  'BUILD_FLAGS=-DSTRAPPY_DB_UI=1 -I../shared' \
+	  options-probe_CORE=static options-probe_COCOA=static options-probe_SQLITE=1 \
+	  'options-probe_GENERATED=$$(FONTAWESOME_GENERATED)' \
+	  options-probe_SIGN=$(if $(filter iOS,$(PLATFORM)),1,0) \
+	  'options-probe_LDFLAGS=-framework Foundation -framework CoreFoundation -framework SystemConfiguration -framework Security -lobjc'

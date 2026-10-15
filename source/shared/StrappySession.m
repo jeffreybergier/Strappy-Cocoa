@@ -3100,10 +3100,22 @@ static void StrappyStoreChanged(unsigned int topics, long long session)
 + (BOOL)deleteSessionWithIdentifier:(NSNumber *)sessionIdentifier
                                error:(NSError **)error
 {
-  return StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
+  if (StrappyServiceCommand(STRAPPY_IPC_MUTATE,[NSDictionary dictionaryWithObjectsAndKeys:
     @"delete_session",@"action",
     StrappyNumber([sessionIdentifier longLongValue]),@"session",
-    nil],error) != nil;
+    nil],error) == nil) return NO;
+  /* SQLite can reuse a deleted session ID. Discard its local edits and retry
+   * identity only after the service confirms deletion; a failed command must
+   * leave the existing conversation's state intact. */
+  @synchronized(self) {
+    [StrappyOptionDrafts removeObjectForKey:sessionIdentifier];
+  }
+  @synchronized([NSUserDefaults standardUserDefaults]) {
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:
+      [NSString stringWithFormat:@"StrappyPendingPrompt-%@", sessionIdentifier]];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+  }
+  return YES;
 }
 
 + (StrappySessionRows *)sidebarRowsWithError:(NSError **)error

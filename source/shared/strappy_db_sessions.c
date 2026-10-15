@@ -615,6 +615,12 @@ int strappy_db_delete_session(const char *db_path,
   sqlite3 *db;
   sqlite3_stmt *stmt;
   int rc;
+  int ok = 0;
+  unsigned int i;
+  static const char *const deletes[] = {
+    "DELETE FROM prompt_runs WHERE session_id = ?;",
+    "DELETE FROM sessions WHERE id = ?;"
+  };
 
   if (session_id <= 0) {
     strappy_set_error(error_out, "Session id is not valid.");
@@ -635,22 +641,32 @@ int strappy_db_delete_session(const char *db_path,
     return 0;
   }
 
-  stmt = NULL;
-  rc = sqlite3_prepare_v2(db, "DELETE FROM sessions WHERE id = ?;", -1,
-                          &stmt, NULL);
-  if ((rc != SQLITE_OK) ||
-      (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
-      (sqlite3_step(stmt) != SQLITE_DONE)) {
-    strappy_set_formatted_error(error_out,
-                                "Could not delete session: %s",
-                                sqlite3_errmsg(db));
-    sqlite3_finalize(stmt);
+  /* Existing v1 stores have no prompt_runs foreign key. Explicit cleanup
+   * handles those stores without changing their schema or user_version. */
+  if (!strappy_db_exec(db, "BEGIN IMMEDIATE;",
+                      "Could not begin session deletion", error_out)) {
     strappy_db_release(db);
     return 0;
   }
-  sqlite3_finalize(stmt);
+  for (i = 0; i < sizeof(deletes) / sizeof(deletes[0]); ++i) {
+    stmt = NULL;
+    rc = sqlite3_prepare_v2(db, deletes[i], -1, &stmt, NULL);
+    if ((rc != SQLITE_OK) ||
+        (sqlite3_bind_int64(stmt, 1, (sqlite3_int64)session_id) != SQLITE_OK) ||
+        (sqlite3_step(stmt) != SQLITE_DONE)) {
+      strappy_set_formatted_error(error_out, "Could not delete session: %s",
+                                 sqlite3_errmsg(db));
+      sqlite3_finalize(stmt);
+      goto done;
+    }
+    sqlite3_finalize(stmt);
+  }
+  ok = strappy_db_exec(db, "COMMIT;", "Could not commit session deletion",
+                      error_out);
+done:
+  if (!ok) sqlite3_exec(db, "ROLLBACK;", NULL, NULL, NULL);
   strappy_db_release(db);
-  return 1;
+  return ok;
 }
 
 int strappy_db_update_session_name(const char *db_path,

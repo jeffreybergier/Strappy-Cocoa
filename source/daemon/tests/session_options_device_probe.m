@@ -19,6 +19,8 @@ static NSString *failure;
 static NSData *expectedPrompt;
 static pthread_cond_t credentialCondition = PTHREAD_COND_INITIALIZER;
 static int credentialReads, releaseCredential, credentialNotifications;
+static unsigned int deleteStatus;
+static int deletions;
 char *strappy_test_credential(const cJSON *command, unsigned int *status)
 {
   const char *account = cJSON_GetObjectItemCaseSensitive(command,"id")->valuestring;
@@ -34,8 +36,13 @@ char *strappy_test_credential(const cJSON *command, unsigned int *status)
 
 char *strappy_test_mutation(unsigned int operation, const cJSON *command, unsigned int *status)
 {
-  (void)operation; (void)command; (void)status;
-  assert(0 && "Send must use one combined command"); return NULL;
+  const cJSON *action = cJSON_GetObjectItemCaseSensitive(command, "action");
+  assert([NSThread XP_isMainThread]);
+  assert(operation == STRAPPY_IPC_MUTATE && cJSON_IsString(action));
+  assert(!strcmp(action->valuestring, "delete_session"));
+  ++deletions;
+  *status = deleteStatus;
+  return deleteStatus == STRAPPY_IPC_OK ? strdup("") : NULL;
 }
 int strappy_test_command(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status)
@@ -116,6 +123,51 @@ static OptionsProbeSession *session(NSNumber *identifier, StrappySessionOptions 
   [s setValue:[NSNumber numberWithBool:YES] forKey:@"optionsLoaded_"];
   return [s autorelease];
 }
+static void testDeletion(StrappySessionOptions *defaults)
+{
+  NSNumber *identifier = [NSNumber numberWithInt:987654322];
+  NSNumber *otherIdentifier = [NSNumber numberWithInt:987654323];
+  NSString *pendingKey = @"StrappyPendingPrompt-987654322";
+  NSString *otherKey = @"StrappyPendingPrompt-987654323";
+  NSUserDefaults *preferences = [NSUserDefaults standardUserDefaults];
+  OptionsProbeSession *original = session(identifier, defaults);
+  OptionsProbeSession *other = session(otherIdentifier, defaults);
+  StrappySessionOptions *edit = [[defaults copy] autorelease];
+  NSError *error = nil;
+  [preferences removeObjectForKey:pendingKey];
+  [preferences removeObjectForKey:otherKey];
+  [edit setBashEnabled:YES];
+  [edit setRoundLimit:9];
+  assert([original updateOptions:edit changedFields:
+    StrappySessionOptionBash | StrappySessionOptionRoundLimit error:NULL]);
+  assert([other updateOptions:edit changedFields:StrappySessionOptionBash
+    error:NULL]);
+  [preferences setObject:[NSDictionary dictionaryWithObject:@"fixture"
+    forKey:@"key"] forKey:pendingKey];
+  [preferences setObject:@"other retry" forKey:otherKey];
+  deleteStatus = STRAPPY_IPC_BUSY;
+  assert(![StrappySession deleteSessionWithIdentifier:identifier error:&error]);
+  assert(error != nil && deletions == 1);
+  assert([[original optionsWithError:NULL] roundLimit] == 9);
+  assert([preferences objectForKey:pendingKey] != nil);
+  /* An uncertain acknowledgement must preserve edits too. */
+  deleteStatus = STRAPPY_IPC_NOT_READY;
+  assert(![StrappySession deleteSessionWithIdentifier:identifier error:NULL]);
+  assert([[original optionsWithError:NULL] bashEnabled]);
+  assert([preferences objectForKey:pendingKey] != nil);
+  deleteStatus = STRAPPY_IPC_OK;
+  assert([StrappySession deleteSessionWithIdentifier:identifier error:NULL]);
+  assert(deletions == 3);
+  assert([preferences objectForKey:pendingKey] == nil);
+  assert(![[session(identifier, defaults) optionsWithError:NULL] bashEnabled]);
+  assert([[session(identifier, defaults) optionsWithError:NULL] roundLimit] == 3);
+  assert([[other optionsWithError:NULL] bashEnabled]);
+  assert([preferences objectForKey:otherKey] != nil);
+  assert([StrappySession deleteSessionWithIdentifier:otherIdentifier error:NULL]);
+  puts("PASS deletion: confirmed delete clears draft and retry identity; "
+    "failed/uncertain delete preserves both; reused ID gets defaults; "
+    "other conversation unchanged");
+}
 static void testCredentialCache(OptionsProbeObserver *observer)
 {
   int i, reads;
@@ -165,6 +217,7 @@ int main(void)
   unsigned char *raw = [bytes mutableBytes];
   unsigned int byte;
   NSString *largePrompt;
+  testDeletion(options);
   for (byte=0; byte<STRAPPY_IPC_MAX_PROMPT_BYTES; byte+=2) { raw[byte]=0xc3; raw[byte+1]=0xa9; }
   expectedPrompt = bytes;
   largePrompt = [[[NSString alloc] initWithData:bytes encoding:NSUTF8StringEncoding] autorelease];

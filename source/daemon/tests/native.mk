@@ -28,6 +28,12 @@ schema-reader-probe_FLAGS = -DSTRAPPY_DB_UI=1 -I../ -I../../shared
 schema-reader-probe_CORE = static
 schema-reader-probe_SIGN = $(auth-probe_SIGN)
 schema-reader-probe_LDFLAGS = $(auth-probe_LDFLAGS)
+delete-probe_TYPE = executable
+delete-probe_SOURCES = session_delete_harness.c $(STRAPPY_STORE_SOURCES)
+delete-probe_FLAGS = $(auth-probe_FLAGS)
+delete-probe_CORE = static
+delete-probe_SIGN = $(auth-probe_SIGN)
+delete-probe_LDFLAGS = $(auth-probe_LDFLAGS)
 include $(ALTIVEC_ROOT)/altivec_common_$(if $(filter iOS,$(PLATFORM)),phone,mac).mk
 _package: $(foreach p,$(TEST_PRODUCTS),_product-$(p))
 endif
