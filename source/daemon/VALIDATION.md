@@ -1276,3 +1276,64 @@ Mac outputs are `build/tests/macOS/daemon/debug/delete-probe/delete-probe`
 and `build/macOS/debug/options-probe/options-probe`. Run `delete-probe` with
 an absolute, nonexistent fixture database path and `options-probe` without
 arguments. Keep each run's output logs and use a new staging directory.
+
+## Empty account endpoint override (2026-10-16)
+
+Both platform daemons compile `strappy_db_catalog.c`. Account updates now bind
+an empty optional endpoint override as SQL NULL, matching provider-default
+resolution and the existing schema constraint. Endpoint validation still runs
+first, so `other` accounts must supply their required Responses endpoint. No
+schema migration, key-format validation, or provider request was added.
+
+The multi-account database regression failed before the fix with `Provider
+account could not be updated.` It now covers empty overrides for OpenRouter
+and ChatGPT, SQL NULL persistence, and rejection of an empty required endpoint.
+The complete `make -C source/daemon/tests clean test` suite passes. Clean debug
+app/daemon builds pass for iOS armv7/arm64 and Mac PPC/i386/x86_64/arm64 with no
+compiler warnings. `make validate` and both debug `validate-package` targets
+pass. This checkout has no `check-project` target; `validate` is its project
+validation entry point.
+
+`account_endpoint_device_probe.c` sends real credential jobs over IPC to the
+production daemon and reads committed rows through read-only SQLite. It checks:
+
+- Saving a synthetic OpenRouter key with an empty endpoint and output limit;
+  the endpoint is SQL NULL and Keychain presence is true.
+- Editing the name/limit without replacing the key; presence remains true.
+- Rejecting an empty endpoint for `other` without changing its saved name.
+- Saving and preserving an explicit endpoint and output limit for `other`.
+- Archiving the fixture accounts through the daemon's credential cleanup path.
+
+Native results:
+
+| Host | Runtime / launch context | Result |
+| --- | --- | --- |
+| `koolphone5` | iOS 8.4.1 / armv7, mobile via `su` | Passed |
+| `x4-vm` | Mac OS X 10.4.11 / PPC, logged-in desktop Terminal | Passed |
+
+The first Mac runs launched directly from SSH could not save the fixture key:
+`SecKeychainGetStatus` in that SSH context reported unlocked=0, writable=0.
+Launching the same daemon/probe from the normal desktop Terminal session passed.
+Do not treat an SSH Keychain denial as a storage regression or native success.
+
+Build the native probe from `source/daemon/tests` using:
+
+```sh
+make -f native.mk PLATFORM=iOS TEST_PRODUCTS=account-endpoint-probe debug
+make -f native.mk PLATFORM=macOS TEST_PRODUCTS=account-endpoint-probe debug
+```
+
+Stage `account_endpoint_device_harness.sh` as `run.sh`, the production daemon
+as `strappyd`, and the probe as `account-endpoint-probe` in a fresh private
+fixture directory. Use the `Intermediates/signed/` outputs on iOS. Include shared
+JSON catalogs, platform `Info.plist`, and `cacert.pem` under `resources/`.
+Invoke `sh run.sh ABSOLUTE_FIXTURE_DIRECTORY` as the normal app user. On Mac,
+launch that command from a desktop Terminal, including when orchestration uses
+SSH; a `.command` wrapper can capture output and exit status in the fixture.
+The harness refuses reused stores and stops only its own daemon.
+
+Passing fixtures are `/var/mobile/tmp_altivec/strappy-endpoint-20261016-2` and
+`/Users/me/Desktop/strappy-endpoint-20261016-3`. Build and runtime logs are retained
+locally under `build/account-endpoint-fix/`. Tests used synthetic credentials and
+isolated stores, made no provider requests, and did not replace installed apps
+or services. This verifies native daemon account saving, not manual UI taps.

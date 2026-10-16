@@ -663,6 +663,11 @@ int strappy_db_update_provider_account(const char *db_path, const char *account_
     strappy_provider_account_record_destroy(&current); return 0;
   }
   strappy_provider_account_record_destroy(&current);
+  /* Empty IPC overrides mean use the provider default. The schema stores
+   * absence as NULL, not an empty string. Required endpoints fail above. */
+  if ((responses_endpoint != NULL) && (responses_endpoint[0] == '\0')) {
+    responses_endpoint = NULL;
+  }
   if (!strappy_db_open(db_path, &db, error_out)) return 0;
   if (!strappy_db_ensure_schema(db, error_out)) { strappy_db_release(db); return 0; }
   stmt = NULL; rc = sqlite3_prepare_v2(db,

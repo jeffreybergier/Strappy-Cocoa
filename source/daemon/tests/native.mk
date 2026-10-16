@@ -34,6 +34,12 @@ delete-probe_FLAGS = $(auth-probe_FLAGS)
 delete-probe_CORE = static
 delete-probe_SIGN = $(auth-probe_SIGN)
 delete-probe_LDFLAGS = $(auth-probe_LDFLAGS)
+account-endpoint-probe_TYPE = executable
+account-endpoint-probe_SOURCES = account_endpoint_device_probe.c ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c
+account-endpoint-probe_FLAGS = -I../../shared
+account-endpoint-probe_CORE = static
+account-endpoint-probe_SIGN = $(auth-probe_SIGN)
+account-endpoint-probe_LDFLAGS = $(auth-probe_LDFLAGS)
 include $(ALTIVEC_ROOT)/altivec_common_$(if $(filter iOS,$(PLATFORM)),phone,mac).mk
 _package: $(foreach p,$(TEST_PRODUCTS),_product-$(p))
 endif

@@ -12270,6 +12270,22 @@ static int harness_run_multi_account_database_tests(
       1LL,"single provider-owned remote model") &&
     strappy_db_update_provider_account(path,chat_two,"Renamed",NULL,0LL,&error);
   strappy_provider_account_record_destroy(&account);
+  /* Cocoa sends an unused endpoint override as an empty IPC string. */
+  if (ok) {
+    ok = strappy_db_update_provider_account(
+      path,router_two,"Empty endpoint","",0LL,&error) &&
+      strappy_db_get_provider_account(path,router_two,&account,&error) &&
+      (account.responses_endpoint == NULL) &&
+      (strcmp(account.display_name,"Empty endpoint") == 0);
+    strappy_provider_account_record_destroy(&account);
+  }
+  if (ok) {
+    ok = strappy_db_update_provider_account(
+      path,chat_two,"Renamed","",0LL,&error) &&
+      strappy_db_get_provider_account(path,chat_two,&account,&error) &&
+      (account.responses_endpoint == NULL);
+    strappy_provider_account_record_destroy(&account);
+  }
   if (ok) {
     char *rejected_account;
 
@@ -12312,7 +12328,7 @@ static int harness_run_multi_account_database_tests(
       strappy_db_get_provider_account(path,other_incomplete,&account,&error) &&
       (account.responses_endpoint == NULL) &&
       !strappy_db_update_provider_account(
-        path,other_incomplete,"Unconfigured",NULL,0LL,&error) &&
+        path,other_incomplete,"Unconfigured","",0LL,&error) &&
       (error != NULL) &&
       (strstr(error,"requires a Responses endpoint") != NULL);
     strappy_provider_account_record_destroy(&account);
