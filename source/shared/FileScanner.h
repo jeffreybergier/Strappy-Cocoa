@@ -38,6 +38,9 @@ extern NSString * const FileScannerCatalogReadFailedNotification;
 /* Service monitor delivery on the UI thread. */
 + (void)serviceWorkDidChange;
 + (BOOL)isDatabaseCatalogScanInFlight;
+/* Main-thread submission. Copies a job key into the request; completion and
+ * errors arrive on the main thread independently of running-event delivery.
+ * No caller-owned target is retained and no caller teardown is required. */
 + (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path
                                  error:(NSError **)error;
 + (BOOL)beginDatabaseCatalogScanAtPath:(NSString *)path

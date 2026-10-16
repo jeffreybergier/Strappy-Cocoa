@@ -182,9 +182,42 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         root = directory/'scan'; root.mkdir()
         with sqlite3.connect(root/'fixture.sqlite') as db:
             db.execute('CREATE TABLE fixture(value TEXT)')
-        rpc(op=23,path=root,quick=0)
+        rpc(op=23,path=root,quick=0,key='1'*64)
         wait(idle)
         assert struct.unpack('!III',command(directory,26)[1])[1:] == (23,3)
+        def outcome(key):
+            status, payload = command(directory,26,key.encode())
+            assert status == 0
+            return struct.unpack('!I',payload)[0]
+        # First observation is terminal; no running-event observation is needed.
+        assert outcome('1'*64) == 3
+        rpc(op=23,path=root,quick=0,key='1'*64,expected=8)
+        with sqlite3.connect(dbpath) as db:
+            db.execute("CREATE TRIGGER fail_scan BEFORE INSERT ON scan_runs "
+                       "BEGIN SELECT RAISE(ABORT,'fixture scan failure'); END")
+        rpc(op=23,path=root,quick=0,key='2'*64)
+        wait(idle)
+        assert outcome('2'*64) == 4
+        with sqlite3.connect(dbpath) as db:
+            db.execute('DROP TRIGGER fail_scan')
+        assert outcome('1'*64) == 3
+        rpc(op=27,id='missing-account',key='3'*64)
+        wait(idle)
+        assert outcome('3'*64) == 4
+        rpc(op=27,id='missing-account',key='4'*64)
+        wait(idle)
+        assert outcome('4'*64) == 4 and outcome('3'*64) == 4
+        assert outcome('f'*64) == 0
+        assert command(directory,26,b'z'*64)[0] == 1
+        rpc(op=27,id='missing-account',key='bad',expected=1)
+        # A completed failure remains addressable after another kind of work.
+        assert outcome('2'*64) == 4
+        for index in range(64):
+            key = format(100 + index, '064x')
+            rpc(op=27,id='missing-account',key=key)
+            wait(idle)
+        assert outcome('3'*64) == 0  # Bounded eviction is explicitly unknown.
+        assert outcome(key) == 4
         catalog = scalar('SELECT database_id FROM database_locations WHERE path=?',(str(root/'fixture.sqlite'),))
         rpc('approve_database',id=catalog,value=1)
         rpc('hide_database',id=catalog,value=1)
@@ -247,8 +280,9 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         assert struct.unpack('!III',command(directory,26)[1])[1:] == (27,3)
         assert scalar("SELECT count(*) FROM models WHERE wire_model_id='fixture/catalog'") == 1
         gate.clear(); entered.clear()
-        rpc(op=27,id=router)
+        rpc(op=27,id=router,key='5'*64)
         wait(entered.is_set)
+        assert outcome('5'*64) == 2
         # Durable retries still resolve while a different kind of worker is busy.
         retry = struct.pack('!Q',cancelled_study) + b'a'*64 + b'Database Study'
         status, result = command(directory,16,retry)
@@ -261,6 +295,7 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
         gate.set()
         process = start()
         assert struct.unpack('!III',command(directory,26)[1]) == (0,0,0)
+        assert outcome('5'*64) == 0  # Restart is unknown, never automatic replay.
         rpc('delete_session',session=session)
         rpc('archive_model',id='other',wire='fixture')
         rpc('archive_account',id=account)

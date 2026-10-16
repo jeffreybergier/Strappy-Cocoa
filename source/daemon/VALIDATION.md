@@ -1377,3 +1377,26 @@ submitted. Logs are under `build/catalog-endpoint-fix/`; native probe staging is
 `/var/root/tmp_altivec/strappy-catalog-install-20261016`. This verifies the native
 production refresh path on the affected phone; Mac coverage for this follow-up
 is compilation and shared resolver tests, not a live Mac provider request.
+
+## Keyed maintenance completion (2026-10-16)
+
+Scan and model-catalog submissions now carry opaque job keys. The daemon retains
+64 keyed states, and a UI worker reads the particular job's terminal result.
+Main-thread completion no longer depends on observing a running activity hint.
+The aggregate monitor cannot finish locally pending jobs. Missing results after
+restart or eviction are unknown outcomes and never trigger automatic replay.
+
+The production-daemon mutation harness covers first observation after successful
+scan completion, injected scan-storage failure, immediate catalog failures,
+consecutive job isolation, duplicate-key rejection, malformed status queries,
+bounded retention, running status, and restart loss. The production-client
+transport harness covers immediate success/failure, unknown outcome, a lost
+status reply followed by a read-only reconnect, and running-to-terminal polling.
+
+`make -C source/daemon/tests clean test`, `make validate`, and
+`make validate-package CONFIG=debug` passed. Final `make clean debug` builds
+passed for Mac PPC/i386/x86_64/arm64 and iOS armv7/arm64, app and daemon, without
+compiler warnings. The first build exposed a missing private scan-completion
+method declaration; that declaration was added before the final clean build.
+Logs are local `/tmp/strappy-maintenance-*` files, not committed artifacts.
+Native GUI/device scenarios and live provider calls were not run for this fix.

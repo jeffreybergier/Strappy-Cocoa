@@ -13,6 +13,7 @@ count = 0
 credential_starts = 0
 credential_jobs = {}
 prompt_count = 0
+maintenance_reads = {}
 lock = threading.Lock()
 refresh_entered, control_seen, background_entered = threading.Event(), threading.Event(), threading.Event()
 def exact(s, n):
@@ -78,6 +79,16 @@ with tempfile.TemporaryDirectory(prefix='strappy-control-',dir='/tmp') as tmp:
                             mutation_connections.append(identity)
                             if count == 33: return
                         response = b'ok'
+                    elif op == 26 and size:
+                        assert size == 64
+                        with lock:
+                            reads = maintenance_reads.get(payload, 0) + 1
+                            maintenance_reads[payload] = reads
+                        if payload == b'd'*64 and reads == 1:
+                            return  # Lost status reply: retry only the read.
+                        state = {b'a':4, b'b':3, b'c':0, b'd':4,
+                                 b'e':2 if reads == 1 else 3}[payload[:1]]
+                        response = struct.pack('!I',state)
                     elif op == 26: response = bytes(12)
                     else: response = snapshot
                     s.sendall(header.pack(magic,version,2,op,ident,len(response),0)+response)
@@ -93,6 +104,7 @@ with tempfile.TemporaryDirectory(prefix='strappy-control-',dir='/tmp') as tmp:
     threading.Thread(target=accept,daemon=True).start()
     subprocess.run([sys.argv[1],path,str(Path(tmp)/'unused.sqlite')],check=True,timeout=15)
     assert not errors, errors
+    assert maintenance_reads == {bytes([c])*64: (2 if c in b'de' else 1) for c in b'abcde'}
     assert credential_starts == 3
     assert prompt_count == 2
     assert count == 34

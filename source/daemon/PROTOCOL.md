@@ -351,3 +351,26 @@ progress finishes before the queued deletion; a cancelled login waiting to save
 cannot restore credentials afterward. Prompt refresh retains the same underlying
 Keychain account lock. Shutdown cancels authorization, wakes queued jobs, and
 joins all workers before releasing their shared state.
+
+## Keyed scan and catalog completion
+
+Scan (23) and catalog refresh (27) accept an optional `key` string containing
+64 lowercase hexadecimal characters. The Cocoa UI always supplies a fresh
+random key. Accepted keyed jobs retain running (2), completed (3), failed (4),
+or interrupted (6) state in a process-local ring of 64 outcomes. Reusing a
+retained key returns conflict (8), without executing the operation again.
+Unkeyed diagnostic clients retain their existing behavior.
+
+Work status (26) keeps its existing empty-request / 12-byte activity snapshot.
+A 64-byte lowercase hexadecimal request instead looks up exactly that key and
+returns one network-order u32 state. Zero means unknown: never accepted, evicted,
+or lost across daemon restart. This additive query does not change SQLite or
+its schema version. An older service rejecting the query is likewise treated
+as an unknown outcome by the client, never as successful completion.
+
+Cocoa waits for keyed completion off the main thread using read-only queries.
+It reports the result once on the main thread even if the daemon finishes
+before the first poll or all running hints coalesce. Ordinary submission is
+still sent once; neither a lost acknowledgment nor a missing result permits
+automatic replay. The activity monitor continues to reflect other clients'
+work, but cannot complete a locally tracked job from its aggregate snapshot.

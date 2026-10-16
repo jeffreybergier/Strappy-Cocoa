@@ -321,6 +321,8 @@ enum {
             (NSString *)wireModelID
                                                     error:
             (NSError **)error;
+/* Main-thread submission; a worker waits for this job's keyed outcome and
+ * publishes completion/error on the main thread. No caller teardown required. */
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error;
 + (NSArray *)databaseStudyRowsWithError:(NSError **)error;
 + (BOOL)deleteDatabaseStudyValuesForDatabaseIdentifier:

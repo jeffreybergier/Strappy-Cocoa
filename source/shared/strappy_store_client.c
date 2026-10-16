@@ -2,6 +2,7 @@
 #include <ai_store.h>
 #include "strappy_db.h"
 #include "strappy_ipc.h"
+#include "strappy_run.h"
 #include "XPFoundation/strappy_ipc_platform.h"
 #include <pthread.h>
 #include <poll.h>
@@ -13,6 +14,7 @@
 
 static char *strappy_command_socket;
 static pthread_mutex_t strappy_status_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t strappy_work_refresh_mutex = PTHREAD_MUTEX_INITIALIZER;
 static unsigned int strappy_active_job, strappy_last_job, strappy_job_result;
 static int strappy_store_exchange(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status, char **response, int attempts, int timeout);
@@ -43,6 +45,9 @@ static void strappy_store_refresh_work(void)
     unsigned int status = 0;
     char *response = NULL;
     unsigned int active = 0, last = 0, result = 0;
+    /* Serialize snapshots so an older monitor read cannot overwrite the idle
+     * snapshot installed before a keyed completion reaches the GUI. */
+    pthread_mutex_lock(&strappy_work_refresh_mutex);
     if (strappy_store_exchange(STRAPPY_IPC_WORK_STATUS,NULL,0,&status,&response,1,2000) &&
         status == STRAPPY_IPC_OK && response) {
         active = strappy_ipc_get32((unsigned char *)response);
@@ -53,6 +58,7 @@ static void strappy_store_refresh_work(void)
     pthread_mutex_lock(&strappy_status_mutex);
     strappy_active_job = active; strappy_last_job = last; strappy_job_result = result;
     pthread_mutex_unlock(&strappy_status_mutex);
+    pthread_mutex_unlock(&strappy_work_refresh_mutex);
 }
 void strappy_store_client_work_status(unsigned int *active, unsigned int *last, unsigned int *result)
 {
@@ -247,7 +253,7 @@ static int strappy_store_exchange_once(unsigned int operation, const unsigned ch
         if (ok) {
             *status = m.status;
             if (response) {
-                if (operation == STRAPPY_IPC_WORK_STATUS && m.length != 12) return 0;
+                if (operation == STRAPPY_IPC_WORK_STATUS && m.length != (length ? 4U : 12U)) return 0;
                 *response = calloc((size_t)m.length+1,1);
                 if (!*response) return 0;
                 memcpy(*response,m.payload,m.length);
@@ -349,4 +355,27 @@ done:
             if (item->valuestring) memset(item->valuestring,0,strlen(item->valuestring));
     }
     cJSON_Delete(start); cJSON_Delete(query); return result;
+}
+
+/* Worker-only wait. The command was submitted once by the caller; every
+ * subsequent exchange is a read, including reconnect after a lost reply. */
+unsigned int strappy_store_client_wait_maintenance(const char *key)
+{
+    if (!key || strlen(key) != 64 || strspn(key,"0123456789abcdef") != 64) return 0;
+    for (;;) {
+        unsigned int status = STRAPPY_IPC_NOT_READY, state = 0;
+        char *response = NULL;
+        int ok = strappy_store_exchange(STRAPPY_IPC_WORK_STATUS,
+            (const unsigned char *)key,64,&status,&response,3,2000);
+        if (ok && status == STRAPPY_IPC_OK && response)
+            state = strappy_ipc_get32((const unsigned char *)response);
+        free(response);
+        if (state != STRAPPY_RUN_RUNNING) {
+            /* Do not leave a stale running snapshot behind the completion. */
+            strappy_store_refresh_work();
+            return state == STRAPPY_RUN_COMPLETED || state == STRAPPY_RUN_FAILED ||
+                state == STRAPPY_RUN_INTERRUPTED ? state : 0;
+        }
+        { struct timespec delay = {0,250000000}; nanosleep(&delay,NULL); }
+    }
 }

@@ -36,7 +36,8 @@ asks the user to check stored state before explicitly trying again.
 | Model/database approval or visibility, context inclusion, study reset/delete | Main-thread control call | Notifications refresh committed values |
 | Conversation/model creation, save, deletion; account creation | Main-thread control call | Completion receives committed identifier/value before handler returns |
 | macOS daemon installation/verification | Explicit `backgroundTarget:` startup work | Main window opens on completion |
-| Scan, catalog fetch, Database Study start | Main-thread acceptance call | Actual long-running job remains in the daemon worker |
+| Scan, catalog fetch | Main-thread acceptance call with a fresh job key | Independent UI worker reads the keyed result; main-thread completion reports success, failure, or unknown |
+| Database Study start | Main-thread acceptance call | Durable session run supplies completion |
 | Account save, credential read/refresh, sign-out, account archival | Per-account daemon credential job; UI worker polls status | Pending state until terminal result, main-thread completion |
 | Prompt submission/cancellation and authentication presentation | Independent background/session paths | Existing durable run and authentication lifecycles |
 | Catalog search, sidebar refresh, conversation refresh | Existing query worker | Latest-only results return to the main thread |
@@ -171,3 +172,11 @@ For an actual iOS WebView, build `webview-device-probe` with
 mobile with the HTML and JavaScript paths as its two arguments. The fixture uses
 no application database or provider request; it checks one document load, the
 ready signal, stable live DOM identities, in-place updates, insertion, and removal.
+
+Scan/catalog completion does not require observing a running event. The bridge
+marks accepted local work pending before returning to the GUI run loop and
+starts a worker that reads only that job's result. While it is pending, activity
+hints cannot finish it. Completion clears pending state and uses the existing
+finish/error notification path once. A second local operation of the same kind
+is refused until completion is delivered. Status snapshot refreshes serialize
+so an earlier monitor read cannot restore stale running state after completion.

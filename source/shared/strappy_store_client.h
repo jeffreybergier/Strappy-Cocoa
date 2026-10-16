@@ -32,5 +32,9 @@ char *strappy_store_client_mutation(unsigned int operation, const cJSON *command
 /* Worker-only: submit once, then poll public job status. NOT_READY means unknown
  * outcome, including daemon restart; never resubmit the mutation automatically. */
 char *strappy_store_client_credential(const cJSON *command, unsigned int *status);
+/* Worker-only: wait for the scan/catalog command's opaque key. Returns a
+ * terminal STRAPPY_RUN_* state or 0 for unknown (restart, eviction, transport
+ * failure). Never submits/repeats work. The daemon retains 64 keyed outcomes. */
+unsigned int strappy_store_client_wait_maintenance(const char *key);
 void strappy_store_client_work_status(unsigned int *active, unsigned int *last, unsigned int *result);
 #endif

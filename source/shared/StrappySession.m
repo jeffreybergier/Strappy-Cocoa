@@ -139,6 +139,7 @@ const NSUInteger StrappySessionMaximumLimit =
   (NSUInteger)STRAPPY_SESSION_MAX_LIMIT;
 
 static BOOL StrappySessionModelCatalogRefreshInFlight = NO;
+static BOOL StrappySessionModelCatalogRefreshPending = NO;
 
 
 static const char *StrappySessionOptionalCString(NSString *string)
@@ -189,6 +190,8 @@ static NSString *StrappySessionStringFromCString(char *value)
     (const strappy_study_database_status_record *)record;
 + (NSString *)guidanceResourceDirectoryWithError:(NSError **)error;
 + (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result;
++ (void)waitForModelCatalogRefresh:(NSString *)key;
++ (void)modelCatalogJobDidFinish:(NSDictionary *)result;
 - (void)updateCachedSummary:(NSDictionary *)summary;
 - (NSString *)currentProcessingStatusJSON;
 - (void)updateProcessingStatusJSON:(NSString *)statusJSON;
@@ -765,10 +768,13 @@ static void StrappyStoreChanged(unsigned int topics, long long session)
   if (topics & (STRAPPY_STORE_CATALOG | STRAPPY_STORE_RUN)) {
     unsigned int active, last, result;
     strappy_store_client_work_status(&active,&last,&result);
-    if ([self isModelCatalogRefreshInFlight] && active != STRAPPY_IPC_REFRESH_CATALOG) {
+    /* Locally submitted jobs report their keyed result independently of hints. */
+    if (!StrappySessionModelCatalogRefreshPending &&
+        [self isModelCatalogRefreshInFlight] && active != STRAPPY_IPC_REFRESH_CATALOG) {
       [self openRouterModelCatalogRefreshDidFinish:(last == STRAPPY_IPC_REFRESH_CATALOG && result == STRAPPY_RUN_COMPLETED) ?
         [NSDictionary dictionary] : [NSDictionary dictionaryWithObject:@"Model refresh failed or the service restarted." forKey:@"error"]];
-    } else if (![self isModelCatalogRefreshInFlight] && active == STRAPPY_IPC_REFRESH_CATALOG) {
+    } else if (!StrappySessionModelCatalogRefreshPending &&
+        ![self isModelCatalogRefreshInFlight] && active == STRAPPY_IPC_REFRESH_CATALOG) {
       @synchronized(self) { StrappySessionModelCatalogRefreshInFlight = YES; }
       [StrappyAsync postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification object:self];
     }
@@ -2954,6 +2960,12 @@ static void StrappyStoreChanged(unsigned int topics, long long session)
 
 + (BOOL)beginOpenRouterModelCatalogRefreshWithError:(NSError **)error
 {
+  char key[65];
+  NSAssert([NSThread XP_isMainThread], @"Catalog submission requires the main thread");
+  if (StrappySessionModelCatalogRefreshPending || !strappy_store_client_request_key(key)) {
+    if (error) *error = [self errorFromCString:"A model refresh is pending or could not be prepared."];
+    return NO;
+  }
   NSEnumerator *accounts = [[self providerAccountCatalogWithError:error] objectEnumerator];
   NSDictionary *account;
   NSString *identifier = nil;
@@ -2965,10 +2977,33 @@ static void StrappyStoreChanged(unsigned int topics, long long session)
     if (error) *error = [self errorFromCString:"Add an OpenRouter account and API key before fetching models."];
     return NO;
   }
+  NSString *jobKey = [NSString stringWithUTF8String:key];
   if (StrappyServiceCommand(STRAPPY_IPC_REFRESH_CATALOG,
-      [NSDictionary dictionaryWithObject:identifier forKey:@"id"],error) == nil) return NO;
-  /* The monitor owns activity state. A fast job can finish before this reply. */
+      [NSDictionary dictionaryWithObjectsAndKeys:identifier,@"id",jobKey,@"key",nil],error) == nil) return NO;
+  StrappySessionModelCatalogRefreshPending = YES;
+  @synchronized(self) { StrappySessionModelCatalogRefreshInFlight = YES; }
+  [StrappyAsync postNotificationName:StrappySessionModelCatalogRefreshDidStartNotification object:self];
+  [NSThread detachNewThreadSelector:@selector(waitForModelCatalogRefresh:) toTarget:self withObject:jobKey];
   return YES;
+}
+
++ (void)waitForModelCatalogRefresh:(NSString *)key;
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  unsigned int state = strappy_store_client_wait_maintenance([key UTF8String]);
+  NSDictionary *result = state == STRAPPY_RUN_COMPLETED ? [NSDictionary dictionary] :
+    [NSDictionary dictionaryWithObject:state == STRAPPY_RUN_FAILED ?
+      @"Model refresh failed. Check the provider account and try again." :
+      @"The model refresh outcome is unknown because the service became unavailable. Reload stored state before retrying."
+      forKey:@"error"];
+  [self performSelectorOnMainThread:@selector(modelCatalogJobDidFinish:) withObject:result waitUntilDone:NO];
+  [pool release];
+}
+
++ (void)modelCatalogJobDidFinish:(NSDictionary *)result;
+{
+  StrappySessionModelCatalogRefreshPending = NO;
+  [self openRouterModelCatalogRefreshDidFinish:result];
 }
 
 + (void)openRouterModelCatalogRefreshDidFinish:(NSDictionary *)result

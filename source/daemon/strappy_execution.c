@@ -27,6 +27,10 @@ struct strappy_execution {
     struct strappy_execution *children, *next;
     int session_worker, finished;
     pthread_mutex_t control;
+    /* Bounded, process-local outcomes; restart/eviction means unknown. */
+    struct { char key[65]; unsigned int state; } maintenance[64];
+    unsigned int maintenance_next;
+    int maintenance_slot;
 };
 /* Cancellation belongs to the executing session, including credential refresh.
  * Global configuration is initialized once before any execution workers start. */
@@ -230,6 +234,10 @@ static void *strappy_execution_work(void *context)
         if (e->run && strappy_run_update(e->db, e->run, state, e->cancel, "", "", 0, 0))
             strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_RUN_CHANGED, e->session, 0);
         free(e->prompt); e->prompt = NULL; if (!e->session_worker) e->run = 0; e->cancel = 0;
+        if (e->maintenance_slot >= 0) {
+            e->maintenance[e->maintenance_slot].state = (unsigned int)state;
+            e->maintenance_slot = -1;
+        }
         e->last_job = e->job; e->last_result = (unsigned int)state; e->job = 0;
         cJSON_Delete(e->command); e->command = NULL;
         if (!e->session_worker) strappy_ipc_server_committed(e->server,STRAPPY_IPC_CATALOG_CHANGED);
@@ -252,6 +260,25 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
     cJSON *settings = NULL;
     strappy_session_options options;
     strappy_session_option_mask mask = 0;
+    /* Keyed status reads never execute or retry a maintenance operation. */
+    if (request->operation == STRAPPY_IPC_WORK_STATUS && request->length) {
+        unsigned int i;
+        reply->status = STRAPPY_IPC_INVALID;
+        if (request->length != 64) return;
+        for (i = 0; i < 64; ++i)
+            if (!((payload[i] >= '0' && payload[i] <= '9') ||
+                  (payload[i] >= 'a' && payload[i] <= 'f'))) return;
+        pthread_mutex_lock(&e->mutex);
+        strappy_ipc_put32(reply->payload, 0); /* Unknown, including restart. */
+        for (i = 0; i < 64; ++i)
+            if (!memcmp(e->maintenance[i].key, payload, 64)) {
+                strappy_ipc_put32(reply->payload, e->maintenance[i].state);
+                break;
+            }
+        reply->length = 4; reply->status = STRAPPY_IPC_OK;
+        pthread_mutex_unlock(&e->mutex);
+        return;
+    }
     if (request->operation != STRAPPY_IPC_SUBMIT_PROMPT && request->operation != STRAPPY_IPC_SUBMIT_WITH_OPTIONS && request->operation != STRAPPY_IPC_CANCEL_RUN) {
         cJSON *command = NULL;
         char *result = NULL;
@@ -302,7 +329,18 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
             reply->length = 12; reply->status = STRAPPY_IPC_OK;
         } else if (request->operation == STRAPPY_IPC_START_SCAN || request->operation == STRAPPY_IPC_REFRESH_CATALOG ||
                  request->operation == STRAPPY_IPC_START_STUDY) {
+            const char *maintenance_key = request->operation == STRAPPY_IPC_START_STUDY ?
+                "" : strappy_command_text(command, "key");
+            unsigned int index;
             int valid = !e->job;
+            if (*maintenance_key) {
+                if (strlen(maintenance_key) != 64 ||
+                    strspn(maintenance_key, "0123456789abcdef") != 64) goto mutation_unlock;
+                for (index = 0; index < 64; ++index)
+                    if (!strcmp(e->maintenance[index].key, maintenance_key)) {
+                        reply->status = STRAPPY_IPC_CONFLICT; goto mutation_unlock;
+                    }
+            }
             if (!valid) { reply->status = STRAPPY_IPC_BUSY; goto mutation_unlock; }
             if (request->operation == STRAPPY_IPC_START_SCAN)
                 valid = *strappy_command_text(command,"path") == '/' &&
@@ -316,6 +354,13 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
             }
             if (valid) {
                 char number[32];
+                e->maintenance_slot = -1;
+                if (*maintenance_key) {
+                    index = e->maintenance_next++ % 64;
+                    memcpy(e->maintenance[index].key, maintenance_key, 65);
+                    e->maintenance[index].state = STRAPPY_RUN_RUNNING;
+                    e->maintenance_slot = (int)index;
+                }
                 e->command = command; command = NULL; e->job = request->operation; e->cancel = 0;
                 if (e->job == STRAPPY_IPC_START_STUDY) {
                     snprintf(number,sizeof(number),"%lld",e->session);
@@ -436,6 +481,7 @@ mutation_done:
         if (r.state == STRAPPY_RUN_ACCEPTED && !existing) {
             child = calloc(1,sizeof(*child));
             if (!child) { reply->status = STRAPPY_IPC_STORAGE_ERROR; goto launch_failed; }
+            child->maintenance_slot = -1;
             child->server = e->server; child->db = e->db; child->resources = e->resources;
             child->session_worker = 1; child->run = r.id; child->session = session;
             child->job = STRAPPY_IPC_SUBMIT_PROMPT;
@@ -483,6 +529,7 @@ strappy_execution *strappy_execution_open(strappy_ipc_server *server, const char
 {
     strappy_execution *e = calloc(1, sizeof(*e));
     if (!e) return NULL;
+    e->maintenance_slot = -1;
     e->db = strappy_string_duplicate(db); e->resources = strappy_string_duplicate(resources); e->server = server;
     if (!e->db || !e->resources || !strappy_run_reconcile(db)) goto fail;
     e->auth = strappy_auth_open(db,server);

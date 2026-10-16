@@ -28,8 +28,12 @@ NSString * const FileScannerCatalogReadFailedNotification = @"FileScannerCatalog
 @end
 
 static BOOL FileScannerDatabaseCatalogScanInFlight = NO;
+static BOOL FileScannerDatabaseCatalogScanPending = NO;
 @interface FileScanner ()
 + (NSError *)errorFromCString:(char *)message;
++ (void)waitForDatabaseCatalogScan:(NSString *)key;
++ (void)databaseCatalogJobDidFinish:(NSDictionary *)result;
++ (void)databaseCatalogScanDidFinish:(NSDictionary *)result;
 + (NSDictionary *)dictionaryFromDiscoveredDatabaseRecord:(const strappy_discovered_database_record *)record;
 + (void)databaseCatalogDidChange:(NSDictionary *)result;
 @end
@@ -92,6 +96,12 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
                                  error:(NSError **)error
 {
   cJSON *command;
+  char key[65];
+  NSAssert([NSThread XP_isMainThread], @"Scan submission requires the main thread");
+  if (FileScannerDatabaseCatalogScanPending || !strappy_store_client_request_key(key)) {
+    if (error) *error = [self errorFromCString:"A database scan is pending or could not be prepared."];
+    return NO;
+  }
   if (![path length] || ![path isAbsolutePath]) {
     if (error) *error = [self errorFromCString:"Scan path must be absolute."];
     return NO;
@@ -99,9 +109,37 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
   command = cJSON_CreateObject();
   cJSON_AddStringToObject(command,"path",[path fileSystemRepresentation]);
   cJSON_AddStringToObject(command,"quick",scanMode == FileScannerDatabaseScanModeQuick ? "1" : "0");
+  if (!cJSON_AddStringToObject(command,"key",key)) {
+    cJSON_Delete(command);
+    if (error) *error = [self errorFromCString:"Could not prepare the scan job key."];
+    return NO;
+  }
   if (!FileScannerCommand(STRAPPY_IPC_START_SCAN,command,error)) return NO;
-  /* The monitor owns activity state. A fast job can finish before this reply. */
+  FileScannerDatabaseCatalogScanPending = YES;
+  @synchronized(self) { FileScannerDatabaseCatalogScanInFlight = YES; }
+  [StrappyAsync postNotificationName:FileScannerDatabaseCatalogScanDidStartNotification object:self];
+  [NSThread detachNewThreadSelector:@selector(waitForDatabaseCatalogScan:) toTarget:self
+    withObject:[NSString stringWithUTF8String:key]];
   return YES;
+}
+
++ (void)waitForDatabaseCatalogScan:(NSString *)key;
+{
+  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  unsigned int state = strappy_store_client_wait_maintenance([key UTF8String]);
+  NSDictionary *result = state == STRAPPY_RUN_COMPLETED ? [NSDictionary dictionary] :
+    [NSDictionary dictionaryWithObject:state == STRAPPY_RUN_FAILED ?
+      @"Scan failed. Check the scan directory and try again." :
+      @"The scan outcome is unknown because the service became unavailable. Reload stored state before retrying."
+      forKey:@"error"];
+  [self performSelectorOnMainThread:@selector(databaseCatalogJobDidFinish:) withObject:result waitUntilDone:NO];
+  [pool release];
+}
+
++ (void)databaseCatalogJobDidFinish:(NSDictionary *)result;
+{
+  FileScannerDatabaseCatalogScanPending = NO;
+  [self databaseCatalogScanDidFinish:result];
 }
 
 + (void)databaseCatalogScanDidFinish:(NSDictionary *)result
@@ -146,6 +184,7 @@ static BOOL FileScannerCommand(unsigned int operation, cJSON *command, NSError *
 {
   unsigned int active, last, result;
   strappy_store_client_work_status(&active,&last,&result);
+  if (FileScannerDatabaseCatalogScanPending) return;
   if ([self isDatabaseCatalogScanInFlight] && active != STRAPPY_IPC_START_SCAN) {
     [self databaseCatalogScanDidFinish:(last == STRAPPY_IPC_START_SCAN && result == STRAPPY_RUN_COMPLETED) ?
       [NSDictionary dictionary] : [NSDictionary dictionaryWithObject:@"Scan failed or the service restarted." forKey:@"error"]];

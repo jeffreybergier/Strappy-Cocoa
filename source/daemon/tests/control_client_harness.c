@@ -52,6 +52,19 @@ static void *background(void *unused)
     assert(result && status == STRAPPY_IPC_OK);
     free(result); cJSON_Delete(command); return NULL;
 }
+static void *maintenance(void *unused)
+{
+    char key[65];
+    const unsigned int expected[] = {4,3,0,4,3};
+    unsigned int i;
+    (void)unused;
+    key[64] = 0;
+    for (i = 0; i < 5; ++i) {
+        memset(key,(int)('a'+i),64);
+        assert(strappy_store_client_wait_maintenance(key) == expected[i]);
+    }
+    return NULL;
+}
 int main(int argc, char **argv)
 {
     unsigned int status, i;
@@ -91,8 +104,12 @@ int main(int argc, char **argv)
         assert(status == STRAPPY_IPC_OK);
         free(payload);
     }
+    pthread_t maintenance_worker;
+    assert(pthread_create(&maintenance_worker,NULL,maintenance,NULL) == 0);
+    pthread_join(maintenance_worker,NULL);
     pthread_join(refresher,NULL);
     pthread_join(background_worker,NULL);
+    puts("maintenance results: immediate failure/success, unknown, lost read reply and running-to-terminal passed");
     puts("control client: caller-thread transport, independent background connection, persistent connection, ordered replies, no mutation replay, reconnect, credential acceptance recovery, restart unknown, terminal failure and no credential replay passed");
     return 0;
 }
