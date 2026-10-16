@@ -1,7 +1,6 @@
 #import "StrappyPreferencesWhitelistTableViewController.h"
 
 #import "AIFontAwesome.h"
-#import "StrappyIdleTimerAssertion.h"
 #import "StrappyPreferencesStatusToolbarView.h"
 #import "XPUIKit.h"
 
@@ -96,7 +95,6 @@ static NSString *StrappyPreferencesTrimmedString(NSString *string)
   }
 
   _working = working;
-  StrappyIdleTimerAssertionSetEnabled(working);
   [self refreshStatusToolbar];
 }
 

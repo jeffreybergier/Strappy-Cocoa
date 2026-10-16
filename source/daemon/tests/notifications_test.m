@@ -92,11 +92,6 @@ static void RunNotifications(void)
 {
   NotificationRecorder *recorder = [[NotificationRecorder alloc] init];
   NotificationDelegate *delegate = [[NotificationDelegate alloc] init];
-  /* Production launch sets this sentinel; the fixture skips app launch. */
-#if TARGET_OS_IPHONE
-  [delegate setValue:[NSNumber numberWithUnsignedInteger:UIBackgroundTaskInvalid]
-      forKey:@"longRunningWorkBackgroundTaskIdentifier"];
-#endif
   fixtureBackground = NO;
   fixtureCenter = [[AILocalNotificationCenter alloc] initWithBackend:recorder];
   NSNotification *success = [NSNotification notificationWithName:@"fixture"

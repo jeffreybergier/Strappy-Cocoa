@@ -12,7 +12,6 @@ GROUP_ui_SOURCES = main.m AppDelegate.m StrappyRootCoordinator.m \
           MessageListViewController.m PromptSendViewController.m \
           StrappySessionOptionsTableViewController.m \
           StrappyModelCellFormatter.m \
-          StrappyIdleTimerAssertion.m \
           StrappyActivityAccessoryView.m \
           StrappyPreferencesStatusToolbarView.m \
           StrappyPreferencesWhitelistTableViewController.m \
