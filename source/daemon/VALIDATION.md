@@ -1399,4 +1399,57 @@ passed for Mac PPC/i386/x86_64/arm64 and iOS armv7/arm64, app and daemon, withou
 compiler warnings. The first build exposed a missing private scan-completion
 method declaration; that declaration was added before the final clean build.
 Logs are local `/tmp/strappy-maintenance-*` files, not committed artifacts.
-Native GUI/device scenarios and live provider calls were not run for this fix.
+Native coverage is recorded below. Manual GUI scenarios and live provider calls
+were not run for this fix.
+
+### Native keyed-maintenance regression (2026-10-16)
+
+`maintenance_device_probe.m` exercises the production `StrappySession` and
+`FileScanner` bridge methods, real worker status polling, and main-thread
+completion/error notifications against the production daemon in a fresh store.
+A test-only transport wrapper delays returning acceptance until the daemon job
+has already terminated. The monitor deliberately forwards no activity hints.
+A session subclass supplies one nonexistent synthetic catalog account; scan
+failure is injected with a temporary trigger in the isolated fixture database.
+No credentials are read or written and no provider requests are made.
+
+Both native runs passed as UID 501:
+
+| Host | Runtime | Result |
+| --- | --- | --- |
+| `koolphone5` | iOS 8.4.1 / armv7, mobile via `su` | PASS |
+| `x4-vm` | Mac OS X 10.4.11 / PPC, desktop user via SSH | PASS |
+
+Each run verifies two immediate catalog failures with distinct job keys, one
+immediate scan success, and one injected scan failure. Four starts produce
+exactly four main-thread completions and three main-thread error notifications.
+Duplicate local submissions are rejected while completion is pending, and a
+short run-loop drain checks that results are not delivered twice. Activity flags
+clear after each result. This tests the Cocoa completion paths, not manual
+button taps, rendered alerts, or OS notification banners.
+
+Build all probe slices using the project's product rules:
+
+```sh
+make -C source/macOS -f ../daemon/tests/maintenance_device_probe.mk debug
+make -C source/iOS -f ../daemon/tests/maintenance_device_probe.mk debug
+```
+
+Stage the probe, matching production `strappyd`, and
+`maintenance_device_harness.sh` as `run.sh` in a fresh private directory. Use the
+`Intermediates/signed/` binaries on iOS. Copy shared JSON resources, the platform
+`Info.plist`, and `cacert.pem` into `resources/`. Run `sh run.sh ABSOLUTE_STAGE`
+as the normal app user. The harness refuses reused stores and stops only the
+daemon it starts; installed apps and launchd services are untouched.
+
+Retained remote fixtures are
+`/var/mobile/tmp_altivec/strappy-maintenance-20261016-2` and
+`/Users/me/Desktop/strappy-maintenance-20261016-2`. Results, heartbeat/readiness
+logs, staged binaries and matching symbols are retained locally under
+`build/maintenance-native-20261016/`. Both fixture daemons logged clean shutdown.
+
+Clean debug builds of the app, daemon, and native probe passed for all six
+architectures without compiler warnings. `make validate validate-package
+CONFIG=debug` passed. The final clean-build binaries were rerun on both hosts;
+their logs, exit statuses (zero), binaries, and symbols are retained under
+`build/maintenance-native-20261016/final/`.
