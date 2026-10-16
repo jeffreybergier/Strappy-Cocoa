@@ -259,9 +259,11 @@ int strappy_service_refresh_catalog(const char *db, const char *account)
         char *json = NULL;
         long http_status = 0;
         strappy_config_init(&config);
-        config.api_endpoint = strappy_string_duplicate(record.responses_endpoint);
+        config.api_endpoint = strappy_provider_definition_responses_endpoint(
+            strappy_provider_find(record.provider_id),record.responses_endpoint,&error);
         config.api_token = strappy_string_duplicate(token);
-        ok = strappy_client_fetch_openrouter_user_models_json_with_cancel(&config,&json,&http_status,
+        ok = config.api_endpoint != NULL &&
+            strappy_client_fetch_openrouter_user_models_json_with_cancel(&config,&json,&http_status,
             StrappyServiceCancelRefresh,NULL,&error) && strappy_db_save_account_models_json(db,account,json,&error);
         free(json); strappy_config_destroy(&config);
     }

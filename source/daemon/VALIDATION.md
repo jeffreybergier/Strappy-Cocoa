@@ -1337,3 +1337,43 @@ Passing fixtures are `/var/mobile/tmp_altivec/strappy-endpoint-20261016-2` and
 locally under `build/account-endpoint-fix/`. Tests used synthetic credentials and
 isolated stores, made no provider requests, and did not replace installed apps
 or services. This verifies native daemon account saving, not manual UI taps.
+
+## OpenRouter catalog default endpoint (2026-10-16)
+
+After account saving was fixed, `strappy_service_refresh_catalog` still copied
+`responses_endpoint` directly into the HTTP configuration. That field is an
+optional override, so a normal OpenRouter account has SQL NULL there. The HTTP
+client rejected the unconfigured request before sending it. The shared Cocoa
+daemon boundary now resolves the endpoint through
+`strappy_provider_definition_responses_endpoint`, preserving provider validation
+and using the built-in URL when no override exists. Endpoint-resolution failure
+stops the fetch. Both Mac and iOS compile this same implementation.
+
+The complete offline suite, clean debug builds for all six app/daemon slices,
+project validation, and both platform package checks passed without compiler
+warnings. `catalog_refresh_device_probe.c` provides an explicit live diagnostic:
+
+```sh
+make -C source/daemon/tests -f native.mk PLATFORM=iOS \
+  TEST_PRODUCTS=catalog-refresh-probe debug
+# Stage the signed probe, then run as mobile with an explicit socket/store:
+STRAPPY_ALLOW_LIVE_PROVIDER_TESTS=YES ./catalog-refresh-probe \
+  /var/log/strappy/service.sock \
+  '/var/mobile/Library/Application Support/Strappy/strappy.sqlite'
+```
+
+The probe requires exactly one active OpenRouter account, submits one catalog
+refresh, polls its completion, and reads the active model count. It does not
+read or print credentials or provider payloads and is not part of offline tests.
+It refreshes the specified store, so use it only for authorized live validation.
+
+On gomadango (iOS 6.1.3 / armv7), the installed pre-fix daemon returned terminal
+state 4 (failed) for the account with its default endpoint. After installing the
+rebuilt rootful 1.1.3 package through dpkg, the same diagnostic returned terminal
+state 3 (completed) and **462 active OpenRouter models**. Launchd started daemon
+PID 8584 as mobile and IPC v8 readiness passed. No prompt/model inference was
+submitted. Logs are under `build/catalog-endpoint-fix/`; native probe staging is
+`/var/mobile/tmp_altivec/strappy-catalog-20261016`, and package staging is
+`/var/root/tmp_altivec/strappy-catalog-install-20261016`. This verifies the native
+production refresh path on the affected phone; Mac coverage for this follow-up
+is compilation and shared resolver tests, not a live Mac provider request.

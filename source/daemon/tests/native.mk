@@ -40,6 +40,12 @@ account-endpoint-probe_FLAGS = -I../../shared
 account-endpoint-probe_CORE = static
 account-endpoint-probe_SIGN = $(auth-probe_SIGN)
 account-endpoint-probe_LDFLAGS = $(auth-probe_LDFLAGS)
+catalog-refresh-probe_TYPE = executable
+catalog-refresh-probe_SOURCES = catalog_refresh_device_probe.c ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c
+catalog-refresh-probe_FLAGS = -I../../shared
+catalog-refresh-probe_CORE = static
+catalog-refresh-probe_SIGN = $(auth-probe_SIGN)
+catalog-refresh-probe_LDFLAGS = $(auth-probe_LDFLAGS)
 include $(ALTIVEC_ROOT)/altivec_common_$(if $(filter iOS,$(PLATFORM)),phone,mac).mk
 _package: $(foreach p,$(TEST_PRODUCTS),_product-$(p))
 endif
