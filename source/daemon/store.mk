@@ -7,7 +7,7 @@ STRAPPY_STORE_SOURCES = $(STRAPPY_SOURCE_ROOT)/shared/strappy_db.c $(STRAPPY_SOU
  $(STRAPPY_SOURCE_ROOT)/shared/strappy_assistant_sets.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_bundled_catalog.c
 
 STRAPPY_EXECUTION_SOURCES = $(STRAPPY_SOURCE_ROOT)/daemon/strappy_auth.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_mutations.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_file_scanner.c \
- $(STRAPPY_SOURCE_ROOT)/daemon/strappy_execution.c $(STRAPPY_SOURCE_ROOT)/shared/strappy_run.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_run_execution.c \
+ $(STRAPPY_SOURCE_ROOT)/daemon/strappy_notifications.c $(STRAPPY_SOURCE_ROOT)/shared/XPFoundation/strappy_notification_platform.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_execution.c $(STRAPPY_SOURCE_ROOT)/shared/strappy_run.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_run_execution.c \
  $(STRAPPY_SOURCE_ROOT)/daemon/strappy_client.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_sse.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_identity.c \
  $(STRAPPY_SOURCE_ROOT)/shared/strappy_cocoa.c $(STRAPPY_SOURCE_ROOT)/shared/strappy_calendar.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_model_catalog.c \
  $(STRAPPY_SOURCE_ROOT)/shared/strappy_prompt.c $(STRAPPY_SOURCE_ROOT)/shared/strappy_quality_policy.c $(STRAPPY_SOURCE_ROOT)/daemon/strappy_debug_capture.c \

@@ -22,6 +22,7 @@ gate = threading.Event()
 entered = threading.Event()
 requests = []
 mode = 'answer'
+answer_text = 'Daemon fixture completed.'
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
@@ -38,10 +39,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                        'name': 'bash', 'arguments': json.dumps({'command': 'echo $$ > tool.pid; sleep 20'})}]
         else:
             output = [{'type': 'message', 'id': f'msg{number}', 'role': 'assistant', 'status': 'completed',
-                       'content': [{'type': 'output_text', 'text': 'Daemon fixture completed.', 'annotations': []}]}]
+                       'content': [{'type': 'output_text', 'text': answer_text, 'annotations': []}]}]
         answer = json.dumps({'id': f'response-fixture-{number}', 'object': 'response', 'status': 'completed', 'output': output}).encode()
+        if mode == 'error':
+            answer = json.dumps({'error': {'message': 'private provider diagnostic',
+                                          'type': 'invalid_request_error'}}).encode()
         try:
-            self.send_response(200)
+            self.send_response(400 if mode == 'error' else 200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Content-Length', str(len(answer)))
             self.end_headers()
@@ -98,9 +102,30 @@ def wait_for(check, timeout=12):
 with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary:
     directory = Path(temporary)
     dbpath = directory/'strappy.sqlite'
+    notification_path = directory/'notifications.sock'
+    notifications = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    notifications.bind(str(notification_path))
+    notifications.settimeout(2)
+    def notification():
+        data = notifications.recv(4096)
+        assert len(data) == 2030
+        magic, run_id, title, body = struct.unpack('4s24s401s1601s', data)
+        assert magic == b'STN1'
+        return (int(run_id.split(b'\0', 1)[0]),
+                title.split(b'\0', 1)[0].decode(), body.split(b'\0', 1)[0].decode())
+    def no_notification():
+        notifications.settimeout(.15)
+        try:
+            notifications.recv(4096)
+            raise AssertionError('unexpected completion notification')
+        except socket.timeout:
+            pass
+        finally:
+            notifications.settimeout(2)
     def start():
         p = subprocess.Popen([binary, str(directory/'heartbeat.log'), str(dbpath), resources],
-                             env={k:v for k,v in os.environ.items() if k not in ('APITOKEN', 'APIENDPOINT')})
+                             env=dict({k:v for k,v in os.environ.items() if k not in ('APITOKEN', 'APIENDPOINT')},
+                                      STRAPPY_TEST_NOTIFICATION_SOCKET=str(notification_path)))
         def ready():
             assert p.poll() is None, 'daemon startup failed'
             try:
@@ -160,6 +185,9 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
             db.execute('DROP TRIGGER reject_accept')
         invalid = dict(settings,rounds='0')
         assert command(directory,28,combined('f'*64,invalid))[0] == 1
+        # Unicode previews must end on a scalar boundary, and the title comes
+        # from the committed rename performed while the request is running.
+        answer_text = 'Tokyo news ' + '漢😀é' * 200
         # Lost acknowledgment: disconnect before reading; retry while request runs.
         key = 'a'*64
         with connect(directory) as sock:
@@ -192,11 +220,17 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
         assert command(directory,17,struct.pack('!QQ',2,second_run))[0] == 0
         wait_for(lambda: state('b'*64) == 5)
         assert state(key) == 2
+        no_notification()  # Cancelled prompts do not notify.
+        with sqlite3.connect(dbpath) as db:
+            db.execute("UPDATE sessions SET name='Tokyo News Summary Report' WHERE id=1")
         # UI lifetime is absent: no client remains while provider completes.
         gate.set()
         wait_for(lambda: state(key) == 3)
         assert struct.unpack('!QI', submit(directory, key)[1]) == (run, 3)
         assert len(requests) == 2
+        assert notification() == (run, 'Tokyo News Summary Report', answer_text[:400])
+        no_notification()  # Durable submission retries must not redisplay.
+        answer_text = 'Daemon fixture completed.'
         subprocess.run([reader, str(dbpath), '3'], check=True)
         with sqlite3.connect(dbpath) as db:
             assert db.execute('SELECT COUNT(*) FROM conversation_items').fetchone()[0] > 0
@@ -371,9 +405,45 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
             assert receive(sock)[0] == 0
         wait_for(lambda: state(plain_key) == 3)
         assert len(requests) == before+2
+        # Drain the two large-prompt completions, then verify an empty final
+        # answer cannot reuse an older reply and errors never echo provider text.
+        notification(); notification(); no_notification()
+        answer_text = ''
+        empty_key = 'b2' * 32
+        assert submit(directory, empty_key)[0] == 0
+        wait_for(lambda: state(empty_key) == 3)
+        assert notification()[1:] == ('Tokyo News Summary Report', '')
+        mode = 'error'
+        error_key = 'b3' * 32
+        assert submit(directory, error_key)[0] == 0
+        wait_for(lambda: state(error_key) == 4)
+        assert notification()[1:] == ('Tokyo News Summary Report', 'Error')
+        assert submit(directory, error_key)[0] == 0
+        no_notification()
+        # Known credential errors use application-owned wording, not raw text.
+        with sqlite3.connect(dbpath) as db:
+            db.execute("INSERT INTO provider_accounts(id,provider_id,display_name,responses_endpoint,created_at_ms,updated_at_ms) VALUES('missing-credentials-fixture','openrouter','Missing',?,1,1)", (endpoint,))
+            db.execute("INSERT INTO models(id,provider_id,wire_model_id,name,last_seen_at_ms) VALUES('openrouter:notification-fixture','openrouter','notification-fixture','Fixture',1)")
+            db.execute("INSERT INTO model_preferences(provider_id,wire_model_id,allowed,updated_at_ms) VALUES('openrouter','notification-fixture',1,1)")
+            db.execute("UPDATE sessions SET model_id='openrouter:notification-fixture',provider_account_id='missing-credentials-fixture' WHERE id=1")
+        credential_key = 'b5' * 32
+        assert submit(directory, credential_key)[0] == 0
+        wait_for(lambda: state(credential_key) == 4)
+        assert notification()[1:] == ('Tokyo News Summary Report',
+            'Error: Add credentials for the selected account and try again.')
+        with sqlite3.connect(dbpath) as db:
+            db.execute("UPDATE sessions SET model_id='other:fixture',provider_account_id='daemon-offline' WHERE id=1")
+        # A missing receiver does not fail, block, or replay a completed prompt.
+        notifications.close(); notification_path.unlink()
+        mode = 'answer'; answer_text = 'Receiver unavailable fixture.'
+        absent_key = 'b4' * 32
+        assert submit(directory, absent_key)[0] == 0
+        wait_for(lambda: state(absent_key) == 3)
+        print('execution_harness: notification previews, errors, cancellation, retries and missing receiver passed')
         print('execution_harness: 1 MiB UTF-8 prompts, independent options limits, partial transfers, durable large retries passed')
         print('execution_harness: durable acceptance, lost reply, reconnect, contention, HTTP/tool cancellation, restart interruption and history passed')
     finally:
+        notifications.close()
         gate.set()
         if process.poll() is None:
             process.send_signal(signal.SIGTERM)

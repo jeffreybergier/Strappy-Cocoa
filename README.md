@@ -141,38 +141,38 @@ flowchart TB
 
 ### Completion notifications
 
-Mac and iOS use AltivecCocoa's `AILocalNotificationCenter`. Completion wording
-and session titles remain app-owned; alerts are background-only. iOS requires
-Authorized status before submission and requests permission on Unknown status
-(including empty iOS 8 settings). Shared foreground cleanup clears alerts and
-the badge. The permission request includes alert, sound, and badge types.
+On iOS, strappyd sends a completion alert after committing a successful or
+failed prompt, independently of the app's state. The title is the chat's name
+(up to 100 Unicode characters); successful messages contain the first 400
+Unicode characters of the final answer. Failed messages say `Error`, with a
+short explanation for recognized credential/configuration errors. Raw provider
+diagnostics are not shown. Cancellation, shutdown interruption, and background
+Database Study do not produce alerts.
 
-Build the offline production-delegate test in the container:
+The DEB includes `StrappyBulletin.dylib` and its SpringBoard-only MobileSubstrate
+filter. MobileSubstrate must already be available, and SpringBoard must restart
+once after installation or receiver updates. The installer prints this reminder
+without restarting the phone UI automatically. This first receiver uses the
+private iOS 6 banner/lock-screen path verified on gomadango; other OS versions
+are not established by cross-building both architectures. It does not register
+Notification Center history or notification settings. Delivery is best-effort:
+a missing or busy receiver never affects the prompt result. See
+[the investigation](docs/deb-notifications-experiment.md) for native evidence,
+DND behavior, and remaining validation.
+
+Offline daemon coverage, including Unicode previews, errors, durable retries,
+cancellation and a missing receiver:
 
 ```sh
-python3 source/daemon/tests/notifications_test.py macOS
-python3 source/daemon/tests/notifications_test.py iOS
+make -C source/daemon/tests execution-test
 ```
 
-Run the Mac test's `Strappy.app/Contents/MacOS/Strappy` under
-`build/tests/notifications/macOS/output/macOS/release/Strappy/`. The isolated iOS
-IPA lives under `build/tests/notifications/iOS/output/iOS/release/Strappy/`;
-after installation on a test phone, run `uiopen strappy-notifications-test://`
-as mobile and check its sandbox's
-`Documents/notifications-result.txt` for PASS. No production accounts or daemon
-are started. The recorder verifies wording, permission policy and lifecycle
-behavior, not OS banner presentation.
-
-The isolated production-delegate and shared notification tests passed on
-`koolphone5` (iOS 8.4.1, armv7) on 2026-10-15. Production permission settings,
-background success/failure banners, foreground suppression, and visible
-alert/badge cleanup remain separate manual checks. The iOS plist declares
-`SBAppUsesLocalNotifications` so SpringBoard registers the system app for local
-notifications. An isolated DEB probe with Strappy's unsandboxed entitlements
-displayed a notification on `koolphone5` on 2026-10-17, confirmed by the owner.
-API submission alone still does not prove display. See
-[the DEB experiment](docs/deb-notifications-experiment.md) for evidence and
-remaining production completion-flow checks.
+Mac continues to use AltivecCocoa's `AILocalNotificationCenter` for app-owned,
+background-only alerts and foreground cleanup. Build the offline macOS delegate
+recorder with `python3 source/daemon/tests/notifications_test.py macOS`, then run
+`build/tests/notifications/macOS/output/macOS/release/Strappy/Strappy.app/Contents/MacOS/Strappy`
+on a Mac. Recording tests do not establish native banner display. The old iOS
+app-delegate fixture has been retired with app-side completion submission.
 
 ### Warning Flags
 

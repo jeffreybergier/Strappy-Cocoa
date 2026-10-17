@@ -9,7 +9,9 @@ enabled, the screen stayed off and the notification was visible after the owner
 woke it with Home, as expected. Notification Center history and notification
 settings registration remain unimplemented by this probe. The test component
 remains installed on gomadango. See [native results and continuation instructions](#native-results-and-handoff-2026-10-17)
-before rerunning or changing the experiment.
+before rerunning or changing the experiment. Production completion integration
+is implemented below; the new receiver has not yet been installed or visually
+validated on gomadango.
 
 ## Result
 
@@ -356,7 +358,7 @@ implementation explains these limits:
 The next investigation is the BulletinBoard data-provider/server route and
 section registration for Notification Center and notification settings. Visible
 presentation from the isolated sender is now confirmed; production prompt
-completion integration remains separate work.
+completion integration is now implemented below, pending native validation.
 
 ### Production follow-up on gomadango
 
@@ -402,3 +404,69 @@ notification behavior while suspended, a reboot, existing production-ID
 notification preferences, or other iOS versions/rootless jailbreaks. The full
 production DEB was not deployed: its v8 daemon would replace the installed v5
 daemon, which is outside this isolated notification comparison.
+
+## Daemon completion integration, 2026-10-17
+
+The production iOS DEB now includes a separately signed `StrappyBulletin.dylib`
+and SpringBoard-only filter under `Library/MobileSubstrate/DynamicLibraries`
+(with the package prefix for rootless). It reuses the tested private display
+controller path, isolated in `source/iOS/notifications/XPStrappyBulletin.m`.
+MobileSubstrate must already be available. Installation prints a reminder to
+restart SpringBoard once; it does not automatically interrupt the UI. The old
+fixed-message probe remains separate and is not triggered by prompt completion.
+
+After a user prompt's completed/failed state commits, strappyd sends one
+nonblocking Unix datagram to the receiver, regardless of app state. Unlike the
+probe's payload-free Darwin signal, the datagram carries the title and reply
+preview and keeps concurrent completions distinct. The receiver owns a private
+0700 mobile directory and 0600 socket at
+`/var/mobile/Library/Application Support/StrappyAlerts/receiver.sock`. Other processes running
+as mobile share this trust boundary. No notification text is persisted to a
+sidecar file or written to logs. There is no replay queue: receiver absence,
+queue pressure, or unsupported private APIs may lose an alert without changing
+or retrying the prompt. SpringBoard processes a bounded number per callback.
+
+Success uses the session name (at most 100 Unicode scalars) and the first 400
+Unicode scalars of this prompt's final answer, preserving UTF-8 boundaries. The
+final answer is captured from the current execution result so an empty answer
+cannot show a previous reply. The title and body are separate bulletin fields;
+the OS controls their visible layout and truncation. A failed prompt uses the
+same title and `Error`, or a short code-owned explanation for an exact recognized
+error such as missing credentials. Arbitrary provider diagnostics are never
+copied into alerts. Cancelled/interrupted runs and maintenance/Database Study
+jobs do not alert. Durable request retries do not redisplay finished prompts.
+
+The iOS app's old local completion submission was removed to prevent duplicates;
+its finite background-task lifecycle remains intact. Mac notification behavior
+is unchanged. This first receiver still depends on the verified iOS 6 private
+API path. Notification Center persistence, settings registration, sound, and
+session-specific tap routing are not added. The DND results above describe the
+original probe; the production receiver and real prompt completion need their
+own native confirmation after installation and a SpringBoard restart.
+
+The full offline Linux suite passed. Focused execution tests also passed after
+adding the credential-error fixture: renamed session, multibyte preview
+truncation, empty answers, generic and recognized errors, cancellation,
+duplicate retries, and receiver absence. Final clean release builds passed for
+iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64 without compiler warnings.
+The retained Mac delegate recorder cross-built for all four Mac architectures;
+it was not run on a native Mac in this change. Final rootful/rootless DEB and
+Mac ZIP validation passed, including architecture, metadata, ownership,
+lifecycle, and executable entitlements; the log is
+`build/notification-package-final.log`.
+
+Full iOS static analysis completed with no diagnostics in the notification
+code. It repeated the existing possible-null-source `memcpy` finding in
+`source/daemon/strappy_client.c:1230`; this change does not resolve that separate
+debug-capture issue. Local logs are `build/notification-tests.log`,
+`build/notification-execution-final.log`, `build/notification-build-final.log`,
+`build/notification-analysis.log`, and
+`build/notification-mac-fixture-build.log`. Generated logs remain ignored.
+
+A read-only check on gomadango confirmed `net.local.dgram.maxdgram = 2048` and
+`net.local.dgram.recvspace = 4096`. The versioned packet is 2,030 bytes; the
+receiver requests a bounded 128 KiB receive buffer for bursts. The socket lives
+under the mobile-owned Application Support directory rather than the device's
+world-writable Caches directory. These checks do not establish native delivery
+of the new payload transport: no new package was installed, no SpringBoard
+restart was performed, and no production prompt was submitted in this change.

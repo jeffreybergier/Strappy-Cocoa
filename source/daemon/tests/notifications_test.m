@@ -1,40 +1,20 @@
-/* Offline production-delegate regression. Never launches the production
+/* Offline macOS production-delegate regression. Never launches the production
  * delegate, daemon, accounts, or native permission prompt. */
-#import <TargetConditionals.h>
 #import <AILocalNotificationCenter.h>
-#if TARGET_OS_IPHONE
-#import "../../iOS/AppDelegate.h"
-#else
 #import "../../macOS/AppDelegate.h"
-#endif
 #include <assert.h>
 #ifndef __has_feature
 #define __has_feature(x) 0
 #endif
 
 static BOOL fixtureBackground;
-#if TARGET_OS_IPHONE
-static BOOL fixtureInactive;
-#endif
 static AILocalNotificationCenter *fixtureCenter;
-#if TARGET_OS_IPHONE
-@interface NotificationApplication : UIApplication
-@end
-@implementation NotificationApplication
-- (UIApplicationState)applicationState;
-{
-  if (fixtureInactive) return UIApplicationStateInactive;
-  return fixtureBackground ? UIApplicationStateBackground : UIApplicationStateActive;
-}
-@end
-#else
 @interface NotificationApplication : NSApplication
 @end
 @implementation NotificationApplication
 - (BOOL)isActive;
 { return !fixtureBackground; }
 @end
-#endif
 
 @interface AppDelegate (NotificationFixture)
 - (AILocalNotificationCenter *)promptCompletionNotificationCenter;
@@ -101,25 +81,8 @@ static void RunNotifications(void)
   recorder->status = AINotificationAuthorizationAuthorized;
   [delegate postPromptCompletionNotificationIfNeeded:success];
   assert(recorder->submissions == 0);
-#if TARGET_OS_IPHONE
-  NSString *background = @"UIApplicationDidEnterBackgroundNotification";
-  NSString *active = @"UIApplicationDidBecomeActiveNotification";
-  [delegate configurePromptCompletionNotifications];
-  assert(recorder->requests == 0);
-  recorder->status = AINotificationAuthorizationUnknown;
-  [delegate configurePromptCompletionNotifications];
-  assert(recorder->requests == 1);
-  recorder->rejectRequest = YES;
-  [delegate configurePromptCompletionNotifications];
-  assert(recorder->requests == 2);
-  recorder->rejectRequest = NO;
-  recorder->status = AINotificationAuthorizationDenied;
-  [delegate configurePromptCompletionNotifications];
-  assert(recorder->requests == 2);
-#else
   NSString *background = @"NSApplicationDidResignActiveNotification";
   NSString *active = @"NSApplicationDidBecomeActiveNotification";
-#endif
   fixtureBackground = YES;
   [[NSNotificationCenter defaultCenter] postNotificationName:background object:nil];
   recorder->status = AINotificationAuthorizationAuthorized;
@@ -141,19 +104,8 @@ static void RunNotifications(void)
   assert(recorder->submissions == 2);
   recorder->status = AINotificationAuthorizationUnknown;
   [delegate postPromptCompletionNotificationIfNeeded:success];
-#if TARGET_OS_IPHONE
-  assert(recorder->submissions == 2);
-#else
   assert(recorder->submissions == 3);
-#endif
   unsigned int submitted = recorder->submissions;
-#if TARGET_OS_IPHONE
-  fixtureInactive = YES;
-  recorder->status = AINotificationAuthorizationAuthorized;
-  [delegate postPromptCompletionNotificationIfNeeded:success];
-  assert(recorder->submissions == submitted);
-  fixtureInactive = NO;
-#endif
   fixtureBackground = NO;
   [[NSNotificationCenter defaultCenter] postNotificationName:active object:nil];
   assert(recorder->clears == 1 && recorder->badge == 0);
@@ -164,7 +116,6 @@ static void RunNotifications(void)
   [fixtureCenter release]; [delegate release]; [recorder release];
 #endif
   fixtureCenter = nil;
-#if !TARGET_OS_IPHONE
   /* Tiger must report Unsupported, independently of the recording backend. */
   if (NSClassFromString(@"NSUserNotificationCenter") == Nil) {
     fixtureBackground = YES;
@@ -174,33 +125,9 @@ static void RunNotifications(void)
         userInfo:nil] == AINotificationUnsupported);
     fixtureBackground = NO;
   }
-#endif
   NSLog(@"PASS: production notification delegates, wording, permissions, foreground cleanup; submission does not prove display");
 }
 
-#if TARGET_OS_IPHONE
-@interface NotificationRunner : UIResponder <UIApplicationDelegate>
-@end
-@implementation NotificationRunner
-- (BOOL)application:(UIApplication *)application
-    didFinishLaunchingWithOptions:(NSDictionary *)options;
-{
-  (void)application; (void)options;
-  RunNotifications();
-  NSString *path = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
-      NSUserDomainMask, YES) objectAtIndex:0];
-  [@"PASS\n" writeToFile:[path stringByAppendingPathComponent:@"notifications-result.txt"]
-      atomically:YES encoding:NSUTF8StringEncoding error:NULL];
-  return YES;
-}
-@end
-int main(int argc, char **argv)
-{
-  @autoreleasepool {
-    return UIApplicationMain(argc, argv, @"NotificationApplication", @"NotificationRunner");
-  }
-}
-#else
 int main(void)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
@@ -209,4 +136,3 @@ int main(void)
   [pool drain];
   return 0;
 }
-#endif

@@ -1,5 +1,4 @@
 #import "StrappyAsync.h"
-#import <AILocalNotificationCenter.h>
 #import "AppDelegate.h"
 #import "AIFontAwesome.h"
 #import "FileScanner.h"
@@ -36,39 +35,6 @@ static void StrappyLogApplicationLifecycle(NSString *event,
         [application backgroundTimeRemaining]);
 }
 
-static NSString *StrappyPromptCompletionNotificationTitle(
-  NSNotification *notification)
-{
-  NSDictionary *summary;
-  StrappySession *session;
-  id name;
-
-  summary = [[notification userInfo] objectForKey:@"session"];
-  session = [notification object];
-  if (![summary isKindOfClass:[NSDictionary class]] &&
-      [session isKindOfClass:[StrappySession class]]) {
-    summary = [session cachedSummary];
-  }
-  name = [summary objectForKey:@"name"];
-  if ([name isKindOfClass:[NSString class]] && ([name length] > 0U)) {
-    return name;
-  }
-  return NSLocalizedString(@"Strappy", nil);
-}
-
-static NSString *StrappyPromptCompletionNotificationBody(
-  NSNotification *notification)
-{
-  id errorMessage;
-
-  errorMessage = [[notification userInfo] objectForKey:@"error"];
-  if ([errorMessage isKindOfClass:[NSString class]] &&
-      ([errorMessage length] > 0U)) {
-    return NSLocalizedString(@"Prompt failed.", nil);
-  }
-  return NSLocalizedString(@"Prompt completed.", nil);
-}
-
 @interface AppDelegate () <UIAlertViewDelegate>
 @property (nonatomic, strong) StrappyRootCoordinator *coordinator;
 @property (nonatomic, assign, getter=isLongRunningWorkNetworkActivityIndicatorEnabled)
@@ -76,10 +42,6 @@ static NSString *StrappyPromptCompletionNotificationBody(
 - (void)showNextAsyncError;
 - (void)observeLongRunningWorkLifecycle;
 - (void)longRunningWorkLifecycleDidChange:(NSNotification *)notification;
-- (void)configurePromptCompletionNotifications;
-- (AILocalNotificationCenter *)promptCompletionNotificationCenter;
-- (void)postPromptCompletionNotificationIfNeeded:
-  (NSNotification *)notification;
 - (BOOL)longRunningWorkIsActive;
 - (void)updateLongRunningWorkActivityIndicator;
 - (void)updatePromptBackgroundTask;
@@ -155,7 +117,6 @@ static BOOL StrappyAsyncErrorVisible;
   [self.coordinator start];
   [self.window makeKeyAndVisible];
 
-  [self configurePromptCompletionNotifications];
   [self updateLongRunningWorkActivityIndicator];
   StrappyLogApplicationLifecycle(@"didFinishLaunching end", application);
   return YES;
@@ -253,60 +214,7 @@ static BOOL StrappyAsyncErrorVisible;
         (unsigned long)[StrappySession inFlightSessionCount],
         [StrappySession isModelCatalogRefreshInFlight] ? @"YES" : @"NO",
         [FileScanner isDatabaseCatalogScanInFlight] ? @"YES" : @"NO");
-  if ([name isEqualToString:StrappySessionPromptDidFinishNotification]) {
-    /* Submit the alert before releasing the final background task. */
-    [self postPromptCompletionNotificationIfNeeded:notification];
-  }
   [self updateLongRunningWorkActivityIndicator];
-}
-
-- (void)configurePromptCompletionNotifications
-{
-  AINotificationAuthorizationStatus status;
-  AILocalNotificationCenter *center;
-
-  center = [self promptCompletionNotificationCenter];
-  status = [center authorizationStatus];
-  NSLog(@"StrappyNotifications authorizationStatus=%d", (int)status);
-  if (status == AINotificationAuthorizationUnknown) {
-    @try {
-      [center requestAuthorization];
-    } @catch (NSException *exception) {
-      (void)exception;
-      NSLog(@"StrappyNotifications authorization request failed");
-    }
-  }
-}
-
-- (AILocalNotificationCenter *)promptCompletionNotificationCenter;
-{
-  return [AILocalNotificationCenter defaultCenter];
-}
-
-- (void)postPromptCompletionNotificationIfNeeded:
-  (NSNotification *)notification
-{
-  UIApplication *application;
-  AILocalNotificationCenter *center;
-  NSString *body;
-  NSString *title;
-
-  application = [UIApplication sharedApplication];
-  if ([application applicationState] != UIApplicationStateBackground) {
-    return;
-  }
-
-  center = [self promptCompletionNotificationCenter];
-  if ([center authorizationStatus] != AINotificationAuthorizationAuthorized) {
-    return;
-  }
-  title = StrappyPromptCompletionNotificationTitle(notification);
-  body = StrappyPromptCompletionNotificationBody(notification);
-  /* Unknown settings are not proof of permission on iOS. Keep the
-   * existing authorized-only policy; submission still cannot prove display
-   * for Strappy's unsandboxed/system-app installation. */
-  NSLog(@"StrappyNotifications completion submission=%d",
-        (int)[center postNotificationWithTitle:title body:body userInfo:nil]);
 }
 
 - (BOOL)longRunningWorkIsActive

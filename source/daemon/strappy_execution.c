@@ -1,5 +1,6 @@
 #include "strappy_auth.h"
 #include "strappy_execution.h"
+#include "strappy_notifications.h"
 #include "strappy_mutations.h"
 #include "strappy_file_scanner.h"
 #include "strappy_study_execution.h"
@@ -207,7 +208,7 @@ static void *strappy_execution_work(void *context)
     for (;;) {
         strappy_session_record record;
         char *error = NULL;
-        int ok = 0, state;
+        int ok = 0, state, notify = 0;
         void *pool;
         pthread_mutex_lock(&e->mutex);
         while ((!e->job || e->job == STRAPPY_IPC_MUTATE) && !e->stopping) pthread_cond_wait(&e->condition, &e->mutex);
@@ -227,12 +228,15 @@ static void *strappy_execution_work(void *context)
         }
         /* Provider/tool diagnostics remain in the normalized ledger. Never log
          * errors here: they can contain provider content or credentials. */
-        free(error); strappy_session_record_destroy(&record);
+        if (!ok && e->session_worker)
+            (void)strappy_session_load_list_record(e->db, e->session, &record, NULL);
         pthread_mutex_lock(&e->mutex);
         state = e->stopping ? STRAPPY_RUN_INTERRUPTED :
             (e->cancel ? STRAPPY_RUN_CANCELLED : (ok ? STRAPPY_RUN_COMPLETED : STRAPPY_RUN_FAILED));
-        if (e->run && strappy_run_update(e->db, e->run, state, e->cancel, "", "", 0, 0))
+        if (e->run && strappy_run_update(e->db, e->run, state, e->cancel, "", "", 0, 0)) {
             strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_RUN_CHANGED, e->session, 0);
+            notify = e->session_worker;
+        }
         free(e->prompt); e->prompt = NULL; if (!e->session_worker) e->run = 0; e->cancel = 0;
         if (e->maintenance_slot >= 0) {
             e->maintenance[e->maintenance_slot].state = (unsigned int)state;
@@ -242,6 +246,10 @@ static void *strappy_execution_work(void *context)
         cJSON_Delete(e->command); e->command = NULL;
         if (!e->session_worker) strappy_ipc_server_committed(e->server,STRAPPY_IPC_CATALOG_CHANGED);
         pthread_mutex_unlock(&e->mutex);
+        if (notify)
+            strappy_notifications_finished(e->run, state, record.name, record.response, error);
+        free(error);
+        strappy_session_record_destroy(&record);
         strappy_service_worker_leave(pool);
         if (e->session_worker) break;
     }

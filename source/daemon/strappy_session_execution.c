@@ -348,8 +348,15 @@ static int strappy_session_load_after_prompt(const char *db_path,
     return 0;
   }
 
-  strappy_free_string(response);
-  return strappy_session_load_record(db_path, session_id, record, error_out);
+  if (!strappy_session_load_record(db_path, session_id, record, error_out)) {
+    strappy_free_string(response);
+    return 0;
+  }
+  /* Use this prompt's final answer, including an empty final answer, rather
+   * than the latest historical assistant text part returned by the reader. */
+  strappy_free_string(record->response);
+  record->response = response;
+  return 1;
 }
 
 int strappy_session_send_prompt_with_events_and_load(

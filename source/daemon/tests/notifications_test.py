@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Build offline production-delegate tests: notifications_test.py [macOS|iOS].
+"""Build offline macOS production-delegate tests.
 
-Run the Mac bundle executable directly. Install the isolated iOS IPA only on
-an authorized test phone and launch with uiopen strappy-notifications-test://
-as mobile; Documents/notifications-result.txt must contain PASS. This recording test does not establish native banner display.
+Run the Mac bundle executable directly. iOS daemon notifications are covered
+by execution_harness.py; visible SpringBoard delivery requires a native test.
 """
 import pathlib
 import plistlib
@@ -13,16 +12,13 @@ import sys
 
 root = pathlib.Path(__file__).resolve().parents[3]
 platform = sys.argv[1] if len(sys.argv) > 1 else 'macOS'
-if platform not in ('macOS', 'iOS'):
-    raise SystemExit('Expected macOS or iOS')
+if platform != 'macOS':
+    raise SystemExit('Use make -C source/daemon/tests execution-test for iOS daemon notification coverage')
 out = root / 'build/tests/notifications' / platform
 out.mkdir(parents=True, exist_ok=True)
 identity = 'com.altivecintelligence.StrappyNotificationsTest'
 plist = plistlib.loads((root / 'source' / platform / 'Info.plist').read_bytes())
 plist.update(CFBundleIdentifier=identity, CFBundleDisplayName='Notifications Test')
-if platform == 'iOS':
-    plist['CFBundleURLTypes'] = [
-        {'CFBundleURLSchemes': ['strappy-notifications-test']}]
 (out / 'Info.plist').write_bytes(plistlib.dumps(plist))
 makefile = (root / 'source' / platform / 'Makefile').read_text().replace('\\\n', ' ')
 sources = re.search(r'^GROUP_ui_SOURCES = (.*)$', makefile, re.M).group(1).split()
@@ -34,9 +30,4 @@ args = [
     'GROUP_ui_SOURCES=' + ' '.join(sources),
     'INFO_PLIST=' + str(out / 'Info.plist'),
 ]
-if platform == 'iOS':
-    (out / 'Entitlements.plist').write_bytes(plistlib.dumps({
-        'application-identifier': identity, 'get-task-allow': True}))
-    args += ['Strappy_ENTITLEMENTS=' + str(out / 'Entitlements.plist'),
-             'Strappy_SANDBOX=container', 'Strappy_INSTALL=', 'Strappy_PACKAGES=ipa']
 subprocess.run(args, check=True)

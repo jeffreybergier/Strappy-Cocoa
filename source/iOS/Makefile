@@ -49,7 +49,7 @@ GROUP_shared_SOURCES = strappy_run.c strappy_store_client.c strappy_ipc.c strapp
 LIBS_IPHONE = -framework QuartzCore -weak_framework WebKit
 BUNDLE_LOCALIZATION_DIRS = $(SHARED_DIR)/Resources
 
-PRODUCTS = Strappy strappyd
+PRODUCTS = Strappy strappyd StrappyBulletin
 CPPFLAGS += -DSTRAPPY_FONTAWESOME_MAP=\"$(FONTAWESOME_WEBVIEW_MAP)\"
 Strappy_TYPE = app
 Strappy_GROUPS = ui shared
@@ -77,7 +77,14 @@ Strappy_LDFLAGS = -framework UIKit -framework Foundation -framework CoreGraphics
 Strappy_ENTITLEMENTS = Entitlements.plist
 Strappy_SANDBOX = unsandboxed
 strappyd_ENTITLEMENTS = daemon/Entitlements.plist
-Strappy_INSTALL = strappyd
+# SpringBoard receiver; the verified iOS 6 private API path is runtime-gated.
+StrappyBulletin_TYPE = executable
+StrappyBulletin_SOURCES = notifications/XPStrappyBulletin.m
+StrappyBulletin_LDFLAGS = -dynamiclib -install_name /Library/MobileSubstrate/DynamicLibraries/StrappyBulletin.dylib -framework Foundation -framework CoreFoundation -lobjc
+StrappyBulletin_SIGN = 1
+StrappyBulletin_INSTALL_PATH = Library/MobileSubstrate/DynamicLibraries/StrappyBulletin.dylib
+Strappy_INSTALL = strappyd StrappyBulletin
+Strappy_PACKAGE_FILES = notifications/StrappyBulletin.plist=Library/MobileSubstrate/DynamicLibraries/StrappyBulletin.plist
 Strappy_PACKAGES = deb-rootful deb-rootless
 Strappy_PACKAGE_ARCH = all
 Strappy_PACKAGE_ID = com.altivecintelligence.strappy

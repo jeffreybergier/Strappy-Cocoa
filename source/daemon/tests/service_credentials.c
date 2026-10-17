@@ -9,7 +9,10 @@ static int credentials(const char *provider, const char *account, int refresh,
 {
     (void)refresh; (void)context; (void)error;
     *token = NULL; *identity = NULL;
-    (void)account;
+    if (!strcmp(account, "missing-credentials-fixture")) {
+        strappy_set_error(error, "The selected account has no bearer credential.");
+        return 0;
+    }
     if (strcmp(provider, "other")) return 0;
     *token = strappy_string_duplicate("offline-fixture");
     return *token != NULL;
