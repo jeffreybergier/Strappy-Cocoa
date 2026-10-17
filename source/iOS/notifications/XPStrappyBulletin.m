@@ -105,9 +105,6 @@ static BOOL XPStrappyBulletinPostBulletin(NSString *title, NSString *body)
   NSString *identity = @"com.altivecintelligence.Strappy";
   NSString *identifier = [[NSProcessInfo processInfo] globallyUniqueString];
   NSDate *date = [NSDate date];
-  /* The iOS 6 presentation uses a single message. Include the session-name
-   * prefix here rather than relying on a separate bulletin title. */
-  NSString *message = [NSString stringWithFormat:@"%@: %@", title, body];
   if (!XPStrappyBulletinBool(away, @"isLocked", &locked)) return NO;
   if (locked) {
     id view = XPStrappyBulletinObject(away, @"awayView");
@@ -125,8 +122,9 @@ static BOOL XPStrappyBulletinPostBulletin(NSString *title, NSString *body)
       !XPStrappyBulletinSetObject(bulletin, @"setBulletinVersionID:", identifier) ||
       !XPStrappyBulletinSetObject(bulletin, @"setRecordID:", identifier) ||
       !XPStrappyBulletinSetObject(bulletin, @"setPublisherBulletinID:", identifier) ||
+      !XPStrappyBulletinSetObject(bulletin, @"setTitle:", title) ||
       !XPStrappyBulletinSetObject(bulletin, @"setMessage:",
-        message) ||
+        body) ||
       !XPStrappyBulletinSetObject(bulletin, @"setDate:", date) ||
       !XPStrappyBulletinSetObject(bulletin, @"setLastInterruptDate:", date) ||
       !XPStrappyBulletinSetBool(bulletin, @"setClearable:", YES)) return NO;

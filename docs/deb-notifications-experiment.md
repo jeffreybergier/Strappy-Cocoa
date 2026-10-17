@@ -11,7 +11,8 @@ settings registration remain unimplemented by this probe. The test component
 remains installed on gomadango. See [native results and continuation instructions](#native-results-and-handoff-2026-10-17)
 before rerunning or changing the experiment. Production completion integration
 is implemented below and was installed on gomadango. The owner confirmed a
-production alert for session 30; its formatting correction is described below.
+production alert for session 30. The later single-message formatting experiment
+was reverted at the owner's request; separate title/body fields are restored.
 
 ## Result
 
@@ -429,11 +430,11 @@ or retrying the prompt. SpringBoard processes a bounded number per callback.
 Success uses the session name (at most 100 Unicode scalars) and the first 400
 Unicode scalars of this prompt's final answer, preserving UTF-8 boundaries. The
 final answer is captured from the current execution result so an empty answer
-cannot show a previous reply. The receiver combines the wire title and body into
-one bulletin message: `Session title: reply preview`. No separate bulletin title
-is set; the iOS 6 presentation requires the session name inside the message. The OS controls visible truncation. A failed
-prompt uses `Session title: Error`, or a short code-owned explanation for an
-exact recognized error such as missing credentials. Arbitrary provider diagnostics are never
+cannot show a previous reply. The receiver sets the session name as the bulletin
+title and the preview as its message. SpringBoard controls visible layout and
+truncation. A failed prompt uses the same title and `Error` as its message, or
+a short code-owned explanation for an exact recognized error such as missing
+credentials. Arbitrary provider diagnostics are never
 copied into alerts. Cancelled/interrupted runs and maintenance/Database Study
 jobs do not alert. Durable request retries do not redisplay finished prompts.
 
@@ -478,9 +479,9 @@ The first deployed build put the session name in the bulletin title and the
 reply preview in its message. The owner observed a notification beginning with
 the reply's Font Awesome shortcode instead of the requested session-name prefix.
 For session 30, the stored name was `Tokyo News Today`, while the final reply
-began with `[fa:regular:newspaper]` and a Markdown heading. The receiver now
-formats the actual message as `Tokyo News Today: <reply preview>`; relying on
-separate title/body presentation did not satisfy the requested format. The
+began with `[fa:regular:newspaper]` and a Markdown heading. Commit `e9261f9` changed the receiver to
+format the actual message as `Tokyo News Today: <reply preview>` without setting
+a separate title, attempting to satisfy the requested prefix. The
 preview content and its 400-character limit are unchanged.
 
 The original production package was installed from commit `3c4685f`; the daemon
@@ -488,3 +489,14 @@ passed IPC readiness, and SpringBoard logged `receiver ready` after restart.
 The owner then confirmed receiving the production alert described above. Its
 installation logs and armv7 symbols are retained under
 `build/device-runs/gomadango-notifications-3c4685f/`.
+
+### Restore separate title and body
+
+After installing `e9261f9`, the owner reported seeing only a title and no body
+and requested the original presentation again. The receiver is restored to the
+`3c4685f` behavior: session name in `setTitle:`, reply preview (or error message)
+in `setMessage:`. The owner suspects that the lock screen presents both fields
+while unlocked banners show only the body. This is a working explanation of the
+observations, not a general compatibility claim about every iOS 6 notification
+API. The earlier assertion that iOS 6 required a single message was premature.
+No shortcode stripping or other preview transformation was added.
