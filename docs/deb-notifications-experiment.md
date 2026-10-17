@@ -587,3 +587,10 @@ reports appeared. The owner confirmed normal operation and opening Strappy.
 Test settings-entry disappearance was not explicitly confirmed; no shared
 notification preferences were altered. See the [native results and limits](ios6-provider-probe.md#native-results-2026-10-17-utc-phone-logs-dated-october-18)
 for details. Production notification code remains unchanged.
+
+The owner requested a next-session production upgrade that presents notifications
+as the real **Strappy** app, including icon and bundle identity. The
+[production handoff](ios6-provider-probe.md#next-session-handoff-production-strappy-identity)
+records the exact identity, daemon/provider architecture, source entry points,
+socket ownership and package migration concerns, and remaining validation.
+Documentation only: no production integration or additional device action.
