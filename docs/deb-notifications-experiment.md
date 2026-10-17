@@ -500,3 +500,68 @@ while unlocked banners show only the body. This is a working explanation of the
 observations, not a general compatibility claim about every iOS 6 notification
 API. The earlier assertion that iOS 6 required a single message was premature.
 No shortcode stripping or other preview transformation was added.
+
+## Provider investigation handoff (2026-10-17)
+
+History reviewed through `ac50d5f`:
+
+| Commit | Accomplishment and limit |
+| --- | --- |
+| `ef3d67c` | Isolated sandboxed IPA / daemon-access experiment. |
+| `20a2a40` | Declared `SBAppUsesLocalNotifications`; native unsandboxed iOS 8.4.1 alert confirmed. |
+| `95652f9` | Retained background execution time during prompts; separate from provider registration. |
+| `07b732e` | Recorded iOS 6 / iOS 8 key comparison and Mail binary evidence. |
+| `07a6197` | Added isolated daemon / SpringBoard presentation probe. |
+| `f03ce5f` | Recorded successful native display and corrected DND interpretation. |
+| `3c4685f` | Connected production prompt completion to the SpringBoard receiver. |
+| `e9261f9` | Tried prefixing the message with the session title. |
+| `ac50d5f` | Restored separate title/body after owner feedback. |
+
+The production receiver displays bulletins through presentation controllers.
+It does not establish a registered provider, Notification Center persistence,
+or notification-settings integration. Its success does not establish that
+Substrate is the only available loading mechanism.
+
+Downloaded the retained investigation directory from
+`me@adorable.local:~/Developer/Strappy-Cocoa/build/investigations/` into this
+checkout's ignored `build/investigations/`. Transfer size: 689,794,819 bytes;
+a checksum-based rsync dry run reported no differences. Includes both devices'
+SpringBoard/shared caches, iOS 6 Mail/provider/service binaries and plists,
+and the earlier SpringBoard Objective-C dump. No phone was changed by this
+transfer. Proprietary binaries and generated logs remain untracked.
+
+Online research found concrete third-party provider precedents:
+
+- [Ryan Petrich's provider template](https://gist.github.com/rpetrich/2340050),
+  created 2012-04-08, builds a `BBDataProvider` bundle targeting iOS 5.0.
+  It supplies section identity/default settings and uses
+  `BBDataProviderAddBulletin(self, bulletin)` from `dataProviderDidLoad`.
+  This is example source, not a native iOS 6.1.3 test result.
+- [WeeLoader source](https://github.com/grp/WeeLoader/blob/master/Tweak.x)
+  explicitly groups iOS 5/6 hooks around
+  `BBServer::_loadAllDataProviderPluginBundles`, directory enumeration and
+  bundle-path resolution. It extends the native provider discovery mechanism.
+- [WeeLoader README](https://github.com/grp/WeeLoader) describes moving providers
+  from `/System/Library/BulletinBoardPlugins` to
+  `/Library/WeeLoader/BulletinBoardPlugins`, for Safe Mode and semitethered
+  jailbreak behavior. WeeLoader itself uses hooks; it is not proof of a
+  Substrate-free deployment on gomadango.
+
+These sources strengthen the custom-provider hypothesis. Mail has dedicated
+integration with a generic provider system; evidence does not establish an
+Apple-only hardcoded allowlist. Nor does it establish that linking BulletinBoard
+into an arbitrary daemon permits publication. Network push delivery and local
+bulletin publication remain separate concerns.
+
+Gomadango is the owner's production phone. Next prepare an isolated removable
+native-provider package, logging, and exact rollback instructions offline.
+Installation and SpringBoard restart require a separately agreed test window.
+Keep production Strappy, strappyd, their data and their Substrate receiver intact.
+
+Prepared the [isolated provider package and device runbook](ios6-provider-probe.md).
+The package uses native BulletinBoard bundle loading, a distinct section/package
+identity, an explicit one-shot sender and persistent attempt guard. No Substrate
+filter or launchd service is installed by it. A clean build, package inspection,
+static analysis, and full production clean builds passed; native testing remains
+pending the owner's test window. A read-only phone preflight verified recovery
+utilities and production paths; no package was installed or service restarted.
