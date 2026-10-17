@@ -19,6 +19,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef STRAPPY_BULLETIN_PROBE
+#include "tests/bulletin_probe/probe.h"
+#endif
+
 #define STRAPPY_LOG_LIMIT (64L * 1024L)
 static volatile sig_atomic_t strappy_stopping = 0;
 static int strappy_signal_pipe[2] = {-1, -1};
@@ -152,6 +156,10 @@ int main(int argc, char **argv)
     char *configuration_error = NULL;
     size_t length;
     int result = EXIT_FAILURE;
+#ifdef STRAPPY_BULLETIN_PROBE
+    if (argc == 2 && strcmp(argv[1], "--bulletin-probe") == 0)
+        return strappy_bulletin_probe_run();
+#endif
     (void)signal(SIGPIPE, SIG_IGN);
     if (argc == 3 && strcmp(argv[1], "--credential-probe") == 0) return strappy_service_credentials_probe(argv[2]);
     if (argc == 3 && strcmp(argv[1], "--ipc-probe") == 0) return strappy_probe(argv[2]);

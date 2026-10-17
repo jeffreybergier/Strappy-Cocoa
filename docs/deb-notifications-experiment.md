@@ -3,6 +3,11 @@
 2026-10-17, branch `experiment/ios-sandbox-ipc`, koolphone5: iPhone5,2,
 iOS 8.4.1 (12H321), armv7, mobile UID 501.
 
+Latest handoff: the iOS 6 daemon-to-SpringBoard probe receives and acknowledges
+IPC, but the owner observed **no visible banner**. The test component remains
+installed on gomadango. See [native results and continuation instructions](#native-results-and-handoff-2026-10-17)
+before rerunning or changing the experiment.
+
 ## Result
 
 An unsandboxed app installed by DEB under `/Applications` displayed a local
@@ -124,7 +129,185 @@ that iOS 6 lacks another notification mechanism. In particular, iOS 6
 SpringBoard contains `usesLocalNotifications`; tracing that implementation
 and Mail's BulletinBoard integration remains a separate investigation.
 
+### Mail binaries and online research
+
+The iOS 6 phone's Mail executable and related native components were copied
+read-only into `build/investigations/gomadango/mail/`, with their plists:
+
+- `/Applications/MobileMail.app/MobileMail` (1,294,992 bytes).
+- `/System/Library/PrivateFrameworks/DataAccess.framework/Support/dataaccessd`
+  (11,664 bytes), plus `com.apple.dataaccess.dataaccessd.plist`. No separately
+  named Mail daemon was found in the inspected launchd/libexec/sbin locations;
+  this is a related service, not proof it owns every Mail notification.
+- `/System/Library/BulletinBoardPlugins/MailDataProvider.bundle/MailDataProvider`
+  (44,752 bytes), whose principal class is `MFMailDataProvider`.
+
+The plugin imports `BBDataProviderAddBulletin`, `BBDataProviderModifyBulletin`,
+`BBBulletinRequest`, and `MSNotificationObserver`. The copied shared cache places
+`MSNotificationObserver` in `MailServices.framework` and contains the service
+name `com.apple.mobilemail.services.xpc`, bulletin observer-registration and
+message-request commands, and callbacks for fetched/deleted messages, summaries,
+flags, and account changes. These strings/imports support the proposed flow
+Mail service -> observer -> MailDataProvider -> BulletinBoard. The full call
+sequence has not been disassembled or traced. Mail's plist contains
+`SBMachServices` and `UIBackgroundModes` values `audio` and `continuous`, but
+does not contain `SBAppUsesLocalNotifications`.
+
+Online leads reviewed:
+
+- [libbulletin](https://github.com/limneos/libbulletin) claims iOS 5 through
+  12.1.2 support. Its SpringBoard injection filter and older-controller code
+  provide the basis for the isolated presentation probe below. It constructs
+  bulletins and calls banner/lock-screen controllers; this does not establish
+  persistent Notification Center delivery or a standalone daemon API.
+- [RocketBootstrap](https://github.com/rpetrich/RocketBootstrap/blob/master/rocketbootstrap.h)
+  supplies Mach, CFMessagePort, and CPDistributedMessagingCenter IPC helpers,
+  not notification presentation. It is not needed for our fixed Darwin signal.
+- [libnotifications](https://github.com/CokePokes/libnotifications) requires
+  iOS 10+, so it is not the iOS 6 implementation to use.
+
 ## Validation and limits
+
+### Five-second daemon / SpringBoard probe
+
+`source/daemon/tests/bulletin_probe.py` builds a separate rootful test DEB with
+the real `strappyd` source compiled with `STRAPPY_BULLETIN_PROBE`. Its installed
+name is `strappyd-bulletin-probe`; `--bulletin-probe` takes an early path before
+opening the database, credentials, execution engine, or production socket.
+It waits five seconds after launch, posts one fixed Darwin notification, then
+waits up to five seconds for a SpringBoard dispatch acknowledgement and exits.
+Production builds do not contain this test mode.
+
+The DEB also installs a signed `StrappyBulletinProbe.dylib` and SpringBoard-only
+MobileSubstrate filter. The receiver runs on the main thread, creates a fixed
+`BBBulletin`, and invokes the iOS 6 banner or lock-screen controller according
+to the current lock state. This follows the older-controller approach visible
+in [libbulletin](https://github.com/limneos/libbulletin/blob/master/libbulletin.xm),
+without linking that library or requiring RocketBootstrap. All private-selector
+bridges and primitive `NSInvocation` calls are in `XPBulletinProbe.m`.
+
+This is a presentation/IPC experiment, not a production notification service.
+Darwin signals carry no payload and are not authenticated or correlated: run
+one sender at a time. The receiver accepts only the fixed test message, limits
+dispatch to once per five seconds, and does not read user data. An acknowledgement
+means the private display invocation returned, not that an alert was visible.
+Notification Center persistence, sounds, tap routing and general iOS-version
+compatibility need separate validation. The initial receiver deliberately
+requires the iOS 6 `SBAwayController` path, even though both iOS slices build.
+
+Build and inspect using the existing common Make pipeline:
+
+```sh
+python3 source/daemon/tests/bulletin_probe.py
+python3 source/daemon/tests/bulletin_probe.py analyze
+python3 source/daemon/tests/bulletin_probe.py validate-package
+```
+
+The package and matching symbols are below
+`build/experiments/bulletin-probe/output/iOS/release/`. The package installs only
+`/usr/libexec/strappyd-bulletin-probe` and the two uniquely named MobileSubstrate
+files. It has no launchd plist or lifecycle scripts and does not replace the
+installed Strappy app or daemon. MobileSubstrate must already be installed.
+
+For native testing, stage the DEB below the explicit phone's `~/tmp_altivec`,
+inspect it, and install using `dpkg -i`. Create
+`/var/mobile/tmp_altivec/strappy-bulletin-probe` owned by mobile for receiver
+logging. Restart SpringBoard to load the component; this briefly interrupts the
+phone UI. Check `receiver.log` there for `receiver ready`, then run as mobile:
+
+```sh
+/usr/libexec/strappyd-bulletin-probe --bulletin-probe
+```
+
+Observe the phone after five seconds, checking unlocked and locked states
+separately. The sender reports IPC submission and acknowledgement separately;
+the receiver logs request and display-dispatch timestamps. Preserve both logs.
+Uninstall with `dpkg -r com.altivecintelligence.strappy.bulletin-probe`, then
+restart SpringBoard to unload the receiver. Keep staging reports and local
+symbols until the investigation is complete.
+
+#### Native results and handoff, 2026-10-17
+
+**Current result: IPC and the display invocation succeeded, but the owner saw
+no banner. Visible notification delivery on iOS 6 is still unresolved.**
+
+The probe ran on gomadango, iOS 6.1.3 / iPhone5,2 / armv7, as mobile. The phone
+has MobileSubstrate 0.9.6301. A negative control before loading the receiver
+waited five seconds, posted its request, then correctly exited with status 1
+after five more seconds without acknowledgement. The isolated rootful DEB
+was then installed. An initial install raced the file transfer and failed with
+a truncated-archive error; reinstalling after transfer completion succeeded.
+
+SpringBoard was deliberately restarted with SIGTERM to load the dylib. This
+UI interruption initially looked like a crash to the owner. The replacement
+SpringBoard remained running as PID 906 and logged `receiver ready`; no matching
+new SpringBoard crash report was found. The production strappyd remained PID 68
+through this check. The installed production app, daemon and data were not
+replaced. No prompt or provider request was submitted.
+
+The first actual receiver-loaded test returned status 0 with these reports:
+
+```text
+bulletin-probe: started; waiting five seconds
+bulletin-probe: request posted; waiting for SpringBoard dispatch
+bulletin-probe: SpringBoard dispatch acknowledged; visible display requires observation
+813923276.012 receiver ready
+813923337.470 received request
+813923337.541 dispatched banner
+```
+
+Receiver times are CFAbsoluteTime seconds. SpringBoard took about 71 ms from
+receiving the IPC signal to returning from its banner invocation. The owner
+explicitly reported that nothing appeared. Syslog had reported Notification
+Center open shortly before this test; it is only a possible suppression cause.
+A retry from the unlocked Home screen was proposed but not performed before
+the owner requested this handoff. No receiver-loaded lock-screen test occurred.
+
+The next experiment is to close Notification Center, stay on the unlocked Home
+screen, and rerun the installed sender. Then test the locked phone separately.
+Do not treat the acknowledgement as visual success. If still invisible, inspect
+the iOS 6 banner controller's filtering and section registration, and consider
+the Mail-style data-provider / BBServer route instead of direct controller
+presentation. `SpringBoard-objc.txt` was generated locally with `otool -ov`;
+it identifies the controller's `observer:addBulletin:forFeed:` method for
+further disassembly. No change to those filters has been made.
+
+State to carry to the next computer:
+
+- Branch: `experiment/ios-sandbox-ipc`.
+- Last SSH address overrides: gomadango `172.20.10.7`; koolphone5 `172.20.10.3`.
+  Use the corresponding configured SSH alias, `-o Hostname=...`, and `scp -O`.
+  Confirm the address and `uname -a` again; hotspot addresses can change.
+- The probe package remains installed and its SpringBoard receiver remains
+  loaded. No further respring is needed to rerun the unchanged sender:
+  `su mobile -c '/usr/libexec/strappyd-bulletin-probe --bulletin-probe'`.
+- Phone staging/logs: `/var/mobile/tmp_altivec/strappy-bulletin-probe/` contains
+  `probe.deb`, the standalone sender copy `strappyd`, `no-receiver.log`,
+  `sender-1.log`, and `receiver.log`. Run one sender at a time.
+- Local build logs and retrieved reports are in
+  `build/experiments/bulletin-probe/`; matching symbols are in its `output/`.
+  Copied Apple binaries, generated disassembly, packages, logs and symbols are
+  ignored local artifacts, not Git content. Rebuild or recopy them as needed;
+  the essential observations are recorded above.
+
+The dual-architecture probe build and DEB validation passed without compiler
+warnings, and the app-boundary check passed. The full production build and
+whole-daemon analysis were interrupted during the conversation. Resuming the
+build in the same initially clean `build/bulletin-validation` directory completed
+successfully for iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64, with no compiler
+warnings or errors. Full output is retained in `build/bulletin-validation.log`
+and `build/bulletin-validation-resume.log`.
+Focused analysis of the two new probe sources passed without diagnostics,
+separately from the unfinished whole-daemon analysis. It can be repeated with:
+
+```sh
+make -C source/iOS -f bulletin_probe.mk \
+  BUILD_ROOT=build/experiments/bulletin-probe/output \
+  strappyd-bulletin-probe_SOURCES=../daemon/tests/bulletin_probe/probe.c analyze
+```
+
+Native coverage is limited to the iOS 6 armv7 observations above, with no
+visible-alert success yet.
 
 ### Production follow-up on gomadango
 
