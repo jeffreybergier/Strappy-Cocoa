@@ -10,8 +10,8 @@ woke it with Home, as expected. Notification Center history and notification
 settings registration remain unimplemented by this probe. The test component
 remains installed on gomadango. See [native results and continuation instructions](#native-results-and-handoff-2026-10-17)
 before rerunning or changing the experiment. Production completion integration
-is implemented below; the new receiver has not yet been installed or visually
-validated on gomadango.
+is implemented below and was installed on gomadango. The owner confirmed a
+production alert for session 30; its formatting correction is described below.
 
 ## Result
 
@@ -429,10 +429,11 @@ or retrying the prompt. SpringBoard processes a bounded number per callback.
 Success uses the session name (at most 100 Unicode scalars) and the first 400
 Unicode scalars of this prompt's final answer, preserving UTF-8 boundaries. The
 final answer is captured from the current execution result so an empty answer
-cannot show a previous reply. The title and body are separate bulletin fields;
-the OS controls their visible layout and truncation. A failed prompt uses the
-same title and `Error`, or a short code-owned explanation for an exact recognized
-error such as missing credentials. Arbitrary provider diagnostics are never
+cannot show a previous reply. The receiver combines the wire title and body into
+one bulletin message: `Session title: reply preview`. No separate bulletin title
+is set; the iOS 6 presentation requires the session name inside the message. The OS controls visible truncation. A failed
+prompt uses `Session title: Error`, or a short code-owned explanation for an
+exact recognized error such as missing credentials. Arbitrary provider diagnostics are never
 copied into alerts. Cancelled/interrupted runs and maintenance/Database Study
 jobs do not alert. Durable request retries do not redisplay finished prompts.
 
@@ -470,3 +471,20 @@ under the mobile-owned Application Support directory rather than the device's
 world-writable Caches directory. These checks do not establish native delivery
 of the new payload transport: no new package was installed, no SpringBoard
 restart was performed, and no production prompt was submitted in this change.
+
+### Notification prefix correction
+
+The first deployed build put the session name in the bulletin title and the
+reply preview in its message. The owner observed a notification beginning with
+the reply's Font Awesome shortcode instead of the requested session-name prefix.
+For session 30, the stored name was `Tokyo News Today`, while the final reply
+began with `[fa:regular:newspaper]` and a Markdown heading. The receiver now
+formats the actual message as `Tokyo News Today: <reply preview>`; relying on
+separate title/body presentation did not satisfy the requested format. The
+preview content and its 400-character limit are unchanged.
+
+The original production package was installed from commit `3c4685f`; the daemon
+passed IPC readiness, and SpringBoard logged `receiver ready` after restart.
+The owner then confirmed receiving the production alert described above. Its
+installation logs and armv7 symbols are retained under
+`build/device-runs/gomadango-notifications-3c4685f/`.

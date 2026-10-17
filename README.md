@@ -142,10 +142,11 @@ flowchart TB
 ### Completion notifications
 
 On iOS, strappyd sends a completion alert after committing a successful or
-failed prompt, independently of the app's state. The title is the chat's name
-(up to 100 Unicode characters); successful messages contain the first 400
-Unicode characters of the final answer. Failed messages say `Error`, with a
-short explanation for recognized credential/configuration errors. Raw provider
+failed prompt, independently of the app's state. The message is formatted as
+`Chat session title: reply preview`, using up to 100 Unicode characters of the
+session name and the first 400 Unicode characters of the final answer. Failed
+messages use `Chat session title: Error`, with a short explanation for recognized
+credential/configuration errors. Raw provider
 diagnostics are not shown. Cancellation, shutdown interruption, and background
 Database Study do not produce alerts.
 
