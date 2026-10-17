@@ -7,7 +7,7 @@ package=com.altivecintelligence.strappy.provider-probe
 bundle=/System/Library/BulletinBoardPlugins/StrappyProviderProbe.bundle
 sender=/usr/libexec/strappy-provider-probe
 [ "$(id -u)" = 0 ] || { echo 'Run as root.' >&2; exit 1; }
-[ "$(pwd -P)" = "$stage" ] || { echo 'Wrong staging directory.' >&2; exit 1; }
+[ "$(pwd -P)" = "$(cd "$stage" && pwd -P)" ] || { echo 'Wrong staging directory.' >&2; exit 1; }
 
 production_fingerprints() {
   for file in /Applications/Strappy.app/Strappy /usr/libexec/strappyd \
@@ -29,7 +29,7 @@ case "${1:-}" in
     fi
     production_fingerprints > before.sha256
     dpkg-query -W com.altivecintelligence.strappy > before.package
-    ps -ax > before.processes
+    launchctl list > before.services
     ls -lt /var/mobile/Library/Logs/CrashReporter > before.crashes
     echo 'Baseline saved. Installation is a separate action.'
     ;;
@@ -55,7 +55,7 @@ case "${1:-}" in
   collect)
     production_fingerprints > after.sha256
     dpkg-query -W com.altivecintelligence.strappy > after.package
-    ps -ax > after.processes
+    launchctl list > after.services
     ls -lt /var/mobile/Library/Logs/CrashReporter > after.crashes
     if [ -r /var/log/syslog ]; then
       grep 'StrappyProviderProbe' /var/log/syslog | tail -100 > provider-syslog.log || :

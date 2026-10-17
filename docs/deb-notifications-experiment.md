@@ -565,3 +565,25 @@ filter or launchd service is installed by it. A clean build, package inspection,
 static analysis, and full production clean builds passed; native testing remains
 pending the owner's test window. A read-only phone preflight verified recovery
 utilities and production paths; no package was installed or service restarted.
+
+
+### Native provider success and removal
+
+The owner authorized and observed the test immediately after preparation.
+On gomadango (iPhone5,2, iOS 6.1.3), the native provider loaded, received server
+registration-related callbacks, and published exactly one bulletin through
+`BBDataProviderAddBulletin`. The owner confirmed the visible notification,
+Notification Center entry, and Settings > Notifications entry.
+
+The probe installed no Substrate filter or hooks. Existing production/Substrate
+components remained enabled, so this does not prove operation on a phone with
+Substrate removed. It does demonstrate that our provider can use native bundle
+loading rather than its own Substrate injection filter.
+
+Withdrawal returned, the package was removed, and the second planned respring
+unloaded it. Production package version and four file hashes were unchanged;
+strappyd kept its PID, the production receiver logged readiness, and no new crash
+reports appeared. The owner confirmed normal operation and opening Strappy.
+Test settings-entry disappearance was not explicitly confirmed; no shared
+notification preferences were altered. See the [native results and limits](ios6-provider-probe.md#native-results-2026-10-17-utc-phone-logs-dated-october-18)
+for details. Production notification code remains unchanged.

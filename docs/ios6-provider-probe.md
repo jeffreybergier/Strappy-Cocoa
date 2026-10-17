@@ -1,7 +1,8 @@
 # Isolated iOS 6 native BulletinBoard provider test
 
-Status: prepared offline; not installed or run on gomadango. The production
-notification implementation is unchanged. This test asks whether Apple's native
+Status: tested successfully on gomadango and removed on 2026-10-17 UTC.
+The production notification implementation is unchanged. See native results
+below; the instructions are retained as the original test recipe. This test asks whether Apple's native
 loader accepts a custom provider, then whether that provider can publish one
 fixed bulletin. It does not try to establish a complete notification service.
 
@@ -75,7 +76,7 @@ Mode. Safe Mode alone is not a rollback plan. Before installation, verify a
 second independent root SSH connection and the package-removal command. If SSH
 recovery cannot be relied on, defer this experiment on the production phone.
 
-Nothing below has been executed as part of preparation. Confirm the phone is
+The recipe below was subsequently executed in the owner-approved window. Confirm the phone is
 still gomadango / iPhone5,2 / iOS 6.1.3 and rootful. Review the exact DEB hash with
 the owner before proceeding; do not use an IP override from an old investigation.
 
@@ -199,9 +200,66 @@ record sanitized observations in the investigation document after the test.
   `build/production-build-provider-review.log`, and
   `build/production-package-provider-review.log`. Keep logs/binaries ignored.
 
-Scheduling remains pending: owner to choose a 15-minute window with the phone
-available and two intentional resprings acceptable. Preparation does not
-schedule an automatic job or authorize unattended installation.
+The owner subsequently authorized the immediate test window. Both planned
+resprings and package removal completed; no scheduled job was created.
 
 Prepared DEB SHA-256 (recompute after any rebuild):
 `76ee305f67630cd0c13a3ffeaccd88df4af01724bd9dfef134a7d46d82688fb7`.
+
+
+## Native results (2026-10-17 UTC; phone logs dated October 18)
+
+Tested the prepared DEB hash above from commit `084643d` on gomadango,
+iPhone5,2 / iOS 6.1.3 (10B329), rootful. The provider executable was not rebuilt
+or changed during the experiment. Root SSH remained available through a second
+interactive connection. The sender ran as mobile.
+
+The runner needed two corrections before baseline/install: `pwd -P` resolves
+`/var` to `/private/var`, so compare canonical staging paths; this phone has no
+`ps`, so capture `launchctl list` service snapshots instead. Shell syntax passed.
+No package was installed until these preflight issues were resolved.
+
+Observed sequence:
+
+1. Captured production package version, four SHA-256 fingerprints, service list
+   and crash-report listing. Installed only the separate probe package.
+2. Respring changed SpringBoard PID 1587 to 1740. The initial immediate read
+   preceded provider startup; the next check found its log. It adopted the
+   runtime protocol, initialized, received `dataProviderDidLoad`, supplied
+   default section settings, and received a bulletin-list query. The owner
+   confirmed the Home Screen was normal.
+3. Sent exactly one fixed notification. Receiver logged
+   `BBDataProviderAddBulletin` entry and return. The owner confirmed seeing it,
+   then explicitly confirmed both its Notification Center entry and its entry
+   under Settings > Notifications. DND and mute state were not reported.
+4. Sent the withdrawal signal; the receiver logged withdrawal return. Removed
+   the probe through dpkg and resprang once to unload it (SpringBoard PID 1873).
+   The package, bundle directory, and sender were absent afterward. Production
+   strappyd retained PID 1568 throughout, and its receiver logged readiness in
+   the final SpringBoard process.
+5. Before/after production hashes and package version matched; crash-directory
+   listings were unchanged. The owner confirmed normal phone operation and
+   opening Strappy after cleanup. Disappearance of the probe's notification and
+   settings entry was not explicitly confirmed; shared preferences were not
+   modified to force cleanup.
+
+This confirms custom native-provider loading and visible publication, including
+Notification Center and settings integration, on this phone. The probe installed
+no Substrate filter and made no hooks. Existing Substrate/production components
+remained enabled, so this was not a test with Substrate entirely removed from
+the device. Native loading is now a demonstrated alternative for our component;
+a general Substrate-free compatibility claim would require further evidence.
+
+This single-bulletin test does not establish persistence across resprings,
+sound, tap routing, DND/lock-screen policy, repeated publication, durable history,
+or production workload reliability. In particular, the provider intentionally
+returns an empty list when asked to reconstruct bulletins.
+
+Evidence retained locally under
+`build/device-runs/gomadango-provider-probe-v1/`, including install/send/receiver/
+clear/remove logs, before/after service and crash listings, production hashes,
+and production receiver readiness. Device staging is retained for review.
+Clean production builds after the runner fixes passed for iOS armv7/arm64 and
+macOS PPC/i386/x86_64/arm64 without warnings; logs are
+`build/production-clean-provider-native.log` and
+`build/production-build-provider-native.log`.
