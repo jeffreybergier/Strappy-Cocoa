@@ -3,9 +3,12 @@
 2026-10-17, branch `experiment/ios-sandbox-ipc`, koolphone5: iPhone5,2,
 iOS 8.4.1 (12H321), armv7, mobile UID 501.
 
-Latest handoff: the iOS 6 daemon-to-SpringBoard probe receives and acknowledges
-IPC, but the owner observed **no visible banner**. The test component remains
-installed on gomadango. See [native results and continuation instructions](#native-results-and-handoff-2026-10-17)
+Latest handoff: the owner confirmed **visible Home-screen and lock-screen
+notifications** from the iOS 6 daemon-to-SpringBoard probe. With Do Not Disturb
+enabled, the screen stayed off and the notification was visible after the owner
+woke it with Home, as expected. Notification Center history and notification
+settings registration remain unimplemented by this probe. The test component
+remains installed on gomadango. See [native results and continuation instructions](#native-results-and-handoff-2026-10-17)
 before rerunning or changing the experiment.
 
 ## Result
@@ -228,8 +231,8 @@ symbols until the investigation is complete.
 
 #### Native results and handoff, 2026-10-17
 
-**Current result: IPC and the display invocation succeeded, but the owner saw
-no banner. Visible notification delivery on iOS 6 is still unresolved.**
+**Initial result: IPC and the display invocation succeeded, but the owner saw
+no banner. The subsequent reruns below confirmed visible delivery.**
 
 The probe ran on gomadango, iOS 6.1.3 / iPhone5,2 / armv7, as mobile. The phone
 has MobileSubstrate 0.9.6301. A negative control before loading the receiver
@@ -263,16 +266,17 @@ Center open shortly before this test; it is only a possible suppression cause.
 A retry from the unlocked Home screen was proposed but not performed before
 the owner requested this handoff. No receiver-loaded lock-screen test occurred.
 
-The next experiment is to close Notification Center, stay on the unlocked Home
-screen, and rerun the installed sender. Then test the locked phone separately.
-Do not treat the acknowledgement as visual success. If still invisible, inspect
-the iOS 6 banner controller's filtering and section registration, and consider
-the Mail-style data-provider / BBServer route instead of direct controller
-presentation. `SpringBoard-objc.txt` was generated locally with `otool -ov`;
+The proposed next experiment was to close Notification Center, stay on the
+unlocked Home screen, and rerun the installed sender, then test the locked phone
+separately. Those reruns are now complete; see the confirmed results below.
+Do not treat the acknowledgement as visual success. The initial fallback plan
+was to inspect the iOS 6 banner controller's filtering and section registration
+and consider the Mail-style data-provider / BBServer route if presentation
+remained invisible. `SpringBoard-objc.txt` was generated locally with `otool -ov`;
 it identifies the controller's `observer:addBulletin:forFeed:` method for
 further disassembly. No change to those filters has been made.
 
-State to carry to the next computer:
+State recorded at the initial handoff (see reruns below for updated connectivity):
 
 - Branch: `experiment/ios-sandbox-ipc`.
 - Last SSH address overrides: gomadango `172.20.10.7`; koolphone5 `172.20.10.3`.
@@ -306,8 +310,53 @@ make -C source/iOS -f bulletin_probe.mk \
   strappyd-bulletin-probe_SOURCES=../daemon/tests/bulletin_probe/probe.c analyze
 ```
 
-Native coverage is limited to the iOS 6 armv7 observations above, with no
-visible-alert success yet.
+Native coverage is limited to the iOS 6 armv7 observations above and the
+owner-confirmed reruns below.
+
+#### Confirmed reruns and DND behavior, 2026-10-17
+
+Connected through gomadango's configured SSH alias at its normal address,
+without the earlier hotspot override. The installed probe was reused without
+restarting SpringBoard or changing the app, daemon, or receiver. Each sender
+ran as mobile, waited five seconds, received a dispatch acknowledgement, and
+exited with status 0. The owner confirmed visible delivery in all three reruns:
+
+| Test | Receiver request / dispatch (CFAbsoluteTime) | Owner observation |
+| --- | --- | --- |
+| Unlocked Home screen | `813938719.886` / `813938719.911` | Banner appeared. |
+| Locked, Do Not Disturb enabled | `813938747.699` / `813938747.732` | Screen did not light up; notification was visible after pressing Home manually. |
+| Locked, Do Not Disturb disabled | `813938790.165` / `813938790.193` | Notification appeared. |
+
+The DND test behaved as expected: the notification was available on the lock
+screen without waking the screen. An initial interpretation that visibility
+under DND suggested a policy bypass was incorrect; the owner clarified that
+Home was pressed to wake the display. This observation does not demonstrate a
+DND bypass or establish every aspect of notification policy. Sound behavior was
+not separately confirmed.
+
+Sender reports remain under
+`/var/mobile/tmp_altivec/strappy-bulletin-probe/` as
+`sender-rerun-20261017.log`, `sender-locked-20261017.log`, and
+`sender-dnd-off-20261017.log`; receiver timestamps are in `receiver.log` there.
+
+The owner also observed that these notifications were absent from Notification
+Center and Strappy was absent from the notification settings list. The probe's
+implementation explains these limits:
+
+- The sender posts a payload-free Darwin signal. The receiver inside SpringBoard
+  creates the fixed message; no remote push service is involved.
+- The receiver directly invokes `observer:addBulletin:forFeed:` on the banner
+  or lock-screen controller. It does not publish through a BulletinBoard data
+  provider/server or implement Notification Center persistence.
+- Setting the bulletin's section identity to Strappy's bundle identifier does
+  not implement notification-provider or settings registration.
+- The acknowledgement confirms the invocation returned; the owner's separate
+  observation confirms visible delivery. Tap routing and sound remain untested.
+
+The next investigation is the BulletinBoard data-provider/server route and
+section registration for Notification Center and notification settings. Visible
+presentation from the isolated sender is now confirmed; production prompt
+completion integration remains separate work.
 
 ### Production follow-up on gomadango
 
