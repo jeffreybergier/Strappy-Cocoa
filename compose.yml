@@ -2,8 +2,6 @@ services:
   altivec:
     image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
     working_dir: /repo/Strappy
-    environment:
-      ALTIVEC_SDK_ARCHIVE_DIR: ${ALTIVEC_SDK_ARCHIVE_DIR:-}
     volumes:
       - .:/repo/Strappy
       - ~/.altivec:/root
@@ -17,8 +15,6 @@ services:
     profiles:
       - tools
     image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
-    environment:
-      ALTIVEC_SDK_ARCHIVE_DIR: ${ALTIVEC_SDK_ARCHIVE_DIR:-}
     volumes:
       - ${ALTIVEC_SDK_HOST_DIR:-./.altivec-sdk}:/altivec-sdk:ro
       - ${ALTIVEC_SDK_HOST_DIR:-${HOME}/.altivec-sdk}:/altivec-sdk-shared:ro
@@ -34,7 +30,6 @@ services:
       - IS_SANDBOX=1
       - TERM=xterm-256color
       - COLORTERM=${COLORTERM:-}
-      - ALTIVEC_SDK_ARCHIVE_DIR=${ALTIVEC_SDK_ARCHIVE_DIR:-}
     working_dir: /repo/Strappy
     volumes:
       - .:/repo/Strappy
@@ -52,8 +47,6 @@ services:
       - tools
     image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
     working_dir: /repo/Strappy
-    environment:
-      ALTIVEC_SDK_ARCHIVE_DIR: ${ALTIVEC_SDK_ARCHIVE_DIR:-}
     volumes:
       - .:/repo/Strappy
       - ~/.altivec:/root
