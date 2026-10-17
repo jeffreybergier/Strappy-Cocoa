@@ -5,8 +5,6 @@ services:
     volumes:
       - .:/repo/Strappy
       - ~/.altivec:/root
-      - ${ALTIVEC_SDK_HOST_DIR:-./.altivec-sdk}:/altivec-sdk:ro
-      - ${ALTIVEC_SDK_HOST_DIR:-${HOME}/.altivec-sdk}:/altivec-sdk-shared:ro
       - cache:/cache
       - altivec-sdk-legacy:/osxcross/legacy/target/SDK
       - altivec-sdk-modern:/osxcross/modern/SDK
@@ -15,9 +13,10 @@ services:
     profiles:
       - tools
     image: ${ALTIVEC_IMAGE:-ghcr.io/jeffreybergier/altivec-intelligence:latest}
+    working_dir: /repo/Strappy
     volumes:
-      - ${ALTIVEC_SDK_HOST_DIR:-./.altivec-sdk}:/altivec-sdk:ro
-      - ${ALTIVEC_SDK_HOST_DIR:-${HOME}/.altivec-sdk}:/altivec-sdk-shared:ro
+      - ~/.altivec:/root
+      - .:/repo/Strappy
       - altivec-sdk-legacy:/osxcross/legacy/target/SDK
       - altivec-sdk-modern:/osxcross/modern/SDK
     entrypoint: altivec-sdk
@@ -34,8 +33,6 @@ services:
     volumes:
       - .:/repo/Strappy
       - ~/.altivec:/root
-      - ${ALTIVEC_SDK_HOST_DIR:-./.altivec-sdk}:/altivec-sdk:ro
-      - ${ALTIVEC_SDK_HOST_DIR:-${HOME}/.altivec-sdk}:/altivec-sdk-shared:ro
       - cache:/cache
       - altivec-sdk-legacy:/osxcross/legacy/target/SDK
       - altivec-sdk-modern:/osxcross/modern/SDK
@@ -50,8 +47,6 @@ services:
     volumes:
       - .:/repo/Strappy
       - ~/.altivec:/root
-      - ${ALTIVEC_SDK_HOST_DIR:-./.altivec-sdk}:/altivec-sdk:ro
-      - ${ALTIVEC_SDK_HOST_DIR:-${HOME}/.altivec-sdk}:/altivec-sdk-shared:ro
       - cache:/cache
       - altivec-sdk-legacy:/osxcross/legacy/target/SDK
       - altivec-sdk-modern:/osxcross/modern/SDK
