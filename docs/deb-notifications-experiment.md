@@ -92,6 +92,39 @@ through `dpkg -r` with their exact package IDs if desired:
 
 ## Validation and limits
 
+### Production follow-up on gomadango
+
+The rootful 1.2.0 package was installed on gomadango (iPhone5,2, iOS 6.1.3).
+Daemon IPC v8 passed, but the owner saw no completion alert. Runtime logs showed
+the app entering the background at 12:10:36 and receiving the prompt completion
+only after becoming active at 12:12:50. The foreground guard then skipped the
+alert. The earlier probe held a background task; production had removed it.
+
+The app now holds one finite UIKit background task while prompts are active,
+including submission before the daemon persists the run. Start/finish events
+track session identifiers so overlapping prompts share the task. Completion
+submits the alert before releasing the task. Expiration releases the assertion
+without stopping daemon work and prevents renewal until the app becomes active
+again. This does not prevent screen locking or promise alerts after iOS expires
+the allotted background time. Submission results are logged without content.
+
+The updated rootful DEB was installed on gomadango; daemon IPC v8 passed again.
+Native notification display on iOS 6 remains a manual validation step: start a
+prompt, press Home before completion, and verify both the visible alert and the
+task begin/submission/end sequence in syslog. Also exercise overlapping prompts
+and expiration with a long-running request; no renewal should occur in the
+background after expiration.
+
+Clean builds passed for both iOS and all four macOS architectures without
+compiler warnings. Both iOS packages validated and the app-boundary check passed.
+iOS static analysis reported no AppDelegate diagnostics, but flagged a possible
+null source in the unchanged debug-capture `memcpy` at
+`source/daemon/strappy_client.c:1230`. That separate finding is not resolved by
+this lifecycle change. Logs and symbols are retained under
+`build/device-runs/gomadango-background/`.
+
+### Original isolated probe coverage
+
 The three probe variants passed clean armv7/arm64 builds and package validation.
 Clang analysis of the shared probe passed. Clean production builds cover all
 four macOS and both iOS architectures; no compiler warnings were reported.

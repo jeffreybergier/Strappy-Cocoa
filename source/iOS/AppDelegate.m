@@ -82,6 +82,8 @@ static NSString *StrappyPromptCompletionNotificationBody(
   (NSNotification *)notification;
 - (BOOL)longRunningWorkIsActive;
 - (void)updateLongRunningWorkActivityIndicator;
+- (void)updatePromptBackgroundTask;
+- (void)endPromptBackgroundTask;
 - (void)setLongRunningWorkNetworkActivityIndicatorEnabled:(BOOL)enabled;
 @end
 
@@ -89,6 +91,15 @@ static NSMutableArray *StrappyAsyncErrors;
 static BOOL StrappyAsyncErrorVisible;
 
 @implementation AppDelegate
+
+- (instancetype)init;
+{
+  if ((self = [super init])) {
+    promptBackgroundTask_ = UIBackgroundTaskInvalid;
+    activePromptIdentifiers_ = [[NSMutableSet alloc] init];
+  }
+  return self;
+}
 
 - (void)asyncCommandFailed:(NSNotification *)notification
 {
@@ -169,6 +180,7 @@ static BOOL StrappyAsyncErrorVisible;
 
 - (void)applicationDidBecomeActive:(UIApplication *)application
 {
+  promptBackgroundTaskExpired_ = NO;
   StrappyLogApplicationLifecycle(@"applicationDidBecomeActive", application);
   [self showNextAsyncError];
   [[StrappyAuthentication sharedAuthentication]
@@ -178,6 +190,7 @@ static BOOL StrappyAsyncErrorVisible;
 
 - (void)applicationWillTerminate:(UIApplication *)application
 {
+  [self endPromptBackgroundTask];
   StrappyLogApplicationLifecycle(@"applicationWillTerminate", application);
   [self setLongRunningWorkNetworkActivityIndicatorEnabled:NO];
 }
@@ -223,12 +236,25 @@ static BOOL StrappyAsyncErrorVisible;
   NSString *name;
 
   name = [notification name];
+  if ([[notification object] isKindOfClass:[StrappySession class]]) {
+    NSNumber *identifier = [[notification object] sessionIdentifier];
+    if (identifier) {
+      if ([name isEqualToString:StrappySessionPromptDidStartNotification]) {
+        /* Submission precedes the daemon's first persisted active run. */
+        [activePromptIdentifiers_ addObject:identifier];
+      } else if ([name isEqualToString:
+                   StrappySessionPromptDidFinishNotification]) {
+        [activePromptIdentifiers_ removeObject:identifier];
+      }
+    }
+  }
   NSLog(@"StrappyLifecycle AppDelegate longRunningWorkLifecycleDidChange name=%@ inFlightSessions=%lu modelRefresh=%@ databaseScan=%@",
         name,
         (unsigned long)[StrappySession inFlightSessionCount],
         [StrappySession isModelCatalogRefreshInFlight] ? @"YES" : @"NO",
         [FileScanner isDatabaseCatalogScanInFlight] ? @"YES" : @"NO");
   if ([name isEqualToString:StrappySessionPromptDidFinishNotification]) {
+    /* Submit the alert before releasing the final background task. */
     [self postPromptCompletionNotificationIfNeeded:notification];
   }
   [self updateLongRunningWorkActivityIndicator];
@@ -279,7 +305,8 @@ static BOOL StrappyAsyncErrorVisible;
   /* Unknown settings are not proof of permission on iOS. Keep the
    * existing authorized-only policy; submission still cannot prove display
    * for Strappy's unsandboxed/system-app installation. */
-  [center postNotificationWithTitle:title body:body userInfo:nil];
+  NSLog(@"StrappyNotifications completion submission=%d",
+        (int)[center postNotificationWithTitle:title body:body userInfo:nil]);
 }
 
 - (BOOL)longRunningWorkIsActive
@@ -292,8 +319,42 @@ static BOOL StrappyAsyncErrorVisible;
 
 - (void)updateLongRunningWorkActivityIndicator
 {
+  [self updatePromptBackgroundTask];
   [self setLongRunningWorkNetworkActivityIndicatorEnabled:
     [self longRunningWorkIsActive]];
+}
+
+/* Main-thread lifecycle callbacks own one finite task for all active prompts.
+ * Expiration releases it without cancelling daemon work or renewing the task
+ * until the app becomes active again. */
+- (void)updatePromptBackgroundTask;
+{
+  if (![activePromptIdentifiers_ count] &&
+      ![StrappySession hasInFlightSessions]) {
+    [self endPromptBackgroundTask];
+    return;
+  }
+  if (promptBackgroundTaskExpired_ ||
+      promptBackgroundTask_ != UIBackgroundTaskInvalid) return;
+
+  promptBackgroundTask_ = [[UIApplication sharedApplication]
+    beginBackgroundTaskWithExpirationHandler:^{
+      promptBackgroundTaskExpired_ = YES;
+      NSLog(@"StrappyLifecycle prompt background task expired");
+      [self endPromptBackgroundTask];
+    }];
+  NSLog(@"StrappyLifecycle prompt background task %@",
+        promptBackgroundTask_ == UIBackgroundTaskInvalid ?
+          @"unavailable" : @"began");
+}
+
+- (void)endPromptBackgroundTask;
+{
+  UIBackgroundTaskIdentifier identifier = promptBackgroundTask_;
+  if (identifier == UIBackgroundTaskInvalid) return;
+  promptBackgroundTask_ = UIBackgroundTaskInvalid;
+  [[UIApplication sharedApplication] endBackgroundTask:identifier];
+  NSLog(@"StrappyLifecycle prompt background task ended");
 }
 
 - (void)setLongRunningWorkNetworkActivityIndicatorEnabled:(BOOL)enabled
@@ -311,6 +372,7 @@ static BOOL StrappyAsyncErrorVisible;
 
 - (void)dealloc
 {
+  [self endPromptBackgroundTask];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [self setLongRunningWorkNetworkActivityIndicatorEnabled:NO];
 }
