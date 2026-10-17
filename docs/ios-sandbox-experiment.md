@@ -3,6 +3,11 @@
 Branch: `experiment/ios-sandbox-ipc`, started 2026-10-17.
 Target: koolphone5 (expected iOS 8.4.1 / armv7).
 
+Follow-up: the [DEB notification experiment](deb-notifications-experiment.md)
+demonstrated visible local notifications from an unsandboxed DEB app using
+`SBAppUsesLocalNotifications`. An IPA/storage conversion is not required for
+that demonstrated result.
+
 The experiment is authorized to depart from AGENTS.md's unsandboxed DEB-only
 rule. Production packaging and the installed service are unchanged.
 

@@ -166,10 +166,13 @@ behavior, not OS banner presentation.
 The isolated production-delegate and shared notification tests passed on
 `koolphone5` (iOS 8.4.1, armv7) on 2026-10-15. Production permission settings,
 background success/failure banners, foreground suppression, and visible
-alert/badge cleanup remain separate manual checks. Strappy's unsandboxed system-app
-installation can accept requests without displaying notifications; shared API
-submission does not fix or prove display. See the sibling AltivecIntelligence
-`TODO.md` for the deferred device checks.
+alert/badge cleanup remain separate manual checks. The iOS plist declares
+`SBAppUsesLocalNotifications` so SpringBoard registers the system app for local
+notifications. An isolated DEB probe with Strappy's unsandboxed entitlements
+displayed a notification on `koolphone5` on 2026-10-17, confirmed by the owner.
+API submission alone still does not prove display. See
+[the DEB experiment](docs/deb-notifications-experiment.md) for evidence and
+remaining production completion-flow checks.
 
 ### Warning Flags
 

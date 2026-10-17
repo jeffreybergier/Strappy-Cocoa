@@ -25,9 +25,17 @@
 {
   [report_ appendFormat:@"%@\n", line];
   [text_ setText:report_];
-  NSString *path = [NSHomeDirectory()
-    stringByAppendingPathComponent:@"Documents/sandbox-result.txt"];
+  NSString *relative = [[NSBundle mainBundle] objectForInfoDictionaryKey:
+    @"StrappyProbeReportPath"];
+  NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:
+    relative ? relative : @"Documents/sandbox-result.txt"];
   NSError *error = nil;
+  if (relative) {
+    [[NSFileManager defaultManager] createDirectoryAtPath:
+      [path stringByDeletingLastPathComponent] withIntermediateDirectories:YES
+      attributes:nil error:&error];
+    NSLog(@"Notification probe: %@", line);
+  }
   if (![report_ writeToFile:path atomically:YES
       encoding:NSUTF8StringEncoding error:&error]) {
     NSLog(@"Sandbox report write failed: %@", error);
@@ -175,9 +183,21 @@
     if (error && freeSandboxError) freeSandboxError(error);
   }
   [[AILocalNotificationCenter defaultCenter] requestAuthorization];
-  [NSThread detachNewThreadSelector:@selector(runProbe) toTarget:self
-    withObject:nil];
+  if (![[[NSBundle mainBundle] objectForInfoDictionaryKey:
+      @"StrappySkipStorageProbe"] boolValue]) {
+    [NSThread detachNewThreadSelector:@selector(runProbe) toTarget:self
+      withObject:nil];
+  }
   return YES;
+}
+
+- (void)application:(UIApplication *)application
+    didRegisterUserNotificationSettings:(UIUserNotificationSettings *)settings;
+{
+  (void)application;
+  [self appendReport:[NSString stringWithFormat:
+    @"Registered notification types=%lu (alert=4, sound=2, badge=1)",
+    (unsigned long)[settings types]]];
 }
 
 - (void)finishBackgroundTask;
