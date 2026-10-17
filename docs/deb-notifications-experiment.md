@@ -90,6 +90,40 @@ through `dpkg -r` with their exact package IDs if desired:
 `com.altivecintelligence.strappynotificationdebcontrol` and
 `com.altivecintelligence.strappynotificationdebdeclared`.
 
+## Binary comparison: iOS 6 and iOS 8
+
+On 2026-10-17, copies of SpringBoard and the armv7s dyld shared cache were
+searched for the exact `SBAppUsesLocalNotifications` string in ASCII, UTF-16LE,
+and UTF-16BE. The key is present only in iOS 8 SpringBoard among these four
+binaries; it is absent from both inspected iOS 6 binaries.
+
+| Device / OS | Binary | Size (bytes) | Exact key search |
+| --- | --- | ---: | --- |
+| gomadango / iOS 6.1.3 | SpringBoard | 2,761,072 | Absent in all three encodings |
+| gomadango / iOS 6.1.3 | dyld shared cache | 244,601,807 | Absent in all three encodings |
+| koolphone5 / iOS 8.4.1 (12H321) | SpringBoard | 5,501,792 | ASCII at file offset `0x340bb4` |
+| koolphone5 / iOS 8.4.1 (12H321) | dyld shared cache | 431,742,976 | Absent in all three encodings |
+
+The iOS 8 match is in `__TEXT,__cstring`, at VM address `0x344bb4`, beside
+`SBSystemAppNeedsUserNotificationPermission`. Neither UTF-16 encoding matched
+that executable. The copied `SystemVersion.plist` confirms koolphone5's OS
+version and build.
+
+Source paths on each phone were
+`/System/Library/CoreServices/SpringBoard.app/SpringBoard` and
+`/System/Library/Caches/com.apple.dyld/dyld_shared_cache_armv7s`. Copies remain
+under the ignored `build/investigations/gomadango/` and
+`build/investigations/koolphone5/` directories, with koolphone5's version plist
+alongside its binaries. These proprietary artifacts are not checked in.
+
+This confirms a difference between the inspected iOS 6.1.3 and iOS 8.4.1
+binaries and supports treating this plist declaration as an iOS 8 finding,
+not an established fix for iOS 6. It does not establish the key's first release
+(iOS 7 was not inspected), rule out a dynamically constructed key, or prove
+that iOS 6 lacks another notification mechanism. In particular, iOS 6
+SpringBoard contains `usesLocalNotifications`; tracing that implementation
+and Mail's BulletinBoard integration remains a separate investigation.
+
 ## Validation and limits
 
 ### Production follow-up on gomadango
