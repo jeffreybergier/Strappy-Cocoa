@@ -136,8 +136,17 @@ of truth. Reused cells reset their accessory and accessibility status.
 The complete offline suite passed, including new checks for default-read rows,
 unread state on refreshed snapshots, snapshot isolation, and acknowledgment
 clearing. The 20,000-session paging test remains bounded (maximum 1,957 VM steps
-per sequential page in this run). The row appearance still needs visual
-confirmation on the phone after installing this build.
+per sequential page in this run).
+
+Build `b881428` was installed on gomadango with dpkg and one respring on
+2026-10-18. The previous installed payload matched the saved `02b1b34` rollback
+package, and all new installed payload hashes matched the staged build. Daemon
+PID 5138 passed store/execution IPC readiness; SpringBoard PID 5151 logged
+production receiver readiness at 23:55:07 device time. No new crash reports
+appeared during these checks. Matching packages, armv7 symbols and logs are under
+`build/device-runs/gomadango-unread-row-b881428/`, with remote staging at
+`/var/mobile/tmp_altivec/gomadango-unread-row-b881428/`. Visual confirmation of
+the processing and unread row icons remains pending.
 
 ## Implementation validation
 
