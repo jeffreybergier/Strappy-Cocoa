@@ -14,7 +14,7 @@ output.parent.mkdir(parents=True, exist_ok=True)
 subprocess.run([
     "clang", "-Wall", "-Wextra", "-Werror", "-Wno-deprecated-declarations",
     "-Wno-semicolon-before-method-body", "-framework", "Foundation",
-    "-framework", "CoreFoundation",
+    "-framework", "CoreFoundation", "-framework", "AudioToolbox",
     str(Path(__file__).with_suffix(".m")), "-o", str(output),
 ], check=True)
 subprocess.run([str(output)], check=True)

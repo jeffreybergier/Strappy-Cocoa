@@ -6,6 +6,7 @@
  */
 #import <Foundation/Foundation.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <AudioToolbox/AudioToolbox.h>
 #import <objc/runtime.h>
 #include <dlfcn.h>
 #include <errno.h>
@@ -71,6 +72,9 @@ static id XPGet(id target, NSString *name)
   CFRunLoopSourceRef source_;
   dev_t socketDevice_;
   ino_t socketInode_;
+  id sound_;
+  SystemSoundID soundID_;
+  BOOL soundAttempted_;
   XPAddBulletin add_;
   XPWithdrawBulletin withdraw_;
 }
@@ -80,6 +84,8 @@ static id XPGet(id target, NSString *name)
 /* Main-thread teardown: invalidates the borrowed callback target first. */
 - (void)stopReceiving;
 - (void)acceptPacket:(const strappy_notification_packet *)packet;
+/* Main-thread lazy sound creation; returned object is borrowed. */
+- (id)notificationSound;
 @end
 
 static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
@@ -226,6 +232,36 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
     withObject:nil waitUntilDone:NO];
 }
 
+- (id)notificationSound;
+{
+  if (soundAttempted_) return sound_;
+  soundAttempted_ = YES;
+  NSString *path = [[NSBundle bundleForClass:[self class]]
+    pathForResource:@"StrappyChime" ofType:@"wav"];
+  if (!path || AudioServicesCreateSystemSoundID((CFURLRef)[NSURL fileURLWithPath:path],
+      &soundID_) != kAudioServicesNoError) {
+    syslog(LOG_NOTICE, "StrappyProvider: custom sound resource unavailable");
+    return nil;
+  }
+  Class cls = NSClassFromString(@"BBSound");
+  SEL selector = NSSelectorFromString(@"alertSoundWithSystemSoundID:");
+  NSMethodSignature *signature = [cls methodSignatureForSelector:selector];
+  NSUInteger size = 0;
+  if (!signature || [signature numberOfArguments] != 3 ||
+      [signature methodReturnLength] != sizeof(id)) return nil;
+  NSGetSizeAndAlignment([signature getArgumentTypeAtIndex:2], &size, NULL);
+  if (size != sizeof(soundID_)) return nil;
+  NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+  [invocation setTarget:cls];
+  [invocation setSelector:selector];
+  [invocation setArgument:&soundID_ atIndex:2];
+  [invocation invoke];
+  id sound = nil;
+  [invocation getReturnValue:&sound];
+  sound_ = [sound retain];
+  return sound_;
+}
+
 - (void)acceptPacket:(const strappy_notification_packet *)packet;
 {
   if (memcmp(packet->magic, "STN1", 4) ||
@@ -261,6 +297,9 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
       !XPSet(request, @"setDate:", [NSDate date]) ||
       !XPSet(request, @"setDefaultAction:", action) ||
       !XPSetClearable(request)) return;
+  id sound = [self notificationSound];
+  if (sound && XPSet(request, @"setSound:", sound))
+    syslog(LOG_NOTICE, "StrappyProvider: custom sound attached");
   NSString *evicted = nil;
   @synchronized (self) {
     [recent_ addObject:identifier];
@@ -381,6 +420,8 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   [self stopReceiving];
   [history_ release];
   [recent_ release];
+  [sound_ release];
+  if (soundID_) AudioServicesDisposeSystemSoundID(soundID_);
   [super dealloc];
 }
 @end

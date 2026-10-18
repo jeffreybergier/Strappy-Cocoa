@@ -1,9 +1,11 @@
 # Native Strappy notification provider candidate
 
-Current native status: the candidate loaded, registered and opened its socket
-on gomadango. The first test was rolled back prematurely; visible notification
-delivery remains untested. The test package is removed. See the corrected
-diagnosis at the end of this document.
+Current native status: on gomadango, the owner confirmed the native provider's
+Notification Center entry with the correct Strappy name/icon, a visible banner,
+and a Strappy notification-settings entry. The custom-sound test was published;
+its audible result and app-launch behavior are awaiting owner confirmation. The
+test package is currently installed; the production daemon still uses the old
+receiver and the candidate still uses its separate socket.
 
 First implementation milestone: an independently built bundle, not included in
 production packages and not installed on a phone. The existing daemon and
@@ -86,8 +88,8 @@ make -C source/iOS -f notification_provider.mk \
   BUILD_ROOT="$PWD/build/experiments/notification-provider" validate-package analyze
 ```
 
-The ZIP contains `StrappyNotificationProvider.bundle/Info.plist` and its signed
-armv7/arm64 `MH_BUNDLE` executable. It is an offline artifact, not a DEB. The
+The ZIP contains `StrappyNotificationProvider.bundle/Info.plist`, the custom
+`StrappyChime.wav`, and its signed armv7/arm64 `MH_BUNDLE` executable. It is an offline artifact, not a DEB. The
 build directory also retains matching dSYMs. Production packaging migration
 belongs to the next milestone.
 
@@ -257,3 +259,50 @@ Final diagnosis checks: native macOS policy/readiness tests passed; clean
 armv7/arm64 diagnostic and test-package builds, static analysis and package
 validation passed. Full clean production builds for both iOS and all four Mac
 architectures and production package validation passed without compiler warnings.
+
+
+## Visible notification retry and custom chime: 2026-10-18
+
+Retried with package 0.1.0 from commit `321ff20`, SHA-256
+`ee05624b40581b40d4ccbcfca63b5c057494c353d5c122fb914cfe05da7a58e0`,
+using fresh staging `strappy-provider-candidate-v2`. The updated live-socket
+readiness gate passed in SpringBoard PID 2776. With the phone unlocked on the
+Home Screen and DND explicitly off, sent test 1 at 13:43:58. The owner confirmed
+its Notification Center entry had Strappy's correct name and icon. The owner
+was not watching for the first banner, so explicitly requested test 2; after
+publication at 13:44:55, the owner confirmed seeing its banner. The owner also
+confirmed the Strappy entry in Settings > Notifications and enabled banners
+and sounds there. No app-owned code changed those preferences.
+
+At the owner's request, added an original 0.65-second two-note chime, mono
+16-bit PCM WAV at 22,050 Hz. The provider lazily creates a SystemSoundID from its
+bundle resource, then uses the runtime-checked BBSound factory
+`alertSoundWithSystemSoundID:` and attaches that sound to the bulletin. Playback
+is still controlled by system settings. It does not play sound independently
+through AudioServices, change volume or force sound through the silent switch.
+The retained iOS 6 framework metadata supplied the factory signature. The sound
+object and SystemSoundID are owned until provider teardown; history is released
+before disposing the sound. Missing resources/APIs leave the alert silent.
+
+The separately packaged candidate is now version 0.1.1. Upgraded only the test
+package with SHA-256
+`68d6b3ef162c31b93a33e8f449da4ec647d54475c755c300cdcc911d992f6bb0`,
+using fresh staging `strappy-provider-candidate-v3`, then restarted SpringBoard
+once (PID 2972). The live-socket check passed. The owner confirmed the Home
+Screen again; silent-switch/volume state was requested but not separately
+reported. Sent test 3 at 13:47:42. Logs show `custom sound attached` and
+`publication returned`. These logs do not prove audible playback or visibility;
+owner confirmation for that send and for tapping to open the app is pending.
+
+Production file fingerprints and package version remained unchanged, strappyd
+retained PID 1568, and no new crash reports appeared at the pre-cleanup checks.
+The test package remains installed pending observation and cleanup. Matching
+packages, armv7 symbols and logs are retained below
+`build/device-runs/gomadango-provider-candidate-v2/` and `...-v3/`; remote staging
+uses the same directory basenames under `/var/mobile/tmp_altivec/`.
+
+Policy/readiness tests passed, including sound attachment through the actual
+provider path with fake private classes. Clean candidate builds, static analysis
+and ZIP/DEB validation passed for armv7/arm64. Full clean production builds and
+package validation passed for both iOS and all four Mac architectures without
+compiler warnings. Logs use `build/provider-sound-*.log`.

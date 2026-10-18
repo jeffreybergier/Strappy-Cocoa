@@ -33,6 +33,7 @@ FIELD(setTitle, title)
 FIELD(setMessage, message)
 FIELD(setDate, date)
 FIELD(setDefaultAction, defaultAction)
+FIELD(setSound, sound)
 - (void)setClearable:(BOOL)value;
 {
   assert(value == YES);
@@ -59,6 +60,7 @@ static void Add(id provider, id bulletin)
   (void)provider;
   assert([[bulletin sectionID] isEqual:@"com.altivecintelligence.Strappy"]);
   assert([[bulletin defaultAction] isEqual:[bulletin sectionID]]);
+  assert([[bulletin sound] isEqual:@"fixture-sound"]);
   ++added;
   if (throwOnAdd) [NSException raise:@"Fixture" format:@"publication failed"];
 }
@@ -71,6 +73,10 @@ static void Withdraw(id provider, NSString *record)
 @interface FixtureProvider : XPStrappyNotificationProvider
 @end
 @implementation FixtureProvider
+- (id)notificationSound;
+{
+  return @"fixture-sound";
+}
 - (void)prepare;
 {
   /* The fixture supplies the runtime dependencies normally resolved on iOS 6.
