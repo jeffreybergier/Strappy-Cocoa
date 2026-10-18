@@ -1,5 +1,10 @@
 # Native Strappy notification provider candidate
 
+Current native status: the candidate loaded, registered and opened its socket
+on gomadango. The first test was rolled back prematurely; visible notification
+delivery remains untested. The test package is removed. See the corrected
+diagnosis at the end of this document.
+
 First implementation milestone: an independently built bundle, not included in
 production packages and not installed on a phone. The existing daemon and
 Substrate receiver remain unchanged. This is an iOS 6 runtime candidate; the
@@ -148,17 +153,20 @@ The test runner is `source/daemon/tests/notification_provider_device/device-test
 Its `remove` action followed by an explicit `respring` is the rollback; a second
 root SSH shell was available throughout. No production package was replaced.
 
-**Result: candidate readiness failed; notification display was not tested.**
+**Corrected result: candidate readiness succeeded; notification display was not
+tested.** The initial readiness-failure report below was premature. Later
+retrieval of syslog established registration and socket readiness in the tested
+SpringBoard process; see the diagnosis below.
 After installation and one restart, SpringBoard PID changed from 1873 to 2512.
-The candidate socket was absent and there were no candidate registration or
-section-query messages in syslog. The production receiver did log readiness.
+The immediate checks found no candidate socket and the captured syslog snapshots
+contained no candidate registration or section-query messages. The production receiver did log readiness.
 No test datagram was sent. This does not establish whether the bundle failed to
 load, its initializer returned nil, or the server rejected/ignored its section:
-the candidate currently has no class-load or initializer-entry logging. A
+the candidate has no class-load or initializer-entry logging. A
 conflict with the existing Strappy section is only a hypothesis. The successful
 isolated probe used a separate identity and resolved publication symbols later,
-at send time; the candidate resolves both functions in its initializer. Inspect
-those differences and add early lifecycle diagnostics before another test.
+at send time; the candidate resolves both functions in its initializer. Those were investigation hypotheses, not established causes. The later evidence
+below supersedes the failed-initialization interpretation.
 
 Removed the test package and restarted SpringBoard once more (PID 2593).
 The bundle and sender were absent; the original receiver logged readiness.
@@ -179,3 +187,73 @@ passed for both iOS and all four Mac architectures without compiler warnings;
 production package validation also passed. Logs use
 `build/notification-provider-device-{policy,build}.log` and
 `build/provider-device-production-{clean,build,package}.log`.
+
+
+## Diagnosis and corrected readiness test: 2026-10-18
+
+The original candidate did load and register. A later read of the phone's syslog
+contains these events in the original test process, SpringBoard PID 2512:
+
+```
+Oct 18 13:18:32 ... StrappyProvider: dataProviderDidLoad
+Oct 18 13:18:32 ... StrappyProvider: default section requested
+Oct 18 13:18:32 ... StrappyProvider: candidate receiver ready
+Oct 18 13:18:32 ... StrappyProvider: list filter=0 count=5 cleared=none
+```
+
+The production receiver had logged readiness at 13:18:29. The test checked too
+soon after restarting SpringBoard and treated the absence in the captured log
+snapshots as a failure. These later-retrieved events establish candidate
+registration, default section queries, IPC readiness and a bulletin-list query.
+They do not establish visible notification delivery, icon resolution, tap
+routing or dismissal: no notification was sent before the premature rollback.
+The post-removal absence of a Settings entry says nothing about visibility
+while the candidate was installed.
+
+Evidence is retained as
+`build/device-runs/gomadango-provider-candidate-v1/provider-syslog-late.log`.
+No provider change was needed to establish this result.
+
+Additional foreground diagnostics on gomadango, run as mobile from staging,
+confirmed that the tested binary loads, the exception-runtime imports and both
+publication/withdrawal symbols resolve, the bundle's principal class conforms
+to the runtime BBDataProvider protocol, and its initializer succeeds with
+CoreFoundation 793.00. They did not invoke server registration, publish, reinstall
+anything or restart SpringBoard. The final reusable diagnostic is
+`source/daemon/tests/notification_provider_device/loader.m`, built with
+`source/iOS/notification_provider_loader.mk`. Pass a staged `.bundle` directory.
+The loader intentionally leaves image teardown to process exit after releasing
+the initialized candidate. It must not invoke `dataProviderDidLoad`.
+
+Offline inspection of the retained iOS 6 BulletinBoard loader also showed that
+`_loadDataProviderPluginBundle:` uses the principal class and protocol conformance,
+and `_addDataProvider:sortSectionsNow:` calls `dataProviderDidLoad`. Its duplicate
+section path logs a warning but continues registration; that hypothesis did not
+explain the originally missing callback. Generated disassembly remains ignored
+under `build/provider-*-annotated.txt`. The retained cache has rebased pointers;
+analysis accounted for the 0x02003000 pointer slide rather than treating those
+pointers as unslid virtual addresses.
+
+The device runner now has an explicit `ready` action: poll for up to 30 seconds
+using the sender's payload-free Unix datagram `connect` check, then report an
+actual live receiver. `send` repeats this check before sending. A leftover socket
+pathname is insufficient: a stale endpoint from the removed candidate remains
+on the phone, and the new check correctly returned exit 1 against it. The next
+provider startup already has lock-protected stale-socket recovery. Syslog is
+supporting evidence, not the readiness gate. After a future install/respring,
+run `sh device-test.sh ready` before asking the owner to observe a notification.
+
+Native macOS tests now cover absent, stale and live endpoints, verify that the
+readiness check sends no datagram, and check that an explicit test send still
+produces the expected packet. No further SpringBoard restart or notification
+test occurred during diagnosis. Production hashes and SpringBoard/daemon PIDs
+were unchanged by the foreground checks. Logs are
+`build/provider-{loader,bundle,receiver,readiness}-native.log`,
+`build/provider-readiness-tests.log`, `build/provider-loader-build.log`,
+`build/provider-readiness-build.log`, and
+`build/provider-diagnosis-production-{clean,build,package,state}.log`.
+
+Final diagnosis checks: native macOS policy/readiness tests passed; clean
+armv7/arm64 diagnostic and test-package builds, static analysis and package
+validation passed. Full clean production builds for both iOS and all four Mac
+architectures and production package validation passed without compiler warnings.

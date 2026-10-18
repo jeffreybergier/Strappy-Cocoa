@@ -25,7 +25,22 @@ case "${1:-}" in
   dpkg -i package.deb > install.log 2>&1
   ;;
  respring) /usr/bin/killall -TERM SpringBoard ;;
+ ready)
+  # Socket connection is authoritative; syslog can be delayed. Bound the wait.
+  attempt=0
+  while [ "$attempt" -lt 30 ]; do
+    if su mobile -c "/usr/libexec/strappy-provider-test ready" > ready.log 2>&1; then
+      cat ready.log
+      exit 0
+    fi
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+  echo 'No live candidate receiver within 30 seconds.' >&2
+  exit 1
+  ;;
  send)
+  su mobile -c "/usr/libexec/strappy-provider-test ready" > ready.log 2>&1
   case "${2:-}" in 1|2|3) ;; *) exit 2 ;; esac
   [ ! -e "sent-$2" ]
   touch "sent-$2"
