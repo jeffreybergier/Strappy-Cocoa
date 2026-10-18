@@ -104,7 +104,16 @@ an explicit retry with the same key. Logs are retained under
 The complete offline suite passed. Final clean builds passed without compiler
 warnings for iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64, along with package
 validation and rootful/rootless notification payload checks. The synchronous
-Send build has not yet replaced the installed `f37bf03` build on gomadango.
+Send build `02b1b34` was subsequently installed on gomadango with dpkg, followed
+by one respring. The previous payload matched the retained `f37bf03` rollback
+package, and installed hashes matched the new package. strappyd PID 4993 passed
+the store/execution IPC readiness probe. SpringBoard PID 5006 logged production
+receiver readiness at 23:36:29 device time on 2026-10-18. No new crash reports
+appeared during installation/readiness checks. Packages, manifests, matching
+armv7 symbols and logs are retained in
+`build/device-runs/gomadango-sync-send-02b1b34/`; remote staging uses
+`/var/mobile/tmp_altivec/gomadango-sync-send-02b1b34/`. Suspended-app completion
+and visible notification testing of this build remain pending.
 
 ## Implementation validation
 
