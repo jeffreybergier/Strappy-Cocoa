@@ -147,7 +147,7 @@ static BOOL StrappyContextRoundActionValues(
 - (void)serviceRefreshDidFinish:(StrappyAsyncResult *)result;
 - (BOOL)sessionPromptIsInFlight;
 - (void)updateSendingStateFromSession;
-- (void)beginSendingPrompt:(NSString *)prompt;
+- (BOOL)beginSendingPrompt:(NSString *)prompt;
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
 - (NSString *)writeCurrentHTML;
@@ -587,11 +587,11 @@ static BOOL StrappyContextRoundActionValues(
   return path;
 }
 
-- (void)promptSendViewController:(PromptSendViewController *)controller
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
                  didSubmitPrompt:(NSString *)prompt
 {
   (void)controller;
-  [self beginSendingPrompt:prompt];
+  return [self beginSendingPrompt:prompt];
 }
 
 - (void)promptSendViewControllerDidCancelPrompt:
@@ -636,22 +636,22 @@ static BOOL StrappyContextRoundActionValues(
   return requested;
 }
 
-- (void)beginSendingPrompt:(NSString *)prompt
+- (BOOL)beginSendingPrompt:(NSString *)prompt
 {
   NSString *promptToSend;
   NSError *startError;
   BOOL didStartPrompt;
 
   if (sending_) {
-    return;
+    return NO;
   }
 
   if ((session_ == nil) || [self sessionPromptIsInFlight]) {
-    return;
+    return NO;
   }
 
   if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {
-    return;
+    return NO;
   }
 
   promptToSend = [prompt copy];
@@ -684,6 +684,7 @@ static BOOL StrappyContextRoundActionValues(
     [result release];
   }
   [promptToSend release];
+  return didStartPrompt;
 }
 
 - (void)sessionPromptDidStart:(NSNotification *)notification

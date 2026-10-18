@@ -75,6 +75,37 @@ against the last badge count. Alert submission and badge delivery are independen
 a banner can appear before its badge update. A later open cannot retract an alert
 already submitted. System settings still control visible presentation and sound.
 
+## Synchronous Send and app suspension
+
+Send now performs one synchronous IPC submission on the main thread. The payload
+includes the prompt, changed session options, and a persisted retry key. Success
+means the daemon has committed acceptance; model execution remains in strappyd.
+Each IPC connect/handshake/send/reply stage has a two-second timeout; a disconnected
+service can therefore take multiple stages, rather than a single total two-second
+deadline. Submission does not automatically retry while holding the UI thread.
+Rejection preserves the editable prompt and option draft. A lost reply also
+preserves the saved key, so retrying the same prompt resolves acceptance without
+duplicating daemon work. Both platform composers clear text only on acceptance.
+
+The iOS app no longer requests background execution time for prompts. It still
+ends observation on deactivation/backgrounding and reacquires it on activation.
+The system can suspend the app while strappyd completes work and SpringBoard
+presents the notification and badge. The earlier visual tests recorded here validated the
+notification policy with the old background task present; actual suspended-app
+completion remains a separate follow-up device test after this change.
+
+The updated native submission fixture passed on koolphone5 (iOS 8.4.1, armv7):
+a simulated 300 ms option-save delay held Send until rejection (about 516 ms
+including local persistence), rejection preserved the option draft, and a lost
+reply retained the retry identity and 1 MiB Unicode payload for acceptance on
+retry. The control-client harness verifies no automatic submission replay and
+an explicit retry with the same key. Logs are retained under
+`build/sync-send-native-final.log` and `build/sync-send-tests-final.log`.
+The complete offline suite passed. Final clean builds passed without compiler
+warnings for iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64, along with package
+validation and rootful/rootless notification payload checks. The synchronous
+Send build has not yet replaced the installed `f37bf03` build on gomadango.
+
 ## Implementation validation
 
 The offline execution suite and dedicated attention harness cover observed and

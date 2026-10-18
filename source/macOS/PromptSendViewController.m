@@ -545,9 +545,8 @@ static NSColor *StrappyInputBezelHighlightColor(void) { return XPColorControlHig
     return;
   }
 
-  if (delegate_ != nil) {
-    [delegate_ promptSendViewController:self didSubmitPrompt:trimmed];
-  }
+  if (delegate_ == nil ||
+      ![delegate_ promptSendViewController:self didSubmitPrompt:trimmed]) return;
 
   [textView_ setString:@""];
   [self updateActionControls];

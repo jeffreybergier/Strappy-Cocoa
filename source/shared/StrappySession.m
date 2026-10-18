@@ -209,7 +209,7 @@ static NSString *StrappySessionStringFromCString(char *value)
                                 renderContext:
                 (const strappy_session_webview_render_context *)renderContext
                                         error:(NSError **)error;
-- (void)sendPromptInBackground:(NSDictionary *)request;
+- (BOOL)submitPromptRequest:(NSDictionary *)request error:(NSError **)error;
 - (void)promptDidFinish:(NSDictionary *)result;
 @end
 
@@ -1081,15 +1081,8 @@ static uint64_t StrappyObservationToken;
       [[NSUserDefaults standardUserDefaults] removeObjectForKey:pendingKey];
       [[NSUserDefaults standardUserDefaults] synchronize];
     }
-    else if (!active && [[pending objectForKey:@"prompt"] isKindOfClass:[NSString class]] &&
-        [[pending objectForKey:@"key"] isKindOfClass:[NSString class]] &&
-        [[pending objectForKey:@"key"] lengthOfBytesUsingEncoding:NSUTF8StringEncoding] == 64) {
-      /* Resume only the saved submission identity. A committed retry returns its
-       * original run, including interrupted/terminal states; it never replays it. */
-      strappy_run_destroy(&run);
-      (void)[self beginResponsesPrompt:[pending objectForKey:@"prompt"] context:nil error:nil];
-      return;
-    }
+    /* Resolve persisted acceptance above, but leave an unknown submission for
+     * an explicit Send retry. Refresh callbacks must not resubmit work. */
     terminalChanged = run.id > 0 && (observedServiceRun_ != run.id || observedServiceState_ != run.state);
     if (run.state == STRAPPY_RUN_FAILED) terminalError = @"The prompt failed. Check the provider account and stored request details.";
     else if (run.state == STRAPPY_RUN_INTERRUPTED) terminalError = @"The background service stopped during this prompt. It was not replayed; check any tool effects before retrying.";
@@ -1690,7 +1683,7 @@ static uint64_t StrappyObservationToken;
     nil];
 }
 
-+ (NSError *)errorFromCString:(char *)message
++ (NSError *)errorFromCString:(const char *)message
 {
   NSString *description;
   NSDictionary *userInfo;
@@ -4001,14 +3994,11 @@ static uint64_t StrappyObservationToken;
     [StrappyPendingSubmissions addObject:sessionIdentifier_];
   }
   @synchronized(self) { promptSubmissionPending_ = YES; promptInFlight_ = YES; }
-  [StrappyAsync postNotificationName:StrappySessionPromptDidStartNotification object:self];
-  [NSThread detachNewThreadSelector:@selector(sendPromptInBackground:) toTarget:self withObject:request];
-  return YES;
+  return [self submitPromptRequest:request error:error];
 }
 
-- (void)sendPromptInBackground:(NSDictionary *)request
+- (BOOL)submitPromptRequest:(NSDictionary *)request error:(NSError **)error
 {
-  NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   unsigned char *payload = NULL;
   NSData *prompt = [[request objectForKey:@"prompt"] dataUsingEncoding:NSUTF8StringEncoding];
   uint64_t session = (uint64_t)[sessionIdentifier_ longLongValue];
@@ -4054,10 +4044,9 @@ static uint64_t StrappyObservationToken;
     }
     @synchronized(self) { promptSubmissionPending_ = NO; }
     @synchronized([StrappySession class]) { [StrappyPendingSubmissions removeObject:sessionIdentifier_]; }
-    [self performSelectorOnMainThread:@selector(promptDidFinish:)
-      withObject:[NSDictionary dictionaryWithObject:preflightError forKey:@"error"] waitUntilDone:NO];
-    [pool release];
-    return;
+    @synchronized(self) { promptInFlight_ = NO; }
+    if (error) *error = [StrappySession errorFromCString:[preflightError UTF8String]];
+    return NO;
   }
   strappy_ipc_put32(payload, (uint32_t)(session >> 32)); strappy_ipc_put32(payload+4, (uint32_t)session);
   memcpy(payload+8, [[request objectForKey:@"key"] UTF8String], 64);
@@ -4090,12 +4079,14 @@ static uint64_t StrappyObservationToken;
   if (!received || status != STRAPPY_IPC_OK) {
     NSString *message = !received ? @"Acceptance is unknown. Retry the same prompt to reconnect safely." :
         (status == STRAPPY_IPC_BUSY ? @"This session already has an active prompt, or the service has reached its execution limit." : @"The service could not accept this prompt.");
-    [self performSelectorOnMainThread:@selector(promptDidFinish:)
-        withObject:[NSDictionary dictionaryWithObject:message forKey:@"error"] waitUntilDone:NO];
+    @synchronized(self) { promptInFlight_ = NO; }
+    if (error) *error = [StrappySession errorFromCString:[message UTF8String]];
+    return NO;
   } else {
+    [StrappyAsync postNotificationName:StrappySessionPromptDidStartNotification object:self];
     [self performSelectorOnMainThread:@selector(serviceRunChanged:) withObject:nil waitUntilDone:NO];
   }
-  [pool release];
+  return YES;
 }
 
 - (void)promptDidFinish:(NSDictionary *)result

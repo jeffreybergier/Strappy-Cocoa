@@ -1,10 +1,6 @@
 #import <UIKit/UIKit.h>
 
-@interface AppDelegate : UIResponder <UIApplicationDelegate> {
-  UIBackgroundTaskIdentifier promptBackgroundTask_;
-  NSMutableSet *activePromptIdentifiers_;
-  BOOL promptBackgroundTaskExpired_;
-}
+@interface AppDelegate : UIResponder <UIApplicationDelegate>
 
 @property (nonatomic, strong) UIWindow *window;
 

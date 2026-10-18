@@ -5,7 +5,7 @@
 @class PromptSendViewController;
 
 @protocol PromptSendViewControllerDelegate
-- (void)promptSendViewController:(PromptSendViewController *)controller
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
                  didSubmitPrompt:(NSString *)prompt;
 - (void)promptSendViewControllerDidCancelPrompt:
     (PromptSendViewController *)controller;

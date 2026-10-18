@@ -236,7 +236,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)serviceRefreshDidFinish:(StrappyAsyncResult *)result;
 - (BOOL)sessionPromptIsInFlight;
 - (void)updateSendingStateFromSession;
-- (void)beginSendingPrompt:(NSString *)prompt;
+- (BOOL)beginSendingPrompt:(NSString *)prompt;
 - (void)setPromptCancellationRequested:(BOOL)requested;
 - (BOOL)promptCancellationRequested;
 - (void)handleActionURL:(NSURL *)url;
@@ -972,11 +972,11 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   return path;
 }
 
-- (void)promptSendViewController:(PromptSendViewController *)controller
+- (BOOL)promptSendViewController:(PromptSendViewController *)controller
                   didSubmitPrompt:(NSString *)prompt
 {
   (void)controller;
-  [self beginSendingPrompt:prompt];
+  return [self beginSendingPrompt:prompt];
 }
 
 - (void)promptSendViewControllerDidCancelPrompt:
@@ -1023,22 +1023,22 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   return requested;
 }
 
-- (void)beginSendingPrompt:(NSString *)prompt
+- (BOOL)beginSendingPrompt:(NSString *)prompt
 {
   NSError *startError;
   BOOL didStartPrompt;
 
   if ([self tearingDown]) {
-    return;
+    return NO;
   }
   if ([self sending]) {
-    return;
+    return NO;
   }
   if (([self session] == nil) || [self sessionPromptIsInFlight]) {
-    return;
+    return NO;
   }
   if (![prompt isKindOfClass:[NSString class]] || ([prompt length] == 0U)) {
-    return;
+    return NO;
   }
 
   [self logLifecycleEvent:@"beginSendingPrompt"];
@@ -1064,6 +1064,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     [self sendPromptDidFinish:
       [NSDictionary dictionaryWithObject:errorMessage forKey:@"error"]];
   }
+  return didStartPrompt;
 }
 
 - (void)sessionPromptDidStart:(NSNotification *)notification

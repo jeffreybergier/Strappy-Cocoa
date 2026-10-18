@@ -51,7 +51,7 @@ int strappy_test_command(unsigned int operation, const unsigned char *payload,
   unsigned int size;
   char json[4097];
   cJSON *settings;
-  assert(![NSThread XP_isMainThread]);
+  assert([NSThread XP_isMainThread]);
   assert(operation == STRAPPY_IPC_SUBMIT_WITH_OPTIONS && length > 76);
   size = strappy_ipc_get32(payload+72);
   assert(size > 0 && size < length-76);
@@ -107,12 +107,7 @@ static void pump(void)
 {
   [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:.01]];
 }
-static void waitFinish(void)
-{
-  NSTimeInterval deadline = [NSDate timeIntervalSinceReferenceDate] + 30;
-  while (!finished && [NSDate timeIntervalSinceReferenceDate] < deadline) pump();
-  assert(finished);
-}
+
 static OptionsProbeSession *session(NSNumber *identifier, StrappySessionOptions *options)
 {
   /* Avoid initialization's DB read and queued service refresh: this fixture is
@@ -211,7 +206,7 @@ int main(void)
   OptionsProbeSession *s = session(identifier,options), *other;
   OptionsProbeObserver *observer = [[[OptionsProbeObserver alloc] init] autorelease];
   NSTimeInterval start, elapsed;
-  int i, ticks = 0;
+  int i;
   NSError *error = nil;
   NSMutableData *bytes = [NSMutableData dataWithLength:STRAPPY_IPC_MAX_PROMPT_BYTES];
   unsigned char *raw = [bytes mutableBytes];
@@ -249,19 +244,17 @@ int main(void)
   assert([[s optionsWithError:NULL] roundLimit] == 7); /* invalidation preserves draft */
   failSave = 1;
   start = [NSDate timeIntervalSinceReferenceDate];
-  assert([s beginResponsesPrompt:largePrompt context:nil error:&error]);
+  assert(![s beginResponsesPrompt:largePrompt context:nil error:&error]);
   elapsed = [NSDate timeIntervalSinceReferenceDate]-start;
   printf("Send with a 300 ms settings transport: %.3f ms on main thread\n",elapsed*1000);
-  assert(elapsed < 1.0);
-  assert(![other updateOptions:options changedFields:StrappySessionOptionBash error:NULL]);
-  while (!finished) { pump(); ++ticks; assert(ticks < 500); }
-  printf("Delayed save: %d main-loop ticks, %d saves, %d submissions; %s\n", ticks, saves, submissions, [failure UTF8String]);
-  assert(ticks >= 2 && failure != nil && submissions == 0);
+  assert(elapsed >= .3 && elapsed < 2.0);
+  assert(error != nil && submissions == 0 && ![s isPromptInFlight]);
   assert([[s optionsWithError:NULL] roundLimit] == 7);
   assert([[NSUserDefaults standardUserDefaults] objectForKey:pendingKey] == nil);
   failSave = 0; loseReply = 1; finished = 0;
-  assert([s beginResponsesPrompt:largePrompt context:nil error:&error]);
-  waitFinish();
+  error = nil;
+  assert(![s beginResponsesPrompt:largePrompt context:nil error:&error]);
+  assert(error != nil && ![s isPromptInFlight]);
   assert(saves == 2 && submissions == 1);
   assert(![s updateOptions:options changedFields:StrappySessionOptionRoundLimit error:NULL]);
   assert([[[NSUserDefaults standardUserDefaults] dictionaryForKey:pendingKey] objectForKey:@"optionsCommand"] != nil);
@@ -275,7 +268,7 @@ int main(void)
   testCredentialCache(observer);
   [[NSNotificationCenter defaultCenter] removeObserver:observer];
   [[NSUserDefaults standardUserDefaults] synchronize];
-  puts("PASS: shared drafts, field merge, invalidation, responsive Send, failed save blocks submission, durable retry preserves 1 MiB Unicode payload; oversized prompt rejected");
+  puts("PASS: shared drafts, field merge, invalidation, synchronous accepted Send, failed save blocks submission, durable retry preserves 1 MiB Unicode payload; oversized prompt rejected");
   [failure release];
   [pool release];
   return 0;

@@ -363,6 +363,10 @@ completion integration is now implemented below, pending native validation.
 
 ### Production follow-up on gomadango
 
+Historical workaround: the app-owned alert/background-task approach below has
+been superseded by daemon-owned notifications and synchronous Send. See the
+[current design](session-unread-notification-plan.md#synchronous-send-and-app-suspension).
+
 The rootful 1.2.0 package was installed on gomadango (iPhone5,2, iOS 6.1.3).
 Daemon IPC v8 passed, but the owner saw no completion alert. Runtime logs showed
 the app entering the background at 12:10:36 and receiving the prompt completion

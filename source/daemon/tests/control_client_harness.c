@@ -91,8 +91,8 @@ int main(int argc, char **argv)
     result = strappy_store_client_mutation(STRAPPY_IPC_MUTATE,command,&status);
     assert(result && status == STRAPPY_IPC_OK); free(result);
     cJSON_Delete(command);
-    /* Production client sends a heap-backed maximum-sized prompt and retries
-     * exactly the same body after the fixture loses its first acknowledgment. */
+    /* Production client returns unknown acceptance without automatic replay.
+     * An explicit retry sends the same maximum-sized body and request key. */
     {
         unsigned int length = STRAPPY_IPC_PROMPT_PREFIX + STRAPPY_IPC_MAX_PROMPT_BYTES;
         unsigned char *payload = malloc(length);
@@ -100,6 +100,7 @@ int main(int argc, char **argv)
         memset(payload,'x',length);
         strappy_ipc_put32(payload,0); strappy_ipc_put32(payload+4,1);
         memset(payload+8,'a',64);
+        assert(!strappy_store_client_command(STRAPPY_IPC_SUBMIT_PROMPT,payload,length,&status));
         assert(strappy_store_client_command(STRAPPY_IPC_SUBMIT_PROMPT,payload,length,&status));
         assert(status == STRAPPY_IPC_OK);
         free(payload);

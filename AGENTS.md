@@ -256,11 +256,16 @@ House style for Strappy source:
 18. The database is the source of truth for committed UI state. Write database
     changes first, then refresh or render the stored value. Active-session option
     edits are an explicit exception: keep a process-local draft shared by session
-    identity, with no IPC or persistence on each edit. Send captures the draft
-    and saves its changed fields on a worker before submitting the prompt. A
-    failed save must prevent submission and retain the editable draft. Service
-    refreshes must not overwrite unsent drafts. Unsent drafts survive controller
-    replacement but are discarded when the UI process exits.
+    identity, with no IPC or persistence on each edit. Send synchronously submits
+    the prompt and changed options through bounded main-thread IPC, returning
+    success only after durable daemon acceptance.
+    Preserve the editable draft on rejection or timeout and reuse the saved
+    request key when acceptance is unknown. Do not hold an iOS background task
+    for submission or execution; strappyd owns execution and notifications.
+    Service refreshes must not overwrite unsent drafts or resubmit an unknown
+    prompt; resolve persisted acceptance or wait for an explicit Send retry.
+    Unsent drafts survive controller replacement but are discarded when the UI
+    process exits.
 19. Shared C/database code owns conversation-visible state. Platform UI code
     must not synthesize prompt, response item, tool, API error, or cancellation
     rows before they exist in SQLite; it should request the shared core to

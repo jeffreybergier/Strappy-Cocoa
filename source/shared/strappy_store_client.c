@@ -246,7 +246,11 @@ static int strappy_store_exchange_once(unsigned int operation, const unsigned ch
             m.request_id = identifier; m.length = length;
             if (length > STRAPPY_IPC_MAX_PAYLOAD) m.external_payload = payload;
             else if (length) memcpy(m.payload, payload, length);
-            ok = strappy_ipc_send(fd, &m, length > STRAPPY_IPC_MAX_PAYLOAD ? 10000 : 2000) == 0 && strappy_ipc_receive(fd, &m, timeout) == 0 &&
+            /* Submission uses the short control budget even for large prompts. */
+            ok = strappy_ipc_send(fd, &m,
+                operation == STRAPPY_IPC_SUBMIT_WITH_OPTIONS || operation == STRAPPY_IPC_SUBMIT_PROMPT ?
+                2000 : (length > STRAPPY_IPC_MAX_PAYLOAD ? 10000 : 2000)) == 0 &&
+                strappy_ipc_receive(fd, &m, timeout) == 0 &&
                 m.kind == STRAPPY_IPC_REPLY && m.operation == operation && m.request_id == identifier;
         }
         if (!ok) { close(fd); *connection = -1; }
@@ -291,6 +295,9 @@ static int strappy_store_exchange(unsigned int operation, const unsigned char *p
 int strappy_store_client_command(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status)
 {
+    /* One short submission attempt; the saved key resolves an ambiguous reply. */
+    if (operation == STRAPPY_IPC_SUBMIT_WITH_OPTIONS || operation == STRAPPY_IPC_SUBMIT_PROMPT)
+        return strappy_store_exchange(operation,payload,length,status,NULL,1,2000);
     return strappy_store_exchange(operation,payload,length,status,NULL,3,10000);
 }
 char *strappy_store_client_mutation(unsigned int operation, const cJSON *command, unsigned int *status)

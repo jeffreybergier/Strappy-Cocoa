@@ -706,13 +706,12 @@ static NSString *StrappyMessageModelStringForRow(NSDictionary *row,
     return;
   }
 
-  [[self textView] setText:@""];
-  [self updateExpansion];
-  [self updateControls];
-
   if ([[self delegate] respondsToSelector:
-        @selector(promptSendViewController:didSubmitPrompt:)]) {
-    [[self delegate] promptSendViewController:self didSubmitPrompt:prompt];
+        @selector(promptSendViewController:didSubmitPrompt:)] &&
+      [[self delegate] promptSendViewController:self didSubmitPrompt:prompt]) {
+    [[self textView] setText:@""];
+    [self updateExpansion];
+    [self updateControls];
   }
 }
 
