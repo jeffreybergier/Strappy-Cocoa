@@ -458,7 +458,8 @@ Installed package 0.1.5, SHA-256
 `36abdc02dea4775454e86933e3b7de72cd79b167af76151e207d5ec58bdffbc8`,
 using staging `strappy-provider-candidate-v8`, with one SpringBoard restart.
 Live socket readiness passed; production hashes/package version were unchanged.
-Owner readiness/visible confirmation for badge 4 is pending.
+The owner subsequently confirmed the Home Screen and visible badge 4, as
+recorded below.
 
 Native macOS fixtures exercise the actual badge bridge with a fake icon,
 checking Strappy identity, literal values 4..7, no ordinary-packet mutations,
@@ -470,5 +471,12 @@ reject 100. Matching package, armv7 symbols and device logs are retained in
 Native fixtures passed. Clean candidate armv7/arm64 builds, static analysis,
 and ZIP/DEB validation passed. Full clean production builds for both iOS
 architectures and all four Mac architectures and package validation passed
-without compiler warnings. The test package remains installed; no badge has
-yet been set by this new candidate, pending the owner's readiness.
+without compiler warnings. The test package remains installed.
+
+After the owner confirmed the Home Screen, sent test 4 at approximately
+16:22:20. SpringBoard PID 3818 logged publication and `test badge 4 set;
+readback matches=1` at 16:22:19. **The owner confirmed Strappy's icon visibly
+showed 4.** This establishes badge display through the candidate's icon-model
+bridge, alongside the earlier banner, Notification Center and Glass sound
+confirmations. Badge 4 remains set; replacement/clearing and production unread
+count policy were not tested or implemented by this probe.
