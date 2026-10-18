@@ -128,3 +128,54 @@ Ignored logs are `build/notification-provider-build.log`,
 `build/notification-provider-native-test.log`,
 `build/notification-provider-offline.log`, and
 `build/notification-provider-production-{clean,build,package}.log`.
+
+## First candidate device test: 2026-10-18
+
+The owner authorized testing on gomadango and confirmed the Home Screen before
+and after the test. Installed the separate package built by
+`source/iOS/notification_provider_device.mk`, version 0.1.0, SHA-256:
+
+```
+2c60b18ad281d157b763ed0b5b842eddf6afaca41303bf992c4f2a6ca9a65d96
+```
+
+Its three payload files are the native provider executable and plist beneath
+`/System/Library/BulletinBoardPlugins/StrappyNotificationProvider.bundle`, and
+`/usr/libexec/strappy-provider-test`. The sender accepts only test numbers 1–3,
+uses fixed diagnostic text and high diagnostic run IDs, and targets only the
+candidate socket. The package has no lifecycle scripts or production dependency.
+The test runner is `source/daemon/tests/notification_provider_device/device-test.sh`.
+Its `remove` action followed by an explicit `respring` is the rollback; a second
+root SSH shell was available throughout. No production package was replaced.
+
+**Result: candidate readiness failed; notification display was not tested.**
+After installation and one restart, SpringBoard PID changed from 1873 to 2512.
+The candidate socket was absent and there were no candidate registration or
+section-query messages in syslog. The production receiver did log readiness.
+No test datagram was sent. This does not establish whether the bundle failed to
+load, its initializer returned nil, or the server rejected/ignored its section:
+the candidate currently has no class-load or initializer-entry logging. A
+conflict with the existing Strappy section is only a hypothesis. The successful
+isolated probe used a separate identity and resolved publication symbols later,
+at send time; the candidate resolves both functions in its initializer. Inspect
+those differences and add early lifecycle diagnostics before another test.
+
+Removed the test package and restarted SpringBoard once more (PID 2593).
+The bundle and sender were absent; the original receiver logged readiness.
+Production strappyd retained PID 1568 throughout. The app, daemon and two
+Substrate files retained their four baseline SHA-256 hashes, the production
+package remained 1.2.0, and crash-directory listings were unchanged. Shared
+notification preferences were not modified. After removal, the owner confirmed
+Strappy opens normally and has no entry in Settings > Notifications. This is a
+post-removal observation, not a check during candidate installation. DND/mute
+state was not explicitly reported, and no display/policy conclusion can be drawn.
+
+Local evidence, the tested DEB and matching armv7 provider symbols are retained
+under `build/device-runs/gomadango-provider-candidate-v1/`. Remote staging is
+`/var/mobile/tmp_altivec/strappy-provider-candidate-v1/`. The test package is no
+longer installed. Candidate policy tests, clean armv7/arm64 test-package builds,
+static analysis and package validation passed. Full clean production builds
+passed for both iOS and all four Mac architectures without compiler warnings;
+production package validation also passed. Logs use
+`build/notification-provider-device-{policy,build}.log` and
+`build/provider-device-production-{clean,build,package}.log`.

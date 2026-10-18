@@ -148,6 +148,7 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   [invocation setArgument:&type atIndex:2];
   [invocation invoke];
   [invocation getReturnValue:&info];
+  syslog(LOG_NOTICE, "StrappyProvider: default section requested");
   return XPSet(info, @"setSectionID:", kSection) ? info : nil;
 }
 
@@ -162,6 +163,8 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
  * callback forms from the historical BBDataProvider interface. */
 - (id)clearedInfoForBulletins:(NSArray *)bulletins lastClearedInfo:(id)info;
 {
+  syslog(LOG_NOTICE, "StrappyProvider: clear callback count=%lu",
+    (unsigned long)[bulletins count]);
   NSMutableArray *cleared = [NSMutableArray array];
   @synchronized (self) {
     if ([info isKindOfClass:[NSArray class]]) {
@@ -198,7 +201,9 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
 {
   /* All our records are ordinary completion alerts (no custom filter groups).
    * Unknown cleared-info formats fail closed instead of resurrecting alerts. */
-  (void)filter;
+  syslog(LOG_NOTICE, "StrappyProvider: list filter=%u count=%u cleared=%s",
+    filter, count, !cleared ? "none" :
+      [cleared isKindOfClass:[NSArray class]] ? "array" : "unknown");
   NSMutableArray *result = [NSMutableArray array];
   @synchronized (self) {
     if (cleared && ![cleared isKindOfClass:[NSArray class]]) return result;
@@ -216,6 +221,7 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
 
 - (void)dataProviderDidLoad;
 {
+  syslog(LOG_NOTICE, "StrappyProvider: dataProviderDidLoad");
   [self performSelectorOnMainThread:@selector(startReceiving)
     withObject:nil waitUntilDone:NO];
 }
@@ -269,6 +275,7 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   @try {
     if (evicted) withdraw_(self, evicted);
     add_(self, request);
+    syslog(LOG_NOTICE, "StrappyProvider: publication returned");
   } @catch (NSException *exception) {
     /* Keep the recent ID: an exception may occur after publication. */
     [self clearedInfoForBulletins:[NSArray arrayWithObject:request]];
