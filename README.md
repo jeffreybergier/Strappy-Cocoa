@@ -161,7 +161,7 @@ a missing or busy receiver never affects the prompt result. Production badge
 counting/clearing is not implemented. See the
 [native findings](docs/ios6-notification-provider.md) and
 [production migration procedure](docs/ios6-provider-migration.md). The package
-migration is prepared but has not yet been deployed to gomadango.
+migration is installed on gomadango; production socket readiness is verified.
 
 Offline daemon coverage, including Unicode previews, errors, durable retries,
 cancellation and a missing receiver:

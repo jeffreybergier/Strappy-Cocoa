@@ -16,25 +16,28 @@ been retested under the corrected conditions, so its implementation is not a
 confirmed failure. The provider explicitly attaches a BBSound; we did not
 establish that omitting sound causes iOS to supply a default.
 
-Candidate test package **0.1.5** remains installed. It loads natively inside
-SpringBoard, with no Substrate filter of its own. The last tested SpringBoard
-PID was 3818; badge 4 remains set. Diagnostic test numbers 4..99 request matching
-literal badges, not unread counts. Matching package, symbols and logs are in
-`build/device-runs/gomadango-provider-candidate-v8/`, with remote staging under
-`/var/mobile/tmp_altivec/strappy-provider-candidate-v8/`.
+**Production migration is installed on gomadango.** On 2026-10-18, package
+built from `6a239a9` replaced the old Substrate receiver. Candidate package
+0.1.5 was removed through dpkg first. The native provider now owns
+`receiver.sock`; strappyd keeps its existing packet format and destination.
+SpringBoard PID 4046 logged provider registration and production socket readiness;
+strappyd restarted as PID 4031. A payload-free connection check as mobile passed.
+All installed production payload hashes matched the staged package, obsolete
+receiver/filter files were absent, and no new crash reports appeared.
 
-**Production has not migrated.** strappyd still sends to `receiver.sock` and
-uses the existing Substrate receiver. The candidate listens on its separate
-`provider-candidate.sock`; production files/package version remained unchanged.
-The bundle is an iOS 6 runtime candidate: its arm64 slice satisfies build
-coverage but initialization refuses iOS 7+.
+The earlier literal badge-4 experiment remains only a diagnostic result. The
+production build excludes that code and introduces no badge count/clear policy.
+The provider is iOS 6-only; its arm64 slice satisfies build coverage but
+initialization refuses iOS 7+. A real prompt completion through this installed
+production package still awaits owner confirmation. See the
+[deployment record](#production-device-cutover-2026-10-18) below.
 
 On 2026-10-18, the owner confirmed tap-to-open and the native notification
 lifecycle checks: dismissal, clearing, retained history, repeated notifications
 and restart behavior. These two validation items are complete based on owner
 confirmation; no new device test or callback trace was collected in this turn.
-Remaining work is coordinated production packaging/socket migration with
-rollback. The literal badge probe must not become production unread-count
+Production packaging/socket migration is installed with rollback artifacts
+retained; the final real-prompt notification observation is pending. The literal badge probe must not become production unread-count
 policy. Badge replacement/clearing and persistent unread-count behavior have
 not been established by the visible badge-4 test. No new badge policy is part
 of the owner's requested proof-of-display experiment.
@@ -66,9 +69,9 @@ The candidate listens at:
 /var/mobile/Library/Application Support/StrappyAlerts/provider-candidate.sock
 ```
 
-**The daemon still sends to `receiver.sock`.** This separate endpoint is
-intentional for the offline milestone; production traffic is not routed to the
-candidate. No synthetic notification is sent at load time. There is no sender,
+**The daemon sends to `receiver.sock`, now owned by the production provider.**
+The explicit diagnostic Makefiles retain the separate candidate endpoint;
+production traffic is never routed to it. No synthetic notification is sent at load time. There is no sender,
 launchd job, Substrate filter, or installation script in the candidate archive.
 
 The directory must be owned by the receiver user with mode 0700; the socket is
@@ -561,3 +564,40 @@ showed 4.** This establishes badge display through the candidate's icon-model
 bridge, alongside the earlier banner, Notification Center and Glass sound
 confirmations. Badge 4 remains set; replacement/clearing and production unread
 count policy were not tested or implemented by this probe.
+
+
+## Production device cutover: 2026-10-18
+
+At the owner's explicit request, installed the production rootful package built
+from `6a239a9` (package version remains 1.2.0), SHA-256:
+
+```
+0d4cc50446a9655235b33cce887e012101aa2d1e1b805f161a187dfda5971dd0
+```
+
+Before changing the phone, compared every installed production file against the
+retained `ac50d5f` rollback DEB and every candidate file against candidate 0.1.5;
+both matched. Staged all three packages and their checksums in
+`/var/mobile/tmp_altivec/strappy-provider-production-6a239a9/`, with an independent
+root SSH recovery session open. Removed the candidate with dpkg, installed
+production with dpkg, and verified every installed payload hash. dpkg now assigns
+the provider bundle to Strappy. The old owned dylib/filter and diagnostic sender
+are absent. No unrelated test packages were removed.
+
+Restarted SpringBoard once: PID 3818 became 4046. strappyd restarted from PID
+1568 to 4031. At 16:39:55 device time, the new SpringBoard process logged
+`dataProviderDidLoad` and readiness at the production `receiver.sock`, followed
+by a history-list query. A staged sender built with its socket override set to
+`STRAPPY_NOTIFICATION_SOCKET` was used only for its payload-free `ready` check
+as mobile; it passed. Its inherited message says "Candidate receiver accepts
+connections", but this binary targets the production socket. No diagnostic
+notification was sent. Readiness took time after restart; a stale pathname was
+not treated as success. Crash-report listings were unchanged.
+
+Matching production armv7 app/daemon/provider symbols, packages, payload
+manifests, install logs, readiness output, service state, and syslog are retained
+under `build/device-runs/gomadango-provider-production-6a239a9/`. The owner has
+been asked to submit a normal prompt and confirm the production notification,
+Glass sound and tap action; that observation is pending. Installation/readiness
+does not by itself prove end-to-end completion delivery. Rollback packages remain
+staged; no chat data or notification preferences were deliberately modified.
