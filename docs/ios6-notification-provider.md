@@ -28,8 +28,9 @@ receiver/filter files were absent, and no new crash reports appeared.
 The earlier literal badge-4 experiment remains only a diagnostic result. The
 production build excludes that code and introduces no badge count/clear policy.
 The provider is iOS 6-only; its arm64 slice satisfies build coverage but
-initialization refuses iOS 7+. A real prompt completion through this installed
-production package still awaits owner confirmation. See the
+initialization refuses iOS 7+. The owner confirmed that a real prompt completion through the installed
+production package worked. They also confirmed that a later respring preserved
+the badge. See the
 [deployment record](#production-device-cutover-2026-10-18) below.
 
 On 2026-10-18, the owner confirmed tap-to-open and the native notification
@@ -37,7 +38,7 @@ lifecycle checks: dismissal, clearing, retained history, repeated notifications
 and restart behavior. These two validation items are complete based on owner
 confirmation; no new device test or callback trace was collected in this turn.
 Production packaging/socket migration is installed with rollback artifacts
-retained; the final real-prompt notification observation is pending. The literal badge probe must not become production unread-count
+retained, and the owner confirmed the real-prompt notification. The literal badge probe must not become production unread-count
 policy. Badge replacement/clearing and persistent unread-count behavior have
 not been established by the visible badge-4 test. No new badge policy is part
 of the owner's requested proof-of-display experiment.
@@ -596,8 +597,10 @@ not treated as success. Crash-report listings were unchanged.
 
 Matching production armv7 app/daemon/provider symbols, packages, payload
 manifests, install logs, readiness output, service state, and syslog are retained
-under `build/device-runs/gomadango-provider-production-6a239a9/`. The owner has
-been asked to submit a normal prompt and confirm the production notification,
-Glass sound and tap action; that observation is pending. Installation/readiness
+under `build/device-runs/gomadango-provider-production-6a239a9/`. The owner subsequently reported that the real-prompt notification worked. Installation/readiness
 does not by itself prove end-to-end completion delivery. Rollback packages remain
 staged; no chat data or notification preferences were deliberately modified.
+
+
+The simplified unread/observation design and foreground/badge-only experiments
+are recorded in [the session notification plan](session-unread-notification-plan.md).

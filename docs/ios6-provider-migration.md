@@ -1,7 +1,7 @@
 # iOS 6 production notification provider migration
 
 Deployed to gomadango on 2026-10-18 from commit `6a239a9`; production socket
-readiness passed. Real-prompt notification observation is pending. The owner confirmed candidate tap-to-open,
+readiness passed, and the owner confirmed the real-prompt notification worked. The owner confirmed candidate tap-to-open,
 dismissal, clearing, history, repeated notifications and restart behavior.
 See [the investigation](ios6-notification-provider.md) for native observations.
 
