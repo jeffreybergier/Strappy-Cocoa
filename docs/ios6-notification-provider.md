@@ -1,16 +1,47 @@
 # Native Strappy notification provider candidate
 
-Current native status: on gomadango, the owner confirmed the native provider's
-Notification Center entry with the correct Strappy name/icon, a visible banner,
-and a Strappy notification-settings entry. The custom-sound test was published;
-its audible result and app-launch behavior are awaiting owner confirmation. The
-test package is currently installed; the production daemon still uses the old
-receiver and the candidate still uses its separate socket.
+## Current findings and handoff (2026-10-18)
 
-First implementation milestone: an independently built bundle, not included in
-production packages and not installed on a phone. The existing daemon and
-Substrate receiver remain unchanged. This is an iOS 6 runtime candidate; the
-arm64 slice satisfies build coverage but initialization refuses iOS 7+.
+On gomadango (iPhone5,2, iOS 6.1.3), the owner confirmed:
+
+- A visible banner and Notification Center entry using Strappy's name/icon.
+- Strappy's entry in Settings > Notifications, with sounds and badges enabled.
+- Audible built-in Glass sound (SystemSoundID 1009), with silent mode off.
+- A visible badge of **4** on Strappy's icon after diagnostic test 4. SpringBoard
+  also reported that its badge readback matched 4.
+
+Earlier no-sound observations were invalidated when the owner discovered the
+phone was in silent mode. Glass subsequently worked. The custom WAV has not
+been retested under the corrected conditions, so its implementation is not a
+confirmed failure. The provider explicitly attaches a BBSound; we did not
+establish that omitting sound causes iOS to supply a default.
+
+Candidate test package **0.1.5** remains installed. It loads natively inside
+SpringBoard, with no Substrate filter of its own. The last tested SpringBoard
+PID was 3818; badge 4 remains set. Diagnostic test numbers 4..99 request matching
+literal badges, not unread counts. Matching package, symbols and logs are in
+`build/device-runs/gomadango-provider-candidate-v8/`, with remote staging under
+`/var/mobile/tmp_altivec/strappy-provider-candidate-v8/`.
+
+**Production has not migrated.** strappyd still sends to `receiver.sock` and
+uses the existing Substrate receiver. The candidate listens on its separate
+`provider-candidate.sock`; production files/package version remained unchanged.
+The bundle is an iOS 6 runtime candidate: its arm64 slice satisfies build
+coverage but initialization refuses iOS 7+.
+
+Remaining work includes tap-to-open confirmation, native dismissal/history and
+lifecycle validation, and coordinated production packaging/socket migration
+with rollback. The literal badge probe must not become production unread-count
+policy. Badge replacement/clearing and persistent unread-count behavior have
+not been established by the visible badge-4 test. No new badge policy is part
+of the owner's requested proof-of-display experiment.
+
+Clean candidate armv7/arm64 builds, native macOS fixtures, static analysis and
+package checks passed. Full clean production builds/package validation passed
+for both iOS and all four Mac architectures without compiler warnings. These
+cross-build results do not extend the on-device compatibility claim beyond
+this iOS 6 phone. The chronological experiment records below preserve the
+observations and subsequent corrections.
 
 ## Architecture
 
@@ -88,8 +119,10 @@ make -C source/iOS -f notification_provider.mk \
   BUILD_ROOT="$PWD/build/experiments/notification-provider" validate-package analyze
 ```
 
-The ZIP contains `StrappyNotificationProvider.bundle/Info.plist`, the custom
-`StrappyChime.wav`, and its signed armv7/arm64 `MH_BUNDLE` executable. It is an offline artifact, not a DEB. The
+The ZIP contains `StrappyNotificationProvider.bundle/Info.plist` and its signed
+armv7/arm64 `MH_BUNDLE` executable. The custom WAV remains in source but is not
+packaged; the selected Glass sound is supplied by iOS. The ZIP is an offline
+artifact, not the separately built device-test DEB. The
 build directory also retains matching dSYMs. Production packaging migration
 belongs to the next milestone.
 

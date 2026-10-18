@@ -373,7 +373,17 @@ check for a residual test entry before interpreting a later settings observation
 
 ## Production provider implementation follow-up
 
-The first offline candidate is now implemented as a separate native bundle.
-See [its architecture, history policy and validation recipe](ios6-notification-provider.md).
-Production packaging and the daemon destination remain unchanged; no new phone
-installation or native compatibility result is implied.
+The subsequent native candidate has now been implemented and tested on
+gomadango with Strappy's real identity. The owner confirmed its banner,
+Notification Center entry/name/icon, notification-settings entry, built-in Glass
+sound, and literal diagnostic icon badge 4. Earlier silent sound tests were
+inconclusive because the phone was later found to be in silent mode; Glass
+worked after that was corrected. The custom WAV remains unverified.
+
+See [the current findings, architecture and device-test record](ios6-notification-provider.md).
+Candidate test package 0.1.5 remains installed on its separate socket. This is
+a later experiment than the removed probe described above: production packaging
+and the daemon destination remain unchanged, and the old Substrate receiver
+still handles production traffic. Native lifecycle/history, tap-to-open and
+coordinated production migration remain outstanding. The badge test establishes
+visible display only; it does not implement unread-count policy.
