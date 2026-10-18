@@ -73,7 +73,6 @@ static id XPGet(id target, NSString *name)
   dev_t socketDevice_;
   ino_t socketInode_;
   id sound_;
-  SystemSoundID soundID_;
   BOOL soundAttempted_;
   XPAddBulletin add_;
   XPWithdrawBulletin withdraw_;
@@ -236,13 +235,9 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
 {
   if (soundAttempted_) return sound_;
   soundAttempted_ = YES;
-  NSString *path = [[NSBundle bundleForClass:[self class]]
-    pathForResource:@"StrappyChime" ofType:@"wav"];
-  if (!path || AudioServicesCreateSystemSoundID((CFURLRef)[NSURL fileURLWithPath:path],
-      &soundID_) != kAudioServicesNoError) {
-    syslog(LOG_NOTICE, "StrappyProvider: custom sound resource unavailable");
-    return nil;
-  }
+  /* Built-in iOS Glass alert, used to isolate custom-resource playback.
+   * System-owned IDs must not be disposed by this provider. */
+  SystemSoundID soundID = 1009;
   Class cls = NSClassFromString(@"BBSound");
   SEL selector = NSSelectorFromString(@"alertSoundWithSystemSoundID:");
   NSMethodSignature *signature = [cls methodSignatureForSelector:selector];
@@ -250,11 +245,11 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   if (!signature || [signature numberOfArguments] != 3 ||
       [signature methodReturnLength] != sizeof(id)) return nil;
   NSGetSizeAndAlignment([signature getArgumentTypeAtIndex:2], &size, NULL);
-  if (size != sizeof(soundID_)) return nil;
+  if (size != sizeof(soundID)) return nil;
   NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
   [invocation setTarget:cls];
   [invocation setSelector:selector];
-  [invocation setArgument:&soundID_ atIndex:2];
+  [invocation setArgument:&soundID atIndex:2];
   [invocation invoke];
   id sound = nil;
   [invocation getReturnValue:&sound];
@@ -299,7 +294,7 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
       !XPSetClearable(request)) return;
   id sound = [self notificationSound];
   if (sound && XPSet(request, @"setSound:", sound))
-    syslog(LOG_NOTICE, "StrappyProvider: custom sound attached");
+    syslog(LOG_NOTICE, "StrappyProvider: built-in sound 1009 attached");
   NSString *evicted = nil;
   @synchronized (self) {
     [recent_ addObject:identifier];
@@ -421,7 +416,6 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   [history_ release];
   [recent_ release];
   [sound_ release];
-  if (soundID_) AudioServicesDisposeSystemSoundID(soundID_);
   [super dealloc];
 }
 @end

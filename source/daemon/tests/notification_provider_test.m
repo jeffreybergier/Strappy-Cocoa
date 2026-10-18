@@ -70,13 +70,18 @@ static void Withdraw(id provider, NSString *record)
   assert([record hasPrefix:@"com.altivecintelligence.Strappy.run."]);
   ++withdrawn;
 }
+@interface BBSound : NSObject
+@end
+@implementation BBSound
++ (id)alertSoundWithSystemSoundID:(SystemSoundID)soundID;
+{
+  assert(soundID == 1009);
+  return @"fixture-sound";
+}
+@end
 @interface FixtureProvider : XPStrappyNotificationProvider
 @end
 @implementation FixtureProvider
-- (id)notificationSound;
-{
-  return @"fixture-sound";
-}
 - (void)prepare;
 {
   /* The fixture supplies the runtime dependencies normally resolved on iOS 6.

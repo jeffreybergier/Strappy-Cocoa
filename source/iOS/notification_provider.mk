@@ -11,9 +11,8 @@ StrappyNotificationProvider_SOURCES = $(PROVIDER_DIR)/XPStrappyNotificationProvi
 StrappyNotificationProvider_LDFLAGS = -bundle -framework Foundation -framework CoreFoundation -framework AudioToolbox -lobjc
 StrappyNotificationProvider_SIGN = 1
 StrappyNotificationProvider_PACKAGE_MAIN_PATH = $(PROVIDER_BUNDLE)/StrappyNotificationProvider
-StrappyNotificationProvider_PACKAGE_RESOURCES = $(PROVIDER_DIR)/Info.plist=$(PROVIDER_BUNDLE)/Info.plist \
-  $(PROVIDER_DIR)/StrappyChime.wav=$(PROVIDER_BUNDLE)/StrappyChime.wav
+StrappyNotificationProvider_PACKAGE_RESOURCES = $(PROVIDER_DIR)/Info.plist=$(PROVIDER_BUNDLE)/Info.plist
 StrappyNotificationProvider_PACKAGES = zip
-StrappyNotificationProvider_VERSION = 0.1.1
+StrappyNotificationProvider_VERSION = 0.1.3
 include $(ALTIVEC_ROOT)/altivec_common_phone.mk
 endif

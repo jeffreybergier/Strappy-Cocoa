@@ -306,3 +306,73 @@ provider path with fake private classes. Clean candidate builds, static analysis
 and ZIP/DEB validation passed for armv7/arm64. Full clean production builds and
 package validation passed for both iOS and all four Mac architectures without
 compiler warnings. Logs use `build/provider-sound-*.log`.
+
+
+## Built-in sound comparison: 2026-10-18
+
+The owner reported a visible banner and two Notification Center entries after
+retrying the custom chime at 16:01:32, but no sound or badge. They subsequently
+confirmed the silent switch was off and Ringer and Alerts volume audible.
+Logs showed successful sound attachment and publication, with no reported
+playback error. These messages do not establish playback. No badge update is
+implemented; bulletin history alone does not set an application badge.
+
+At the owner's request, candidate 0.1.2 substitutes built-in SystemSoundID 1007
+for the dynamically created custom resource ID. It retains the same runtime
+BBSound factory and bulletin publication path. The system owns this ID, so the
+provider does not dispose it. The WAV remains in source for the experiment but
+is no longer packaged. No independent audio playback or settings changes were
+introduced. The native fixture now exercises the actual factory invocation
+using a fake BBSound class rather than overriding notificationSound.
+
+Upgraded the isolated test package, SHA-256
+`f5fe7546c80565847c49ca84d53cf207eba4024d87bced5bc54101968f5d5a1a`,
+in `strappy-provider-candidate-v4`, and restarted SpringBoard once (PID 3247).
+Live socket readiness passed. After the owner confirmed the Home Screen and
+silent mode disabled, sent test 1 at 16:10:14. Logs showed built-in sound 1007
+attached and publication returned. **The owner confirmed both banner and
+sound.** This confirms that this built-in sound can play through the provider; the
+precise cause of the earlier failure remains unresolved. It does not test sound omission or establish
+that a bulletin without a sound receives any automatic default.
+
+Candidate 0.1.2 was subsequently superseded by the Glass test below.
+Production hashes/package version were
+unchanged. Daemon routing still uses the production receiver; this successful
+candidate test does not complete the production migration. Tap-to-open and
+badge lifecycle remain unverified/unimplemented respectively.
+
+Native macOS policy/readiness tests passed. Clean armv7/arm64 candidate builds,
+static analysis and ZIP/DEB validation passed. Full clean production builds
+and package validation passed for both iOS architectures and all four Mac
+architectures, without compiler warnings. Logs use
+`build/provider-default-*.log`. Matching test package, armv7 symbols and device
+logs are retained in `build/device-runs/gomadango-provider-candidate-v4/`;
+remote staging uses the same basename under `/var/mobile/tmp_altivec/`.
+
+
+## Alternate built-in Glass tone: 2026-10-18
+
+The owner identified the successful 1007 test as the default sound and asked
+for a different built-in tone. Candidate 0.1.3 selects SystemSoundID 1009
+(Glass) through the same BBSound factory. Its system asset
+`/System/Library/Audio/UISounds/sms-received3.caf` exists on gomadango.
+The package SHA-256 is
+`54ed9ff116c0ef7be750dba057f812609ea978b68f0603768a0727b9d306abdf`.
+Installed it in staging `strappy-provider-candidate-v5` and restarted
+SpringBoard once (PID 3373). Live socket readiness passed.
+
+After the owner confirmed Home Screen and sound enabled, sent test 1 at
+16:11:37. The owner reported **banner, no sound**. Logs showed sound 1009
+attached and publication returned, with no playback confirmation. Sent test 2
+at 16:11:58 to check repeatability after startup; owner observation is pending.
+Thus a different built-in tone has not yet been validated. The earlier custom
+WAV failure cannot be explained solely by its being a custom resource.
+
+Candidate 0.1.3 remains installed, with no production routing changes. Production
+file hashes/package version remained unchanged. Matching package, armv7 symbols
+and logs are retained in `build/device-runs/gomadango-provider-candidate-v5/`.
+Native macOS tests, clean candidate armv7/arm64 builds, analysis and package
+validation passed. Full clean iOS and four-architecture Mac production builds
+and package validation also passed without compiler warnings. Logs use
+`build/provider-glass-*.log`. These build results do not establish audible
+playback; only the 1007 comparison has owner-confirmed sound so far.
