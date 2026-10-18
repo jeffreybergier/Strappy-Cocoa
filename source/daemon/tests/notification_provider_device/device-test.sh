@@ -41,7 +41,7 @@ case "${1:-}" in
   ;;
  send)
   su mobile -c "/usr/libexec/strappy-provider-test ready" > ready.log 2>&1
-  case "${2:-}" in 1|2|3) ;; *) exit 2 ;; esac
+  case "${2:-}" in [1-9]|[1-9][0-9]) ;; *) exit 2 ;; esac
   [ ! -e "sent-$2" ]
   touch "sent-$2"
   su mobile -c "/usr/libexec/strappy-provider-test $2" > "sender-$2.log" 2>&1

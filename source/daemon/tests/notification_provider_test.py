@@ -50,5 +50,10 @@ with tempfile.TemporaryDirectory(prefix="strappy-ready-", dir="/tmp") as directo
     subprocess.run([str(sender), "1"], check=True, capture_output=True)
     packet = receiver.recv(4096)
     assert len(packet) == 2030 and packet[:4] == b"STN1"
+    for sequence in (4, 5, 6, 7, 99):
+        subprocess.run([str(sender), str(sequence)], check=True, capture_output=True)
+        packet = receiver.recv(4096)
+        assert packet[4:24].split(b"\0")[0] == str(9000000000000000000 + sequence).encode()
+    assert subprocess.run([str(sender), "100"], capture_output=True).returncode == 2
     receiver.close()
 print("notification provider readiness: absent/stale/live/no-alert passed")

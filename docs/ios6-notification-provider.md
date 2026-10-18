@@ -431,3 +431,44 @@ Matching package, symbols and device logs are retained in
 Glass binary was reused without rebuilding; the final code matches commit
 `7c3a5ed`. This follow-up changes only the test record. Production daemon
 migration, badge lifecycle and tap-to-open validation remain separate work.
+
+
+## Literal badge-number probe: 2026-10-18
+
+The owner requested only proof of badge display, with the diagnostic test
+number as the badge (4, 5, 6, 7, ...), and confirmed sound/badges enabled in
+Settings. Candidate 0.1.5 adds a main-thread bridge through
+`SBIconController.sharedInstance`, `model`,
+`applicationIconForDisplayIdentifier:`, and the icon's object-valued
+`setBadge:`. These selectors/signatures were checked against gomadango's
+retained SpringBoard metadata; its own badge forwarding method uses this
+same icon-model route. Runtime selector checks guard unavailable APIs.
+
+Only reserved diagnostic run IDs `9000000000000000004` through
+`9000000000000000099` set badges. The sender now accepts tests 1..99; tests 1..3
+and ordinary packets do not change the badge. After bulletin publication, the
+provider sets the literal decimal test number on Strappy's icon and logs
+whether `badgeNumberOrString` reads back the requested value. Readback does
+not prove visible display. Badge exceptions are isolated from publication.
+The existing duplicate guard prevents repeated packets changing it again.
+This is a diagnostic value, not an unread count; no clearing/history policy
+is introduced and this probe must not migrate into production daemon routing.
+
+Installed package 0.1.5, SHA-256
+`36abdc02dea4775454e86933e3b7de72cd79b167af76151e207d5ec58bdffbc8`,
+using staging `strappy-provider-candidate-v8`, with one SpringBoard restart.
+Live socket readiness passed; production hashes/package version were unchanged.
+Owner readiness/visible confirmation for badge 4 is pending.
+
+Native macOS fixtures exercise the actual badge bridge with a fake icon,
+checking Strappy identity, literal values 4..7, no ordinary-packet mutations,
+and duplicate suppression. Sender tests also cover diagnostic IDs 4..7/99 and
+reject 100. Matching package, armv7 symbols and device logs are retained in
+`build/device-runs/gomadango-provider-candidate-v8/`. Build/test logs use
+`build/provider-badge-*.log`.
+
+Native fixtures passed. Clean candidate armv7/arm64 builds, static analysis,
+and ZIP/DEB validation passed. Full clean production builds for both iOS
+architectures and all four Mac architectures and package validation passed
+without compiler warnings. The test package remains installed; no badge has
+yet been set by this new candidate, pending the owner's readiness.

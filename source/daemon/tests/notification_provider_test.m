@@ -93,6 +93,35 @@ static void Withdraw(id provider, NSString *record)
 }
 @end
 
+/* Fake icon routing exercises the real test badge bridge. */
+static NSString *testBadge;
+static unsigned int badgeUpdates;
+@interface SBIconController : NSObject
+@end
+@implementation SBIconController
++ (id)sharedInstance;
+{
+  return self;
+}
++ (id)model;
+{
+  return self;
+}
++ (id)applicationIconForDisplayIdentifier:(NSString *)identity;
+{
+  assert([identity isEqualToString:@"com.altivecintelligence.Strappy"]);
+  return self;
+}
++ (void)setBadge:(NSString *)value;
+{
+  [testBadge release]; testBadge = [value copy]; ++badgeUpdates;
+}
++ (id)badgeNumberOrString;
+{
+  return testBadge;
+}
+@end
+
 static strappy_notification_packet Packet(unsigned int run)
 {
   strappy_notification_packet packet;
@@ -214,6 +243,20 @@ int main(void)
   unlink(fixtureSocket);
   unlink(fixtureLock);
   rmdir(fixtureDirectory);
+  assert(badgeUpdates == 0); /* Ordinary packets never touch the badge. */
+  provider = [FixtureProvider alloc]; [provider prepare];
+  for (unsigned int i = 3; i <= 7; ++i) {
+    packet = Packet(i);
+    snprintf(packet.run, sizeof(packet.run), "%019lld",
+      9000000000000000000LL + i);
+    [provider acceptPacket:&packet];
+    [provider acceptPacket:&packet]; /* Duplicate must not update again. */
+    if (i >= 4) {
+      assert([testBadge intValue] == (int)i);
+      assert(badgeUpdates == i - 3);
+    } else assert(badgeUpdates == 0);
+  }
+  [provider release]; [testBadge release]; testBadge = nil;
   [pool drain];
   puts("notification provider policy: passed");
   return 0;

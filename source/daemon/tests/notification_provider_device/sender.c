@@ -21,10 +21,11 @@ int main(int argc, char **argv)
   if (argc != 2) return 2;
   readiness = !strcmp(argv[1], "ready");
   sequence = readiness ? 1 : strtol(argv[1], &end, 10);
-  if (!readiness && (*end || sequence < 1 || sequence > 3)) return 2;
+  if (!readiness && (*end || sequence < 1 || sequence > 99)) return 2;
   memset(&packet, 0, sizeof(packet));
   memcpy(packet.magic, "STN1", 4);
-  snprintf(packet.run, sizeof(packet.run), "900000000000000000%ld", sequence);
+  snprintf(packet.run, sizeof(packet.run), "%019lld",
+    9000000000000000000LL + sequence);
   strcpy(packet.title, "Strappy notification test");
   snprintf(packet.body, sizeof(packet.body),
     "Native provider test %ld. Tap to open Strappy.", sequence);

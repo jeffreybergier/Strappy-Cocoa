@@ -13,6 +13,6 @@ StrappyNotificationProvider_SIGN = 1
 StrappyNotificationProvider_PACKAGE_MAIN_PATH = $(PROVIDER_BUNDLE)/StrappyNotificationProvider
 StrappyNotificationProvider_PACKAGE_RESOURCES = $(PROVIDER_DIR)/Info.plist=$(PROVIDER_BUNDLE)/Info.plist
 StrappyNotificationProvider_PACKAGES = zip
-StrappyNotificationProvider_VERSION = 0.1.3
+StrappyNotificationProvider_VERSION = 0.1.5
 include $(ALTIVEC_ROOT)/altivec_common_phone.mk
 endif

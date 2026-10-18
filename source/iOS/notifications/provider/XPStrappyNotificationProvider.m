@@ -64,6 +64,34 @@ static id XPGet(id target, NSString *name)
     [target performSelector:selector] : nil;
 }
 
+/* Main-thread diagnostic only: reserved sender IDs 4..99 set literal badges.
+ * This is not unread-count policy and must not migrate to daemon routing. */
+static void XPSetTestBadge(const char *run)
+{
+  if (strlen(run) != 19 || strncmp(run, "90000000000000000", 17)) return;
+  int number = (run[17] - '0') * 10 + run[18] - '0';
+  if (number < 4 || number > 99) return;
+  @try {
+    id controller = XPGet(NSClassFromString(@"SBIconController"), @"sharedInstance");
+    id model = XPGet(controller, @"model");
+    SEL selector = NSSelectorFromString(@"applicationIconForDisplayIdentifier:");
+    id icon = [model respondsToSelector:selector] ?
+      [model performSelector:selector withObject:kSection] : nil;
+    NSString *badge = [NSString stringWithFormat:@"%d", number];
+    if (!XPSet(icon, @"setBadge:", badge)) {
+      syslog(LOG_NOTICE, "StrappyProvider: test badge API unavailable");
+      return;
+    }
+    BOOL matches = [[XPGet(icon, @"badgeNumberOrString") description]
+      isEqualToString:badge];
+    syslog(LOG_NOTICE, "StrappyProvider: test badge %d set; readback matches=%d",
+      number, matches ? 1 : 0);
+  } @catch (NSException *exception) {
+    (void)exception;
+    syslog(LOG_NOTICE, "StrappyProvider: test badge update raised exception");
+  }
+}
+
 @interface XPStrappyNotificationProvider : NSObject {
   NSMutableArray *history_;
   NSMutableArray *recent_;
@@ -310,6 +338,7 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
     if (evicted) withdraw_(self, evicted);
     add_(self, request);
     syslog(LOG_NOTICE, "StrappyProvider: publication returned");
+    XPSetTestBadge(packet->run);
   } @catch (NSException *exception) {
     /* Keep the recent ID: an exception may occur after publication. */
     [self clearedInfoForBulletins:[NSArray arrayWithObject:request]];

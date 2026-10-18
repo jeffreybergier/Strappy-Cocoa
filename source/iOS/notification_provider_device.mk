@@ -13,7 +13,7 @@ strappy-provider-test_SIGN = 1
 strappy-provider-test_PACKAGES = deb-rootful
 strappy-provider-test_PACKAGE_ID = com.altivecintelligence.strappy.notification-provider-test
 strappy-provider-test_PACKAGE_ARCH = iphoneos-arm
-strappy-provider-test_VERSION = 0.1.3
+strappy-provider-test_VERSION = 0.1.5
 strappy-provider-test_INSTALL = StrappyNotificationProvider
 strappy-provider-test_PACKAGE_FILES = $(PROVIDER_DIR)/Info.plist=$(PROVIDER_BUNDLE)/Info.plist
 StrappyNotificationProvider_TYPE = executable
