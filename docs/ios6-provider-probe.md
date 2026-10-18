@@ -370,3 +370,10 @@ completed isolated test and removal; it is not an unattended future deployment
 window. Existing ignored local/device evidence should be preserved. No test
 notification/settings-entry disappearance was explicitly confirmed after removal;
 check for a residual test entry before interpreting a later settings observation.
+
+## Production provider implementation follow-up
+
+The first offline candidate is now implemented as a separate native bundle.
+See [its architecture, history policy and validation recipe](ios6-notification-provider.md).
+Production packaging and the daemon destination remain unchanged; no new phone
+installation or native compatibility result is implied.
