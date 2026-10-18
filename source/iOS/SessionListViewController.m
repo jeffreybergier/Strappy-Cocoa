@@ -3,7 +3,6 @@
 
 #import "AIFontAwesome.h"
 #import "PreferencesTableViewController.h"
-#import "StrappyActivityAccessoryView.h"
 #import "StrappySession.h"
 #import "StrappySessionSections.h"
 #import "XPFoundation.h"
@@ -90,7 +89,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 - (BOOL)canDeleteSession:(NSDictionary *)session;
 - (void)confirmDeleteSession:(NSDictionary *)session;
 - (void)deleteSessionIdentifier:(NSNumber *)sessionIdentifier;
-- (UIView *)promptInFlightAccessoryViewForCell:(UITableViewCell *)cell;
+- (UIView *)sessionStatusAccessoryViewForUnread:(BOOL)unread;
 - (void)configureSessionCell:(UITableViewCell *)cell
                      session:(NSDictionary *)session;
 - (void)notifySelectedSession;
@@ -495,16 +494,14 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   [self reloadData];
 }
 
-- (UIView *)promptInFlightAccessoryViewForCell:(UITableViewCell *)cell
+- (UIView *)sessionStatusAccessoryViewForUnread:(BOOL)unread;
 {
-  UIColor *color;
-
-  color = [[cell detailTextLabel] textColor];
-  if (color == nil) {
-    color = [UIColor grayColor];
-  }
-
-  return StrappyActivityAccessoryView(color);
+  UIColor *blue = [UIColor colorWithRed:0.0f green:(122.0f / 255.0f)
+                                 blue:1.0f alpha:1.0f];
+  UIImage *image = [AIFontAwesome imageForIcon:unread ? AIFACircle : AIFAArrowsSpin
+    style:AIFontAwesomeStyleSolid iconSize:10.0f canvasSize:14.0f
+    color:blue scale:0.0f];
+  return image ? [[UIImageView alloc] initWithImage:image] : nil;
 }
 
 - (void)notifySelectedSession
@@ -659,9 +656,15 @@ forRowAtIndexPath:(NSIndexPath *)indexPath
   [[cell detailTextLabel] setText:StrappySessionSubtitle(session)];
   [[cell imageView] setImage:nil];
   if (StrappySessionPromptIsInFlight(session)) {
-    [cell setAccessoryView:[self promptInFlightAccessoryViewForCell:cell]];
+    [cell setAccessoryView:[self sessionStatusAccessoryViewForUnread:NO]];
     [cell setAccessoryType:UITableViewCellAccessoryNone];
+    [cell setAccessibilityValue:NSLocalizedString(@"Processing", nil)];
+  } else if ([[session objectForKey:@"has_new_answers"] boolValue]) {
+    [cell setAccessoryView:[self sessionStatusAccessoryViewForUnread:YES]];
+    [cell setAccessoryType:UITableViewCellAccessoryNone];
+    [cell setAccessibilityValue:NSLocalizedString(@"Unread", nil)];
   } else {
+    [cell setAccessibilityValue:nil];
     [cell setAccessoryView:nil];
     [cell setAccessoryType:UITableViewCellAccessoryNone];
   }

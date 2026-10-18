@@ -112,8 +112,32 @@ receiver readiness at 23:36:29 device time on 2026-10-18. No new crash reports
 appeared during installation/readiness checks. Packages, manifests, matching
 armv7 symbols and logs are retained in
 `build/device-runs/gomadango-sync-send-02b1b34/`; remote staging uses
-`/var/mobile/tmp_altivec/gomadango-sync-send-02b1b34/`. Suspended-app completion
-and visible notification testing of this build remain pending.
+`/var/mobile/tmp_altivec/gomadango-sync-send-02b1b34/`. After installation, the owner reported that the background completion test
+worked. The app has no prompt background assertion; the exact OS suspension
+state was not independently instrumented during that visual test.
+
+## Unread status in iOS session rows
+
+Session rows use the existing trailing accessory position. An active prompt
+shows Font Awesome solid `arrows-spin`; an idle unread session shows solid
+`circle`; a read idle session has no accessory. Both glyphs use the same bold
+blue (#007AFF), with the existing 14-point canvas and 10-point icon size.
+Processing takes precedence when a session is both active and unread. These are
+static status glyphs, matching the previous accessory's presentation.
+
+The paged sidebar snapshot now includes `session_attention.has_new_answers`,
+defaulting missing attention rows to read. It uses an indexed join inside the
+existing bounded page query and exposes the flag through `StrappySessionRows`.
+No new persistent state or per-cell database call is needed. Existing committed
+session invalidations refresh the snapshot after completion or acknowledgment,
+so opening a session clears the row dot and the app badge from the same source
+of truth. Reused cells reset their accessory and accessibility status.
+
+The complete offline suite passed, including new checks for default-read rows,
+unread state on refreshed snapshots, snapshot isolation, and acknowledgment
+clearing. The 20,000-session paging test remains bounded (maximum 1,957 VM steps
+per sequential page in this run). The row appearance still needs visual
+confirmation on the phone after installing this build.
 
 ## Implementation validation
 

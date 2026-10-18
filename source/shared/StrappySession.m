@@ -4266,6 +4266,7 @@ NSString * const StrappySessionListReadFailedNotification =
         record = &records.records[row];
         [rows addObject:[NSDictionary dictionaryWithObjectsAndKeys:
           [NSNumber numberWithLongLong:record->session_id], @"id",
+          [NSNumber numberWithBool:record->has_new_answers], @"has_new_answers",
           [NSNumber numberWithLongLong:record->last_activity_at_ms], @"last_activity_at_ms",
           [StrappySession stringFromCStringOrEmpty:record->name], @"name",
           [StrappySession stringFromCStringOrEmpty:record->model_name], @"model_name",

@@ -18,6 +18,7 @@ extern "C" {
 typedef struct strappy_session_reader strappy_session_reader;
 typedef struct strappy_sidebar_record {
   long long session_id;
+  int has_new_answers;
   long long last_activity_at_ms;
   char *name;
   char *model_name;

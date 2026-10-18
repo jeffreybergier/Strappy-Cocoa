@@ -92,13 +92,14 @@ struct strappy_session_reader {
 
 #define STRAPPY_SIDEBAR_SELECT \
   "SELECT p.session_id,p.last_activity_at_ms,s.name,COALESCE(m.name," \
-    "s.model_id," STRAPPY_DB_DEFAULT_MODEL_SQL ",'') FROM (" \
+    "s.model_id," STRAPPY_DB_DEFAULT_MODEL_SQL ",''),COALESCE(a.has_new_answers,0) FROM (" \
     "SELECT session_id,last_activity_at_ms FROM session_activity "
 #define STRAPPY_SIDEBAR_ORDER \
     "ORDER BY last_activity_at_ms DESC,session_id DESC LIMIT ?3 "
 #define STRAPPY_SIDEBAR_JOIN \
   ") p JOIN sessions s ON s.id=p.session_id LEFT JOIN models m ON m.id=" \
     "COALESCE(s.model_id," STRAPPY_DB_DEFAULT_MODEL_SQL ") " \
+    "LEFT JOIN session_attention a ON a.session_id=p.session_id " \
   "ORDER BY p.last_activity_at_ms DESC,p.session_id DESC;"
 
 static int strappy_sidebar_error(strappy_session_reader *reader, char **error_out)
@@ -139,7 +140,7 @@ int strappy_db_sidebar_open(const char *path, strappy_session_reader **out,
   sqlite3_stmt *count_stmt = NULL;
   sqlite3_int64 count = 0;
   int rc;
-  static const char *const tables[] = { "session_activity", "sessions", "models", "app_preferences", NULL };
+  static const char *const tables[] = { "session_activity", "sessions", "models", "app_preferences", "session_attention", NULL };
   if (out == NULL) {
     strappy_set_error(error_out, "Missing session sidebar output.");
     return 0;
@@ -159,7 +160,8 @@ int strappy_db_sidebar_open(const char *path, strappy_session_reader **out,
       "CREATE UNIQUE INDEX temp.activity_id ON session_activity(session_id);"
       "CREATE INDEX temp.activity_order ON session_activity(last_activity_at_ms DESC,session_id DESC);"
       "CREATE UNIQUE INDEX temp.session_id ON sessions(id);"
-      "CREATE UNIQUE INDEX temp.model_id ON models(id);", NULL, NULL, NULL);
+      "CREATE UNIQUE INDEX temp.model_id ON models(id);"
+      "CREATE UNIQUE INDEX temp.attention_id ON session_attention(session_id);", NULL, NULL, NULL);
   }
   if (rc == SQLITE_OK)
     rc = sqlite3_prepare_v2(reader->db, "SELECT count(*) FROM session_activity;", -1, &count_stmt, NULL);
@@ -279,6 +281,7 @@ static int strappy_sidebar_read_statement(strappy_session_reader *reader,
     record->last_activity_at_ms = (long long)sqlite3_column_int64(stmt, 1);
     record->name = strappy_db_column_string(stmt, 2);
     record->model_name = strappy_db_column_string(stmt, 3);
+    record->has_new_answers = sqlite3_column_int(stmt, 4) ? 1 : 0;
     if (record->name == NULL || record->model_name == NULL) {
       strappy_set_error(error_out, "Could not allocate sidebar row.");
       strappy_sidebar_reset(reader, stmt);

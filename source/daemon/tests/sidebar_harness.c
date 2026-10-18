@@ -111,10 +111,13 @@ int main(void)
     require(!strappy_db_sidebar_ids(reader,ids,1,&error),"identity projection rejects truncation");
     free(error); error=NULL;
   }
-  sql(db,"UPDATE sessions SET name='Changed',created_at_ms=500 WHERE id=1;");
+  sql(db,"UPDATE sessions SET name='Changed',created_at_ms=500 WHERE id=1;"
+    "INSERT INTO session_attention(session_id,has_new_answers) VALUES(1,1);");
   require(strappy_db_sidebar_read(reader,0,&page,&error),"read old snapshot after write");
   require(page.count==2 && page.records[0].session_id==2 &&
     strcmp(page.records[1].name,"Renamed")==0,"snapshot preserves order and values");
+  require(!page.records[0].has_new_answers && !page.records[1].has_new_answers,
+    "missing attention row defaults read; old snapshot ignores later unread change");
   strappy_db_sidebar_page_destroy(&page);
   require(strappy_db_sidebar_count_since(reader,200,&count,&error) && count==1,"snapshot counts remain consistent");
   { long long ids[2]; require(strappy_db_sidebar_ids(reader,ids,2,&error) && ids[0]==2 && ids[1]==1,
@@ -122,9 +125,17 @@ int main(void)
   require(strappy_db_sidebar_open(path,&new_reader,&error),"refresh snapshot");
   require(strappy_db_sidebar_read(new_reader,0,&page,&error) && page.records[0].session_id==1 &&
     strcmp(page.records[0].name,"Changed")==0,"new snapshot sees new order and title");
+  require(page.records[0].has_new_answers && !page.records[1].has_new_answers,
+    "refreshed snapshot exposes per-session unread state");
   strappy_db_sidebar_page_destroy(&page);
   strappy_db_sidebar_close(reader); strappy_db_sidebar_close(new_reader);
   reader=NULL; new_reader=NULL;
+  sql(db,"UPDATE session_attention SET has_new_answers=0 WHERE session_id=1;");
+  require(strappy_db_sidebar_open(path,&reader,&error),"open acknowledged snapshot");
+  require(strappy_db_sidebar_read(reader,0,&page,&error) && !page.records[0].has_new_answers,
+    "acknowledgment clears row unread state");
+  strappy_db_sidebar_page_destroy(&page);
+  strappy_db_sidebar_close(reader); reader=NULL;
   sql(db,"DELETE FROM sessions WHERE id=2;");
   require(integer(db,"SELECT count(*) FROM session_activity WHERE session_id=2;")==0,"session deletion removes index entry");
 
