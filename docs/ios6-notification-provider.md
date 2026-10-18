@@ -368,7 +368,7 @@ at 16:11:58 to check repeatability after startup; owner observation is pending.
 Thus a different built-in tone has not yet been validated. The earlier custom
 WAV failure cannot be explained solely by its being a custom resource.
 
-Candidate 0.1.3 remains installed, with no production routing changes. Production
+Candidate 0.1.3 was subsequently replaced by 0.1.4 below. Production
 file hashes/package version remained unchanged. Matching package, armv7 symbols
 and logs are retained in `build/device-runs/gomadango-provider-candidate-v5/`.
 Native macOS tests, clean candidate armv7/arm64 builds, analysis and package
@@ -376,3 +376,58 @@ validation passed. Full clean iOS and four-architecture Mac production builds
 and package validation also passed without compiler warnings. Logs use
 `build/provider-glass-*.log`. These build results do not establish audible
 playback; only the 1007 comparison has owner-confirmed sound so far.
+
+
+## Restore the confirmed default tone: 2026-10-18
+
+Glass test 3 at 16:13:38 also produced a banner without sound, as confirmed
+by the owner. At their request, candidate 0.1.4 restores explicit built-in
+SystemSoundID 1007, the setting previously confirmed audible. It does not
+omit the sound or assume iOS supplies one automatically. Alternate built-in
+and custom-resource playback remain unresolved and outside this restoration.
+
+Installed package SHA-256
+`aba79b21916afc4b5199a4807c037fd472073505a0b266d68067baf41acf35d7`
+using staging `strappy-provider-candidate-v6`. Restarted SpringBoard once
+(PID 3559), and live socket readiness passed. After the owner confirmed the
+Home Screen, sent test 1 at 16:15:26. Logs show sound 1007 attached and
+publication returned. The owner then discovered the phone was on silent,
+so this observation and earlier silent results cannot establish a sound defect.
+Production file hashes and package version remained unchanged. Candidate 0.1.4
+was subsequently replaced for the Glass retest below; production daemon
+routing is still unchanged.
+
+Matching package, armv7 symbols and device logs are retained in
+`build/device-runs/gomadango-provider-candidate-v6/`. Build/test logs use
+`build/provider-restore-*.log`.
+
+
+## Silent-switch correction and Glass retest: 2026-10-18
+
+The owner discovered silent mode was enabled and asked to retry Glass. This
+supersedes earlier assertions that silent mode was off: the earlier no-sound
+observations are inconclusive, including the custom chime. There is not enough
+evidence to conclude either custom resources or alternate built-in sounds are
+broken. Earlier entries above retain the chronological observations only.
+
+Reloaded the exact previously built and validated 0.1.3 Glass package from
+v5, SHA-256 `54ed9ff116c0ef7be750dba057f812609ea978b68f0603768a0727b9d306abdf`,
+in fresh staging `strappy-provider-candidate-v7`. Reverted the uncommitted
+1007 restoration in source to the already committed 1009 implementation.
+The intervening 0.1.4 clean builds, tests, analysis and package checks passed,
+but that version is not the final selection. No new implementation changes
+are required to repeat the Glass test.
+
+Restarted SpringBoard once (PID 3691), and live socket readiness passed. The
+owner explicitly confirmed Home Screen and silent mode disabled. Sent test 1
+at 16:16:52; logs show sound 1009 attached and publication returned. **The
+owner confirmed the Glass test worked.** Glass is the final selected sound;
+0.1.3 remains installed. Production hashes and package version are unchanged.
+The custom WAV has not been retested with the corrected switch state and must
+not be described as a confirmed implementation failure.
+
+Matching package, symbols and device logs are retained in
+`build/device-runs/gomadango-provider-candidate-v7/`. The existing validated
+Glass binary was reused without rebuilding; the final code matches commit
+`7c3a5ed`. This follow-up changes only the test record. Production daemon
+migration, badge lifecycle and tap-to-open validation remain separate work.
