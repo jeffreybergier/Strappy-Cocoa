@@ -124,11 +124,13 @@ static BOOL StrappyAsyncErrorVisible;
 
 - (void)applicationWillResignActive:(UIApplication *)application
 {
+  [StrappySession setSessionObservationActive:NO];
   StrappyLogApplicationLifecycle(@"applicationWillResignActive", application);
 }
 
 - (void)applicationDidEnterBackground:(UIApplication *)application
 {
+  [StrappySession setSessionObservationActive:NO];
   StrappyLogApplicationLifecycle(@"applicationDidEnterBackground", application);
   [self updateLongRunningWorkActivityIndicator];
 }
@@ -142,6 +144,7 @@ static BOOL StrappyAsyncErrorVisible;
 - (void)applicationDidBecomeActive:(UIApplication *)application
 {
   promptBackgroundTaskExpired_ = NO;
+  [StrappySession setSessionObservationActive:YES];
   StrappyLogApplicationLifecycle(@"applicationDidBecomeActive", application);
   [self showNextAsyncError];
   [[StrappyAuthentication sharedAuthentication]
@@ -151,6 +154,7 @@ static BOOL StrappyAsyncErrorVisible;
 
 - (void)applicationWillTerminate:(UIApplication *)application
 {
+  [StrappySession setSessionObservationActive:NO];
   [self endPromptBackgroundTask];
   StrappyLogApplicationLifecycle(@"applicationWillTerminate", application);
   [self setLongRunningWorkNetworkActivityIndicatorEnabled:NO];

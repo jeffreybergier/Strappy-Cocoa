@@ -8,7 +8,9 @@
                  didUpdateSession:(NSDictionary *)session;
 @end
 
-@interface MessageListViewController : UIViewController
+@interface MessageListViewController : UIViewController {
+  BOOL observationVisible_;
+}
 
 @property (nonatomic, assign) id<MessageListViewControllerDelegate> delegate;
 

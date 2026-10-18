@@ -1,5 +1,6 @@
 #ifndef STRAPPY_STORE_CLIENT_H
 #define STRAPPY_STORE_CLIENT_H
+#include <stdint.h>
 enum {
     STRAPPY_STORE_SESSION = 1U << 0,
     STRAPPY_STORE_LEDGER = 1U << 1,
@@ -17,6 +18,8 @@ int strappy_store_client_start(const char *socket_path, const char *database_pat
  * ordinary mutations never replay after an uncertain acknowledgement. */
 int strappy_store_client_command(unsigned int operation, const unsigned char *payload,
     unsigned int length, unsigned int *status);
+/* Main-thread, bounded observation command; idempotent open/close/renew. */
+int strappy_store_client_observe(long long session, uint64_t token, unsigned int mode);
 int strappy_store_client_request_key(char key[65]);
 
 #include "cJSON.h"

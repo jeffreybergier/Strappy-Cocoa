@@ -18,6 +18,8 @@
 struct strappy_ipc_scope { uint32_t topic; long long session, request; };
 struct strappy_ipc_peer {
     int fd, negotiated, subscribed, closing;
+    uint64_t peer_id;
+    struct strappy_ipc_server *server;
     uint32_t last_id;
     pthread_t worker;
     int working, finished, wake_fd;
@@ -40,6 +42,7 @@ struct strappy_ipc_server {
     unsigned char instance[16];
     pthread_mutex_t mutex;
     uint64_t revision;
+    uint64_t next_peer, live_peers[STRAPPY_IPC_MAX_CLIENTS];
     unsigned int pending;
     unsigned int scope_count;
     struct strappy_ipc_scope scopes[STRAPPY_IPC_SCOPES];
@@ -87,6 +90,13 @@ static void *strappy_ipc_command(void *context)
 }
 static void strappy_ipc_drop(struct strappy_ipc_peer *peer)
 {
+    if (peer->server && peer->peer_id) {
+        int i;
+        pthread_mutex_lock(&peer->server->mutex);
+        for (i=0;i<STRAPPY_IPC_MAX_CLIENTS;++i)
+            if (peer->server->live_peers[i]==peer->peer_id) peer->server->live_peers[i]=0;
+        pthread_mutex_unlock(&peer->server->mutex);
+    }
     if (peer->worker_started) {
         pthread_mutex_lock(peer->mutex); peer->worker_stop = 1;
         pthread_cond_signal(&peer->command_changed); pthread_mutex_unlock(peer->mutex);
@@ -166,11 +176,12 @@ static void strappy_ipc_request(strappy_ipc_server *s, struct strappy_ipc_peer *
                 strappy_ipc_snapshot(s, &reply);
             }
         } else if (request.operation >= STRAPPY_IPC_SUBMIT_PROMPT &&
-                   request.operation <= STRAPPY_IPC_AUTH)
+                   request.operation <= STRAPPY_IPC_OBSERVE_SESSION)
         {
             if (s->handler) {
                 if (p->large_payload) request.external_payload = p->large_payload;
                 else memcpy(request.payload, p->input + STRAPPY_IPC_HEADER, request.length);
+                request.peer_id = p->peer_id;
                 p->command = request; p->response = reply;
                 p->handler = s->handler; p->context = s->context; p->mutex = &s->mutex;
                 p->wake_fd = s->wake[1];
@@ -400,6 +411,11 @@ int strappy_ipc_server_step(strappy_ipc_server *s, int wake_fd, int timeout_ms)
             if (i == STRAPPY_IPC_MAX_CLIENTS || strappy_ipc_nonblocking(fd) != 0 ||
                 !strappy_ipc_platform_peer_matches(fd, geteuid())) (void)close(fd);
             else {
+                pthread_mutex_lock(&s->mutex);
+                s->peers[i].peer_id = ++s->next_peer;
+                s->live_peers[i] = s->peers[i].peer_id;
+                pthread_mutex_unlock(&s->mutex);
+                s->peers[i].server = s;
                 s->peers[i].fd = fd; s->peers[i].needed = STRAPPY_IPC_HEADER;
                 s->peers[i].progress = strappy_ipc_platform_milliseconds();
             }
@@ -470,4 +486,15 @@ void strappy_ipc_server_drain(strappy_ipc_server *s)
         pthread_join(p->worker,NULL); pthread_cond_destroy(&p->command_changed);
         p->worker_started = p->working = 0;
     }
+}
+
+int strappy_ipc_server_peer_alive(strappy_ipc_server *s, uint64_t peer)
+{
+    int i, alive=0;
+    if (!s || !peer) return 0;
+    pthread_mutex_lock(&s->mutex);
+    for (i=0;i<STRAPPY_IPC_MAX_CLIENTS;++i)
+        if (s->live_peers[i]==peer) alive=1;
+    pthread_mutex_unlock(&s->mutex);
+    return alive;
 }

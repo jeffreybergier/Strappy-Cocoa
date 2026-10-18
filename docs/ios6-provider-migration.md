@@ -14,8 +14,10 @@ socket and must be removed before installing production because they own the
 same bundle path. The production provider contains no literal test-badge code.
 Existing badge 4 is not cleared by this migration; badge policy is separate work.
 
-The runtime guard accepts iOS 6 only. arm64 and rootless packaging checks do not
-establish support for newer systems or their native plugin loading locations.
+This migration originally accepted iOS 6 only. The subsequent
+[unread/badge implementation](session-unread-notification-plan.md) removes that
+upper version guard and tests candidate loading on iOS 8.4.1. arm64 and rootless
+packaging checks alone do not establish native support.
 The verified cutover target is gomadango, a rootful armv7 iOS 6.1.3 phone.
 
 ## Before the device window

@@ -96,9 +96,22 @@ static void Withdraw(id provider, NSString *record)
 /* Fake icon routing exercises the real test badge bridge. */
 static NSString *testBadge;
 static unsigned int badgeUpdates;
+static BOOL modernBadgeAPI;
 @interface SBIconController : NSObject
 @end
 @implementation SBIconController
++ (BOOL)respondsToSelector:(SEL)selector;
+{
+  if (selector==NSSelectorFromString(@"applicationIconForBundleIdentifier:")) return modernBadgeAPI;
+  if (selector==NSSelectorFromString(@"applicationIconForDisplayIdentifier:")) return !modernBadgeAPI;
+  return [super respondsToSelector:selector];
+}
++ (id)applicationIconForBundleIdentifier:(NSString *)identity;
+{
+  assert(modernBadgeAPI);
+  assert([identity isEqualToString:@"com.altivecintelligence.Strappy"]);
+  return self;
+}
 + (id)sharedInstance;
 {
   return self;
@@ -272,6 +285,28 @@ int main(void)
     assert(badgeUpdates == 0);
 #endif
   }
+  [provider release];
+  provider=[FixtureProvider alloc]; [provider prepare];
+  strappy_badge_packet badge;
+  memset(&badge,0,sizeof(badge)); memcpy(badge.magic,"STB1",4);
+  strcpy(badge.revision,"1"); strcpy(badge.count,"3");
+  unsigned int publications=added, updates=badgeUpdates;
+  assert([provider acceptBadgePacket:&badge]);
+  assert([testBadge intValue]==3 && badgeUpdates==updates+1);
+  assert([provider acceptBadgePacket:&badge]);
+  assert(badgeUpdates==updates+1); /* Lost ACK retry does not mutate again. */
+  strcpy(badge.count,"4"); assert(![provider acceptBadgePacket:&badge]);
+  modernBadgeAPI=YES; /* iOS 8 renamed selector; same badge-only behavior. */
+  strcpy(badge.revision,"2"); strcpy(badge.count,"0");
+  assert([provider acceptBadgePacket:&badge]); assert(testBadge==nil);
+  strcpy(badge.revision,"1"); strcpy(badge.count,"9");
+  assert([provider acceptBadgePacket:&badge]); assert(testBadge==nil);
+  strcpy(badge.revision,"3"); strcpy(badge.count,"-1");
+  assert(![provider acceptBadgePacket:&badge]);
+  strcpy(badge.count,"01"); assert(![provider acceptBadgePacket:&badge]);
+  strcpy(badge.count,"9223372036854775808"); assert(![provider acceptBadgePacket:&badge]);
+  memset(badge.count,'9',sizeof(badge.count)); assert(![provider acceptBadgePacket:&badge]);
+  assert(added==publications); /* Badge-only commands never publish a bulletin. */
   [provider release]; [testBadge release]; testBadge = nil;
   [pool drain];
   puts("notification provider policy: passed");

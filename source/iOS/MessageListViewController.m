@@ -372,6 +372,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 - (void)viewWillAppear:(BOOL)animated
 {
   [super viewWillAppear:animated];
+  observationVisible_=YES;
+  [StrappySession observeSessionIdentifier:[[self session] sessionIdentifier] owner:self];
   [self logLifecycleEvent:@"viewWillAppear begin"];
   if (![self composing]) {
     [self setComposeBarBottomY:[[self view] bounds].size.height];
@@ -392,6 +394,8 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
 - (void)viewWillDisappear:(BOOL)animated
 {
+  observationVisible_=NO;
+  [StrappySession stopObservingSessionForOwner:self];
   [super viewWillDisappear:animated];
   [self logLifecycleEvent:@"viewWillDisappear begin"];
   [self setWebViewScrollsToTop:NO];
@@ -439,6 +443,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
     return;
   }
 
+  [StrappySession stopObservingSessionForOwner:self];
   [self logLifecycleEvent:@"prepareForRemoval begin"];
   [self setTearingDown:YES];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -661,6 +666,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
   StrappySession *oldSession;
   StrappySessionOptions *sessionOptions;
   BOOL sessionChanged;
+  BOOL identityChanged;
   BOOL studyLocked;
 
   if ([self tearingDown]) {
@@ -673,6 +679,7 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
 
   oldSession = [self session];
   sessionChanged = (oldSession != session) ? YES : NO;
+  identityChanged = ![[oldSession sessionIdentifier] isEqual:[session sessionIdentifier]];
   if (sessionChanged) {
     [self clearRequestState];
     if (oldSession != nil) {
@@ -690,6 +697,10 @@ static NSString *StrappyMessageListLifecycleEventName(NSString *notificationName
                                                     object:oldSession];
     }
     [self setSession:session];
+    if (observationVisible_ && identityChanged) {
+      if (session) [StrappySession observeSessionIdentifier:[session sessionIdentifier] owner:self];
+      else [StrappySession stopObservingSessionForOwner:self];
+    }
     if (session != nil) {
       [[NSNotificationCenter defaultCenter]
         addObserver:self

@@ -152,6 +152,13 @@ enum {
   BOOL          promptCancellationRequested_;
 }
 
+/* Main thread only. Owner is borrowed and must stop observation before teardown.
+ * Opening acknowledges immediately, independently of web content rendering.
+ * Application deactivation suspends observation; activation reacquires it. */
++ (void)observeSessionIdentifier:(NSNumber *)identifier owner:(id)owner;
++ (void)stopObservingSessionForOwner:(id)owner;
++ (void)setSessionObservationActive:(BOOL)active;
+
 + (void)bootstrapProcess;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;

@@ -758,7 +758,59 @@ static void StrappyStoreChanged(unsigned int topics, long long session)
   [pool release];
 }
 
+/* Main-thread observation owner; borrowed controller must invalidate before release. */
+static id StrappyObservationOwner;
+static NSNumber *StrappyObservedSession;
+static NSTimer *StrappyObservationTimer;
+static BOOL StrappyObservationActive;
+static uint64_t StrappyObservationToken;
+
 @implementation StrappySession
+
++ (void)renewSessionObservation:(NSTimer *)timer;
+{
+  (void)timer;
+  if (StrappyObservationActive && StrappyObservedSession)
+    (void)strappy_store_client_observe([StrappyObservedSession longLongValue],
+      StrappyObservationToken,2);
+}
+
++ (void)observeSessionIdentifier:(NSNumber *)identifier owner:(id)owner;
+{
+  if (!owner || !identifier || [identifier longLongValue]<=0) return;
+  StrappyObservationOwner=owner;
+  [StrappyObservedSession release]; StrappyObservedSession=[identifier copy];
+  ++StrappyObservationToken;
+  if (StrappyObservationActive)
+    (void)strappy_store_client_observe([identifier longLongValue],StrappyObservationToken,1);
+  if (!StrappyObservationTimer) {
+    StrappyObservationTimer=[[NSTimer timerWithTimeInterval:5.0 target:self
+      selector:@selector(renewSessionObservation:) userInfo:nil repeats:YES] retain];
+    [[NSRunLoop mainRunLoop] addTimer:StrappyObservationTimer forMode:NSRunLoopCommonModes];
+  }
+}
+
++ (void)stopObservingSessionForOwner:(id)owner;
+{
+  if (owner!=StrappyObservationOwner) return;
+  if (StrappyObservedSession)
+    (void)strappy_store_client_observe([StrappyObservedSession longLongValue],StrappyObservationToken,0);
+  StrappyObservationOwner=nil;
+  [StrappyObservedSession release]; StrappyObservedSession=nil;
+  [StrappyObservationTimer invalidate]; [StrappyObservationTimer release];
+  StrappyObservationTimer=nil;
+}
+
++ (void)setSessionObservationActive:(BOOL)active;
+{
+  if (active==StrappyObservationActive) return;
+  StrappyObservationActive=active;
+  if (!StrappyObservedSession) return;
+  if (active) ++StrappyObservationToken;
+  (void)strappy_store_client_observe([StrappyObservedSession longLongValue],
+    StrappyObservationToken,active ? 1U : 0U);
+}
+
 
 + (void)serviceStoreChanged:(NSDictionary *)change
 {

@@ -1,6 +1,7 @@
 #include "strappy_auth.h"
 #include "strappy_execution.h"
 #include "strappy_notifications.h"
+#include "strappy_attention.h"
 #include "strappy_mutations.h"
 #include "strappy_file_scanner.h"
 #include "strappy_study_execution.h"
@@ -233,7 +234,9 @@ static void *strappy_execution_work(void *context)
         pthread_mutex_lock(&e->mutex);
         state = e->stopping ? STRAPPY_RUN_INTERRUPTED :
             (e->cancel ? STRAPPY_RUN_CANCELLED : (ok ? STRAPPY_RUN_COMPLETED : STRAPPY_RUN_FAILED));
-        if (e->run && strappy_run_update(e->db, e->run, state, e->cancel, "", "", 0, 0)) {
+        if (e->run && (e->session_worker ?
+            strappy_attention_finish(e->run,e->session,state,e->cancel,record.name,record.response,error) :
+            strappy_run_update(e->db,e->run,state,e->cancel,"","",0,0))) {
             strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_RUN_CHANGED, e->session, 0);
             notify = e->session_worker;
         }
@@ -247,7 +250,7 @@ static void *strappy_execution_work(void *context)
         if (!e->session_worker) strappy_ipc_server_committed(e->server,STRAPPY_IPC_CATALOG_CHANGED);
         pthread_mutex_unlock(&e->mutex);
         if (notify)
-            strappy_notifications_finished(e->run, state, record.name, record.response, error);
+            strappy_ipc_server_committed_scope(e->server, STRAPPY_IPC_SESSION_CHANGED, e->session, 0);
         free(error);
         strappy_session_record_destroy(&record);
         strappy_service_worker_leave(pool);
@@ -268,6 +271,9 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
     cJSON *settings = NULL;
     strappy_session_options options;
     strappy_session_option_mask mask = 0;
+    if (request->operation == STRAPPY_IPC_OBSERVE_SESSION) {
+        reply->status = strappy_attention_observe(request); return;
+    }
     /* Keyed status reads never execute or retry a maintenance operation. */
     if (request->operation == STRAPPY_IPC_WORK_STATUS && request->length) {
         unsigned int i;
@@ -388,7 +394,13 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
             }
             /* Control mutations never reserve the prompt/maintenance worker. */
             pthread_mutex_unlock(&e->mutex);
+            if (!strcmp(action,"delete_session")) strappy_attention_lock();
             reply->status = strappy_mutation(e->db,e->resources,command,&result) ? STRAPPY_IPC_OK : STRAPPY_IPC_INVALID;
+            if (!strcmp(action,"delete_session")) {
+                if (reply->status==STRAPPY_IPC_OK)
+                    strappy_attention_deleted(strappy_command_number(command,"session"));
+                strappy_attention_unlock();
+            }
             pthread_mutex_lock(&e->mutex);
             if (reply->status == STRAPPY_IPC_OK) {
                 if (result && strlen(result) <= STRAPPY_IPC_MAX_PAYLOAD) {
@@ -555,6 +567,9 @@ strappy_execution *strappy_execution_open(strappy_ipc_server *server, const char
         pthread_key_delete(strappy_execution_key); pthread_mutex_destroy(&e->control);
         strappy_execution_owner = NULL; pthread_mutex_destroy(&e->mutex); pthread_cond_destroy(&e->condition); goto fail;
     }
+    if (!strappy_attention_start(db,server)) {
+        strappy_execution_close(e); return NULL;
+    }
     strappy_ipc_server_handler(server, strappy_execution_command, e);
     return e;
 fail:
@@ -585,6 +600,7 @@ void strappy_execution_close(strappy_execution *e)
         pthread_join(child->worker,NULL); e->children = child->next;
         pthread_mutex_destroy(&child->mutex); pthread_cond_destroy(&child->condition); free(child);
     }
+    strappy_attention_stop();
     strappy_execution_owner = NULL;
     pthread_key_delete(strappy_execution_key); pthread_mutex_destroy(&e->control);
     pthread_mutex_destroy(&e->mutex); pthread_cond_destroy(&e->condition);

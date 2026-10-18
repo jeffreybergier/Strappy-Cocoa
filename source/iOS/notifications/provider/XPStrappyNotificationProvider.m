@@ -18,6 +18,7 @@
 #include <syslog.h>
 #include <unistd.h>
 #include <string.h>
+#include <stdio.h>
 #include "../../../daemon/strappy_notifications.h"
 
 /* Diagnostic builds retain their isolated endpoint and literal badge probe. */
@@ -71,6 +72,17 @@ static id XPGet(id target, NSString *name)
     [target performSelector:selector] : nil;
 }
 
+/* iOS 8 renamed the icon lookup; both forms take/return objects. */
+static id XPApplicationIcon(void)
+{
+  id model=XPGet(XPGet(NSClassFromString(@"SBIconController"),@"sharedInstance"),@"model");
+  SEL selector=NSSelectorFromString(@"applicationIconForBundleIdentifier:");
+  if (![model respondsToSelector:selector])
+    selector=NSSelectorFromString(@"applicationIconForDisplayIdentifier:");
+  return [model respondsToSelector:selector] ?
+    [model performSelector:selector withObject:kSection] : nil;
+}
+
 /* Main-thread diagnostic only: reserved sender IDs 4..99 set literal badges.
  * This is not unread-count policy and must not migrate to daemon routing. */
 #if XP_PROVIDER_DIAGNOSTIC
@@ -80,11 +92,7 @@ static void XPSetTestBadge(const char *run)
   int number = (run[17] - '0') * 10 + run[18] - '0';
   if (number < 4 || number > 99) return;
   @try {
-    id controller = XPGet(NSClassFromString(@"SBIconController"), @"sharedInstance");
-    id model = XPGet(controller, @"model");
-    SEL selector = NSSelectorFromString(@"applicationIconForDisplayIdentifier:");
-    id icon = [model respondsToSelector:selector] ?
-      [model performSelector:selector withObject:kSection] : nil;
+    id icon = XPApplicationIcon();
     NSString *badge = [NSString stringWithFormat:@"%d", number];
     if (!XPSet(icon, @"setBadge:", badge)) {
       syslog(LOG_NOTICE, "StrappyProvider: test badge API unavailable");
@@ -112,6 +120,8 @@ static void XPSetTestBadge(const char *run)
   ino_t socketInode_;
   id sound_;
   BOOL soundAttempted_;
+  long long badgeRevision_;
+  long long badgeCount_;
   XPAddBulletin add_;
   XPWithdrawBulletin withdraw_;
 }
@@ -123,6 +133,8 @@ static void XPSetTestBadge(const char *run)
 - (void)acceptPacket:(const strappy_notification_packet *)packet;
 /* Main-thread lazy sound creation; returned object is borrowed. */
 - (id)notificationSound;
+/* Main-thread badge-only path; YES permits an ACK, never publishes a bulletin. */
+- (BOOL)acceptBadgePacket:(const strappy_badge_packet *)packet;
 @end
 
 static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
@@ -150,8 +162,7 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   self = [super init];
   if (!self) return nil;
   lockFD_ = -1;
-  if (kCFCoreFoundationVersionNumber < 793.0 ||
-      kCFCoreFoundationVersionNumber >= 847.0) {
+  if (kCFCoreFoundationVersionNumber < 793.0) {
     [self release]; return nil;
   }
   add_ = (XPAddBulletin)dlsym(RTLD_DEFAULT, "BBDataProviderAddBulletin");
@@ -360,12 +371,66 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   }
 }
 
+- (BOOL)acceptBadgePacket:(const strappy_badge_packet *)packet;
+{
+  long long values[2];
+  const char *fields[2] = {packet->revision, packet->count};
+  if (memcmp(packet->magic,"STB1",4)) return NO;
+  for (unsigned int i=0;i<2;++i) {
+    const char *text=fields[i];
+    if (!memchr(text,0,24)) return NO;
+    size_t length=strlen(text);
+    if (!length || length>19 || (length>1 && text[0]=='0') ||
+        (length==19 && strcmp(text,"9223372036854775807")>0)) return NO;
+    values[i]=0;
+    for (size_t j=0;j<length;++j) {
+      if (text[j]<'0' || text[j]>'9') return NO;
+      values[i]=values[i]*10 + text[j]-'0';
+    }
+  }
+  if (!values[0]) return NO;
+  if (values[0]<badgeRevision_) return YES;
+  if (values[0]==badgeRevision_) return values[1]==badgeCount_;
+  @try {
+    id icon=XPApplicationIcon();
+    if (![icon respondsToSelector:NSSelectorFromString(@"badgeNumberOrString")]) return NO;
+    NSString *value=values[1] ? [NSString stringWithUTF8String:packet->count] : nil;
+    if (!XPSet(icon,@"setBadge:",value)) return NO;
+    id actual=XPGet(icon,@"badgeNumberOrString");
+    if (value ? ![[actual description] isEqualToString:value] :
+        (actual && ![[actual description] isEqualToString:@"0"] &&
+          [[actual description] length])) return NO;
+    badgeRevision_=values[0]; badgeCount_=values[1];
+    return YES;
+  } @catch (NSException *exception) {
+    (void)exception;
+    syslog(LOG_NOTICE,"StrappyProvider: badge API exception"); return NO;
+  }
+}
+
 - (void)receivePackets;
 {
   for (unsigned int i = 0; receiver_ && i < 8; ++i) {
     unsigned char bytes[sizeof(strappy_notification_packet) + 1];
-    ssize_t size = recv(CFSocketGetNative(receiver_), bytes, sizeof(bytes), 0);
+    struct sockaddr_un from;
+    socklen_t fromSize=sizeof(from);
+    memset(&from,0,sizeof(from));
+    ssize_t size = recvfrom(CFSocketGetNative(receiver_), bytes, sizeof(bytes), 0,
+      (struct sockaddr *)&from,&fromSize);
     if (size < 0) break;
+    if (size == sizeof(strappy_badge_packet)) {
+      strappy_badge_packet packet;
+      char expected[sizeof(from.sun_path)];
+      memcpy(&packet,bytes,sizeof(packet));
+      if ([self acceptBadgePacket:&packet] &&
+          snprintf(expected,sizeof(expected),"%s.ack",XP_PROVIDER_SOCKET)<(int)sizeof(expected) &&
+          memchr(from.sun_path,0,sizeof(from.sun_path)) && !strcmp(from.sun_path,expected)) {
+        memcpy(packet.magic,"STA1",4);
+        (void)sendto(CFSocketGetNative(receiver_),&packet,sizeof(packet),0,
+          (struct sockaddr *)&from,fromSize);
+      }
+      continue;
+    }
     if (size != sizeof(strappy_notification_packet)) continue;
     strappy_notification_packet packet;
     memcpy(&packet, bytes, sizeof(packet));

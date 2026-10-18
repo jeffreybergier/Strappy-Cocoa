@@ -555,3 +555,10 @@ test: session-delete-test
 .PHONY: notification-provider-test
 notification-provider-test:
 	python3 notification_provider_test.py
+
+.PHONY: attention-test
+$(BUILD_DIR)/attention_harness: attention_harness.c ../strappy_attention.c ../strappy_notifications.c ../../shared/XPFoundation/strappy_notification_platform.c $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) | $(BUILD_DIR)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -D_GNU_SOURCE -DSTRAPPY_ENABLE_LOOPBACK_HTTP_TESTS=1 $^ $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
+attention-test: $(BUILD_DIR)/attention_harness
+	python3 -c 'import tempfile,subprocess; from pathlib import Path; d=tempfile.TemporaryDirectory(prefix="strappy-attention-",dir="/tmp"); subprocess.run(["$(BUILD_DIR)/attention_harness",str(Path(d.name)/"fixture")],check=True)'
+test: attention-test

@@ -1,7 +1,8 @@
 # Session unread state, observation and badges
 
-Design discussion and device experiments, 2026-10-18. This is a plan, not an
-implemented database or notification policy.
+Design, implementation and device experiments, 2026-10-18. The policy below is
+implemented for the iOS app and daemon. macOS retains its existing app-owned
+notification presentation policy.
 
 ## Agreed simpler behavior
 
@@ -20,29 +21,90 @@ implemented database or notification policy.
   Completion in an observed session should not add unread state or send an alert.
   Opening a session clears its flag and updates the badge independently of alerts.
 
-## Reliability details still to settle
+## Implemented policy and ordering
 
-The daemon should serialize opening/acknowledgment and completion updates through
-its existing database writer, so a later completion is not erased by a stale
-read/modify/write. The UI sends session-open intent, not a copied boolean value.
-Unread state persists in SQLite. Derived badge updates should send the absolute
-session count, including zero; no increment/decrement guessing.
+`session_attention.has_new_answers` is durable SQLite state. A missing row means
+read, so existing chats begin read. `notification_badge` stores a monotonically
+increasing revision and pending flag; the count is derived from unread sessions.
+Both tables are created additively; `user_version` stays at 1.
 
-A durable `isBeingObserved=true` can become stale after an app crash, kill or
-suspension. Prefer connection-owned observation cleared on disconnect, with a
-bounded expiry if needed for suspended connections. These are implementation
-options, not yet agreed heartbeat requirements. On daemon restart, observation
-must be reestablished by the app rather than trusting a leftover true value.
-The main lifecycle distinction is which session is observed; app backgrounding
-invalidates that observation, while app activity alone grants no global exemption.
+Observation is live, connection-owned daemon state, not a persisted boolean.
+The main-thread UI bridge opens immediately, closes on navigation away or
+resigning activity/backgrounding, and renews every 5 seconds while active.
+Observation expires after 15 seconds without renewal; a disconnected peer is
+ineligible immediately when completion checks it. Returning to the session or
+reconnecting reacquires observation and acknowledges unread answers. Session and
+owner tokens prevent an old controller's close from clearing a newer observation.
+A lost close can suppress a completion until disconnect or lease expiry; lifecycle
+IPC is best effort, so this is bounded rather than mathematically instantaneous.
 
-Decide whether failed prompts count as new answers/unread completions. Existing
-notifications include failures, and exclude cancellation and Database Study.
-Decide whether clearing Notification Center changes unread state (proposal: it
-only dismisses the alert; opening the session acknowledges the answer).
-Session deletion must remove its contribution to the badge. Existing sessions'
-initial unread state and the schema change need an explicit implementation plan;
-no schema/user_version change is made by these experiments.
+The daemon serializes acknowledgment, terminal-state commits and deletion.
+Completion and unread changes commit together, before attempting the alert.
+Failures count as new answers; cancellations, shutdown interruption and Database
+Study do not. Repeated completion processing cannot send a second alert. Clearing
+Notification Center does not acknowledge a session. Opening does not remove
+previously delivered bulletins.
+
+| Event | Durable unread state | Visible alert | Badge update |
+| --- | --- | --- | --- |
+| Open session A | Clear A immediately; observe A | None | Always queue current count, even if unchanged |
+| A completes while observed | A remains read | None | Queue current count |
+| B completes while observing A | Set B unread | Send B alert, even in foreground | Queue current count |
+| Unobserved A completes again | A stays unread | Send new completion alert | Queue same absolute count |
+| Unobserved prompt fails | Set its session unread | Send failure alert | Queue current count |
+| Cancel, interrupt, or Database Study ends | Unchanged | None | None |
+| Switch A to B | End A observation; clear/observe B | None | Always queue current count |
+| Close session / leave app | End observation | None | None |
+| Return to session | Reacquire observation; clear it | None | Always queue current count |
+| Ordinary 5-second renewal | Extend observation | None | None |
+| App disconnects / lease expires | End observation; existing unread unchanged | None by itself | None |
+| Delete session | Remove its unread row and observation | None | Queue current count if it had an attention row |
+| Completion wins race before open | Commit unread and attempt alert, then clear on open | May already be sent | Latest count wins |
+| Open wins race before completion | Completion sees observation and stays read | None | Latest count wins |
+| Provider unavailable or ACK lost | Preserve pending revision | Alerts remain best effort | Retry latest snapshot about once per second |
+| Daemon restarts | Preserve unread; discard observation | No replay | Retry pending snapshot; UI reacquires observation |
+| SpringBoard resprings after ACK | Unchanged | No replay | No forced restoration; OS preserves badge |
+| Dismiss Notification Center item | Unchanged | Dismissed by OS | None |
+
+The dedicated badge worker sends absolute counts using `STB1`; SpringBoard changes
+only the icon badge and acknowledges `STA1` after API readback. Older revisions
+cannot overwrite newer ones, and an ACK clears only its exact durable revision.
+The worker coalesces queued updates to the latest state. There is no comparison
+against the last badge count. Alert submission and badge delivery are independent;
+a banner can appear before its badge update. A later open cannot retract an alert
+already submitted. System settings still control visible presentation and sound.
+
+## Implementation validation
+
+The offline execution suite and dedicated attention harness cover observed and
+unobserved completions, failures, repeated answers, repeated opens, stale closes,
+switching, disconnect, expiry/reacquisition, cancellation, deletion, lost ACKs,
+idle after ACK, and daemon restart with a pending badge. The attention harness
+also runs natively on x4-vm (Mac OS X 10.4.11, PowerPC) and koolphone5 (iOS 8.4.1,
+armv7), using isolated databases and sockets. Both passed.
+
+The production provider policy fixture passed natively on koolphone5, including
+badge validation, duplicate/stale revisions, clear, and separation from bulletin
+publication. A removable candidate provider loaded in iOS 8 SpringBoard and
+acknowledged badge 8 and then zero with real icon readback. iOS 8 needs
+`applicationIconForBundleIdentifier:`; iOS 6 uses
+`applicationIconForDisplayIdentifier:`. Both selectors are runtime checked.
+The iOS-6-only upper version guard has been removed as requested. The native
+candidate also returned from bulletin publication with sound 1009 attached.
+It was removed and SpringBoard restarted afterward; production app and daemon
+SHA-256 fingerprints remained unchanged.
+
+Production builds cover iOS armv7/arm64 and macOS PPC/i386/x86_64/arm64;
+rootful/rootless package payload checks pass. Provider analysis is clean. Broader
+daemon analysis reports an existing possible null `memcpy` source in unchanged
+`strappy_client.c:1230` (raw HTTP debug capture), unrelated to badge handling.
+No new crash reports appeared during the koolphone5 candidate tests.
+
+Native device logs and matching test artifacts are retained under
+`build/device-runs/attention-x4/` and `build/device-runs/attention-koolphone5/`.
+The device tests do not establish visible banner/sound or app navigation behavior:
+the owner is away. End-to-end UI and visual checks on gomadango remain for tonight.
+No production installation on gomadango was attempted during implementation.
 
 ## Test 1: foreground notification delivery
 
@@ -95,7 +157,7 @@ to unload it. The production provider registered in new SpringBoard PID 4355
 and passed a live socket connection check; no new crash reports appeared.
 Restoration has API readback evidence, not a separate owner visual confirmation. Production files were verified against the original installed
 manifest; no production binaries or settings were changed by this experiment.
-No unread tracking or production badge policy is implemented.
+At the time of that experiment, unread tracking was not yet implemented.
 
 Clean probe builds passed for armv7/arm64, along with static analysis and DEB
 validation. Full clean production builds passed for iOS armv7/arm64 and macOS
@@ -109,5 +171,5 @@ gomadango (iOS 6.1.3), not other OS versions.
 
 These results establish both prerequisites for the simpler design: badge changes
 can be separate from alerts, and foreground Strappy does not inherently suppress
-the provider's banners. Next implement session unread/observation state and the
-production badge-update protocol after settling the remaining policy choices.
+the provider's banners. The implementation above uses these results for session observation and the
+independent production badge-update protocol.

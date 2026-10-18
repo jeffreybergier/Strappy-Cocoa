@@ -379,3 +379,16 @@ unsigned int strappy_store_client_wait_maintenance(const char *key)
         { struct timespec delay = {0,250000000}; nanosleep(&delay,NULL); }
     }
 }
+
+int strappy_store_client_observe(long long session, uint64_t token, unsigned int mode)
+{
+    unsigned char payload[20];
+    unsigned int status=STRAPPY_IPC_NOT_READY;
+    strappy_ipc_put32(payload,(uint32_t)((uint64_t)session>>32));
+    strappy_ipc_put32(payload+4,(uint32_t)session);
+    strappy_ipc_put32(payload+8,(uint32_t)(token>>32));
+    strappy_ipc_put32(payload+12,(uint32_t)token);
+    strappy_ipc_put32(payload+16,mode);
+    return strappy_store_exchange(STRAPPY_IPC_OBSERVE_SESSION,payload,sizeof(payload),
+        &status,NULL,1,500) && status==STRAPPY_IPC_OK;
+}

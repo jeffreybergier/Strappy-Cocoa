@@ -27,8 +27,9 @@ receiver/filter files were absent, and no new crash reports appeared.
 
 The earlier literal badge-4 experiment remains only a diagnostic result. The
 production build excludes that code and introduces no badge count/clear policy.
-The provider is iOS 6-only; its arm64 slice satisfies build coverage but
-initialization refuses iOS 7+. The owner confirmed that a real prompt completion through the installed
+That initial provider was iOS 6-only. The subsequent
+[unread/badge implementation](session-unread-notification-plan.md) removes the
+upper version guard, adds badge counting, and tests a candidate on iOS 8.4.1. The owner confirmed that a real prompt completion through the installed
 production package worked. They also confirmed that a later respring preserved
 the badge. See the
 [deployment record](#production-device-cutover-2026-10-18) below.

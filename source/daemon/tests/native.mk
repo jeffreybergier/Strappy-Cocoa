@@ -46,6 +46,20 @@ catalog-refresh-probe_FLAGS = -I../../shared
 catalog-refresh-probe_CORE = static
 catalog-refresh-probe_SIGN = $(auth-probe_SIGN)
 catalog-refresh-probe_LDFLAGS = $(auth-probe_LDFLAGS)
+attention-probe_TYPE = executable
+attention-probe_SOURCES = attention_harness.c ../strappy_attention.c ../strappy_notifications.c ../../shared/XPFoundation/strappy_notification_platform.c ../../shared/strappy_ipc.c ../../shared/XPFoundation/strappy_ipc_platform.c ../strappy_ipc_server.c $(STRAPPY_STORE_SOURCES)
+attention-probe_FLAGS = $(auth-probe_FLAGS) -DSTRAPPY_ENABLE_LOOPBACK_HTTP_TESTS=1
+attention-probe_CORE = static
+attention-probe_SIGN = $(auth-probe_SIGN)
+attention-probe_LDFLAGS = $(auth-probe_LDFLAGS)
+provider-policy-probe_TYPE = executable
+provider-policy-probe_SOURCES = notification_provider_test.m
+provider-policy-probe_FLAGS = -DXP_PROVIDER_DIAGNOSTIC=0
+provider-policy-probe_SIGN = $(auth-probe_SIGN)
+provider-policy-probe_LDFLAGS = -framework Foundation -framework CoreFoundation -framework AudioToolbox -lobjc
+provider-badge-sender_TYPE = executable
+provider-badge-sender_SOURCES = notification_provider_device/badge_sender.c
+provider-badge-sender_SIGN = $(auth-probe_SIGN)
 include $(ALTIVEC_ROOT)/altivec_common_$(if $(filter iOS,$(PLATFORM)),phone,mac).mk
 _package: $(foreach p,$(TEST_PRODUCTS),_product-$(p))
 endif

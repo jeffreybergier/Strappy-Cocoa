@@ -29,7 +29,7 @@ enum strappy_ipc_operation {
     STRAPPY_IPC_REFRESH_CATALOG = 27,
     STRAPPY_IPC_SUBMIT_WITH_OPTIONS = 28,
     STRAPPY_IPC_REFRESH_CREDENTIALS = 29,
-    STRAPPY_IPC_AUTH = 30,
+    STRAPPY_IPC_AUTH = 30, STRAPPY_IPC_OBSERVE_SESSION = 31,
     STRAPPY_IPC_SESSION_CHANGED = 32, STRAPPY_IPC_LEDGER_CHANGED = 33,
     STRAPPY_IPC_CATALOG_CHANGED = 34, STRAPPY_IPC_RUN_CHANGED = 35
 };
@@ -47,6 +47,8 @@ typedef struct strappy_ipc_message {
     /* Borrowed storage for large outgoing requests and server handler input.
      * Valid until send/handler returns; never used for replies or events. */
     const unsigned char *external_payload;
+    /* Server-assigned connection identity; never decoded from the wire. */
+    uint64_t peer_id;
 } strappy_ipc_message;
 
 typedef struct strappy_ipc_server strappy_ipc_server;
@@ -85,6 +87,8 @@ int strappy_ipc_server_committed(strappy_ipc_server *server, uint32_t event);
 /* Stop/join workers before close. */
 void strappy_ipc_server_drain(strappy_ipc_server *server);
 void strappy_ipc_server_close(strappy_ipc_server *server);
+/* Worker-safe liveness, independent of descriptor reuse. */
+int strappy_ipc_server_peer_alive(strappy_ipc_server *server, uint64_t peer);
 
 /* Blocking caller-thread primitives; each complete send/read has a bounded
  * timeout. Short UI control calls intentionally wait on the GUI main thread;

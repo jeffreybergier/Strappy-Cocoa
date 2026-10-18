@@ -15,6 +15,13 @@ typedef struct strappy_notification_packet {
   char body[1601];
 } strappy_notification_packet;
 
+/* Badge-only absolute snapshot and echo acknowledgment. Decimal ASCII avoids
+ * native packing/endian assumptions. Revisions increase in the database.
+ * Receiver replies STA1 only after applying (or recognizing) the revision. */
+typedef struct strappy_badge_packet {
+  char magic[4], revision[24], count[24];
+} strappy_badge_packet;
+
 /* Thread-safe, best-effort nonblocking delivery after the run commits.
  * Borrows strings for this call only. A missing/full receiver never retries
  * the prompt or changes its outcome. Unsupported platforms do nothing.

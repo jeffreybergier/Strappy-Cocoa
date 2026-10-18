@@ -142,7 +142,7 @@ flowchart TB
 ### Completion notifications
 
 On iOS, strappyd sends a completion alert after committing a successful or
-failed prompt, independently of the app's state. The bulletin title is the chat's
+failed prompt when that session is not being observed by the app. The bulletin title is the chat's
 name (up to 100 Unicode characters); its body contains the first 400 Unicode
 characters of the final answer. Failed bodies use `Error`, with a short
 explanation for recognized credential/configuration errors. SpringBoard controls
@@ -150,15 +150,20 @@ how those fields appear on the lock screen and in unlocked banners. Raw provider
 diagnostics are not shown. Cancellation, shutdown interruption, and background
 Database Study do not produce alerts.
 
-The DEB includes a native iOS 6 BulletinBoard provider, loaded by SpringBoard
+The DEB includes a native BulletinBoard provider, loaded by SpringBoard
 without a MobileSubstrate filter. It publishes with Strappy's name/icon,
 Notification Center history, notification settings, and the built-in Glass
 sound. Sound and presentation follow the system's settings. SpringBoard must
 restart after installation or provider updates; the installer prints a reminder.
-The runtime is restricted to iOS 6; other versions are not supported by this
-provider despite cross-building both architectures. Delivery is best-effort:
-a missing or busy receiver never affects the prompt result. Production badge
-counting/clearing is not implemented. See the
+The provider uses runtime-checked private APIs on iOS 6 and later, including the
+iOS 8 icon lookup selector. Alert delivery remains best-effort: a missing or busy
+receiver never affects the prompt result. Per-session unread flags persist in
+SQLite; the badge counts unread sessions. Opening a session immediately clears
+its flag and sends the current absolute count, including zero, without an alert.
+Badge updates use a durable latest-value queue and acknowledgments/retries.
+Observation ends on navigation away or backgrounding; connection loss and a
+15-second lease also prevent indefinitely stale observation. See the
+[policy and timing table](docs/session-unread-notification-plan.md),
 [native findings](docs/ios6-notification-provider.md) and
 [production migration procedure](docs/ios6-provider-migration.md). The package
 migration is installed on gomadango; production socket readiness is verified.

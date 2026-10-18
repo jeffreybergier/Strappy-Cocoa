@@ -106,8 +106,22 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
     notifications = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
     notifications.bind(str(notification_path))
     notifications.settimeout(2)
+    badges = []
+    def receive_alert(timeout):
+        end = time.monotonic() + timeout
+        while True:
+            notifications.settimeout(max(.001,end-time.monotonic()))
+            data, address = notifications.recvfrom(4096)
+            if data[:4] != b'STB1':
+                return data
+            assert len(data) == 52
+            revision, count = (int(x.split(b'\0')[0]) for x in struct.unpack('24s24s',data[4:]))
+            badges.append((revision,count))
+            notifications.sendto(b'STA1'+data[4:],address)
+            if time.monotonic() >= end:
+                raise socket.timeout()
     def notification():
-        data = notifications.recv(4096)
+        data = receive_alert(2)
         assert len(data) == 2030
         magic, run_id, title, body = struct.unpack('4s24s401s1601s', data)
         assert magic == b'STN1'
@@ -116,7 +130,7 @@ with tempfile.TemporaryDirectory(prefix='strappy-run-', dir='/tmp') as temporary
     def no_notification():
         notifications.settimeout(.15)
         try:
-            notifications.recv(4096)
+            receive_alert(.15)
             raise AssertionError('unexpected completion notification')
         except socket.timeout:
             pass

@@ -49,6 +49,7 @@ void strappy_ipc_encode(unsigned char *p, const strappy_ipc_message *m)
 int strappy_ipc_decode(const unsigned char *p, strappy_ipc_message *m)
 {
     m->external_payload = NULL;
+    m->peer_id = 0;
     if (memcmp(p, "STPY", 4) != 0) return -1;
     m->kind = ((uint32_t)p[6] << 8) | p[7];
     m->operation = strappy_ipc_get32(p + 8);
