@@ -5,6 +5,13 @@ readiness passed, and the owner confirmed the real-prompt notification worked. T
 dismissal, clearing, history, repeated notifications and restart behavior.
 See [the investigation](ios6-notification-provider.md) for native observations.
 
+The subsequent unread/badge build `f37bf03` is also installed on gomadango and
+passed the owner-guided core notification and badge tests. See the
+[production test record and approach](session-unread-notification-plan.md).
+The original migration procedure and rollback guidance below remain historical
+context; the current retained deployment is
+`build/device-runs/gomadango-attention-f37bf03/`.
+
 ## Package and compatibility
 
 The Strappy DEB now owns the native provider bundle and no longer ships the

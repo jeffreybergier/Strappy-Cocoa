@@ -2,6 +2,13 @@
 
 ## Current findings and handoff (2026-10-18)
 
+**Current production build: `f37bf03`.** The unread/badge implementation is now
+installed on gomadango. The owner confirmed observed-session suppression,
+foreground alerts for another session, background alerts, two unread sessions
+producing badge 2, and opening each session reducing it to 1 and then clearing it.
+See the [approach, timings and production test record](session-unread-notification-plan.md).
+The earlier provider investigation and migration evidence follows.
+
 On gomadango (iPhone5,2, iOS 6.1.3), the owner confirmed:
 
 - A visible banner and Notification Center entry using Strappy's name/icon.
@@ -25,8 +32,8 @@ strappyd restarted as PID 4031. A payload-free connection check as mobile passed
 All installed production payload hashes matched the staged package, obsolete
 receiver/filter files were absent, and no new crash reports appeared.
 
-The earlier literal badge-4 experiment remains only a diagnostic result. The
-production build excludes that code and introduces no badge count/clear policy.
+The earlier literal badge-4 experiment remains only a diagnostic result. That
+initial production build excluded it and had no badge count/clear policy.
 That initial provider was iOS 6-only. The subsequent
 [unread/badge implementation](session-unread-notification-plan.md) removes the
 upper version guard, adds badge counting, and tests a candidate on iOS 8.4.1. The owner confirmed that a real prompt completion through the installed

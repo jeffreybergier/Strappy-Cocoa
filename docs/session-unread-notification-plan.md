@@ -2,7 +2,8 @@
 
 Design, implementation and device experiments, 2026-10-18. The policy below is
 implemented for the iOS app and daemon. macOS retains its existing app-owned
-notification presentation policy.
+notification presentation policy. Production build `f37bf03` is installed on
+gomadango, where the owner confirmed the core end-to-end behavior below.
 
 ## Agreed simpler behavior
 
@@ -102,9 +103,57 @@ No new crash reports appeared during the koolphone5 candidate tests.
 
 Native device logs and matching test artifacts are retained under
 `build/device-runs/attention-x4/` and `build/device-runs/attention-koolphone5/`.
-The device tests do not establish visible banner/sound or app navigation behavior:
-the owner is away. End-to-end UI and visual checks on gomadango remain for tonight.
-No production installation on gomadango was attempted during implementation.
+Those isolated tests established daemon and provider behavior, not visual
+presentation. The subsequent production checks below establish visible behavior
+and app navigation on gomadango.
+
+## Production deployment and owner-confirmed results on gomadango
+
+On 2026-10-18, installed the rootful production DEB built from `f37bf03` on
+gomadango (iPhone5,2, iOS 6.1.3, armv7), then restarted SpringBoard once.
+The installed package version remains 1.2.0; the commit and SHA-256 identify
+this particular build:
+
+`ebd24470a250db7d0f00a874cbe18cf94b02a27e9af2cae0c1ede2596c77ca6e`
+
+Before installation, the existing payload matched the retained rollback DEB
+from the `6a239a9` deployment. After installation, all installed payload hashes
+matched the new package. strappyd PID 4803 passed the same-user IPC probe,
+including store/execution readiness. SpringBoard PID 4815 logged production
+`receiver.sock` readiness at 23:15:42 device time. No new crash reports appeared
+in the installation/readiness check. Existing chats and settings were preserved.
+
+The owner then ran real prompts and confirmed these results interactively:
+
+| Test | Owner-observed result | Result |
+| --- | --- | --- |
+| Stay in the completing session | No sound and no banner | Pass |
+| Send a prompt, return Home before completion | Banner, sound, badge 1 | Pass |
+| Open that unread session, return Home | Badge gone | Pass |
+| Send in A, switch to B, keep Strappy foregrounded | A's completion produces banner and sound | Pass |
+| Leave A unread, send in B, return Home before completion | Banner, sound, badge 2 | Pass |
+| Open A, return Home | Badge drops from 2 to 1 | Pass |
+| Open B, return Home | Remaining badge clears | Pass |
+
+These results validate per-session alert eligibility, background observation
+cleanup, unread-session counting, and acknowledgment on opening a session.
+The badge follows unread sessions rather than app-wide activity. Opening always
+queues the absolute count, even if unchanged; the provider handles this separately
+from visible bulletin delivery. Observation is deliberately ephemeral, while
+unread state and pending badge updates survive daemon restarts in SQLite.
+
+The production acknowledgment tests explicitly confirmed badge changes. The
+absence of sound/banner for isolated badge-only commands was confirmed in the
+earlier experiment below. Repeated answers in one unread session, failures,
+deletion, disconnect/expiry, and lost ACK/restart recovery remain covered by the
+automated harnesses; they were not separately exercised in this visual session.
+The final owner-observed badge state was cleared.
+
+The new/rollback packages, payload manifests, matching armv7 symbols, installer
+logs, readiness logs and crash inventories are retained locally under
+`build/device-runs/gomadango-attention-f37bf03/`. Remote installation artifacts
+are under `/var/mobile/tmp_altivec/gomadango-attention-f37bf03/`. These generated
+artifacts are ignored by Git; the production code is committed as `f37bf03`.
 
 ## Test 1: foreground notification delivery
 

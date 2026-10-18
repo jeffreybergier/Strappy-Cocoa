@@ -166,7 +166,9 @@ Observation ends on navigation away or backgrounding; connection loss and a
 [policy and timing table](docs/session-unread-notification-plan.md),
 [native findings](docs/ios6-notification-provider.md) and
 [production migration procedure](docs/ios6-provider-migration.md). The package
-migration is installed on gomadango; production socket readiness is verified.
+and unread/badge implementation are installed on gomadango. The owner confirmed
+observed-session suppression, foreground alerts for another session, background
+alerts, and badge transitions 2 → 1 → cleared by opening each unread session.
 
 Offline daemon coverage, including Unicode previews, errors, durable retries,
 cancellation and a missing receiver:
