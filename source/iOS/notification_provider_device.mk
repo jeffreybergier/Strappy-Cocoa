@@ -17,6 +17,7 @@ strappy-provider-test_VERSION = 0.1.5
 strappy-provider-test_INSTALL = StrappyNotificationProvider
 strappy-provider-test_PACKAGE_FILES = $(PROVIDER_DIR)/Info.plist=$(PROVIDER_BUNDLE)/Info.plist
 StrappyNotificationProvider_TYPE = executable
+StrappyNotificationProvider_FLAGS = -DXP_PROVIDER_DIAGNOSTIC=1
 StrappyNotificationProvider_SOURCES = $(PROVIDER_DIR)/XPStrappyNotificationProvider.m
 StrappyNotificationProvider_LDFLAGS = -bundle -framework Foundation -framework CoreFoundation -framework AudioToolbox -lobjc
 StrappyNotificationProvider_SIGN = 1

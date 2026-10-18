@@ -7,6 +7,7 @@ PRODUCTS = StrappyNotificationProvider
 PROVIDER_DIR = notifications/provider
 PROVIDER_BUNDLE = StrappyNotificationProvider.bundle
 StrappyNotificationProvider_TYPE = executable
+StrappyNotificationProvider_FLAGS = -DXP_PROVIDER_DIAGNOSTIC=1
 StrappyNotificationProvider_SOURCES = $(PROVIDER_DIR)/XPStrappyNotificationProvider.m
 StrappyNotificationProvider_LDFLAGS = -bundle -framework Foundation -framework CoreFoundation -framework AudioToolbox -lobjc
 StrappyNotificationProvider_SIGN = 1

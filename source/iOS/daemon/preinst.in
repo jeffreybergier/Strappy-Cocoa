@@ -3,6 +3,7 @@ set -e
 # ALTIVEC_LIFECYCLE
 case "$1" in
     install|upgrade)
+        strappy_provider_preflight
         strappy_service stop
         if command -v killall >/dev/null 2>&1; then
             killall Strappy >/dev/null 2>&1 || true

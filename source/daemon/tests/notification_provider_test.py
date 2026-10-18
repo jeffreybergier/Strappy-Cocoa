@@ -11,13 +11,15 @@ if platform.system() != "Darwin":
     raise SystemExit("This fixture requires macOS Foundation and clang.")
 output = root / "build/tests/notification-provider/policy-test"
 output.parent.mkdir(parents=True, exist_ok=True)
-subprocess.run([
-    "clang", "-Wall", "-Wextra", "-Werror", "-Wno-deprecated-declarations",
-    "-Wno-semicolon-before-method-body", "-framework", "Foundation",
-    "-framework", "CoreFoundation", "-framework", "AudioToolbox",
-    str(Path(__file__).with_suffix(".m")), "-o", str(output),
-], check=True)
-subprocess.run([str(output)], check=True)
+for diagnostic in (0, 1):
+    subprocess.run([
+        "clang", "-DXP_PROVIDER_DIAGNOSTIC=" + str(diagnostic),
+        "-Wall", "-Wextra", "-Werror", "-Wno-deprecated-declarations",
+        "-Wno-semicolon-before-method-body", "-framework", "Foundation",
+        "-framework", "CoreFoundation", "-framework", "AudioToolbox",
+        str(Path(__file__).with_suffix(".m")), "-o", str(output),
+    ], check=True)
+    subprocess.run([str(output)], check=True)
 
 # Readiness must distinguish a live receiver from a stale filesystem entry,
 # and must not itself produce a datagram/notification.

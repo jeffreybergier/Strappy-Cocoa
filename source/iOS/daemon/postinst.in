@@ -4,7 +4,7 @@ set -e
 case "$1" in
     configure)
         strappy_service start
-        echo 'Strappy: restart SpringBoard to load the completion notification receiver.'
+        echo 'Strappy: restart SpringBoard before sending prompts to activate the native notification provider.'
         if command -v uicache >/dev/null 2>&1; then
             su mobile -c 'uicache -p @PREFIX@/Applications/Strappy.app' >/dev/null 2>&1 || uicache -p '@PREFIX@/Applications/Strappy.app' >/dev/null 2>&1 || su mobile -c uicache >/dev/null 2>&1 || uicache >/dev/null 2>&1 || true
         fi

@@ -29,9 +29,12 @@ uses the existing Substrate receiver. The candidate listens on its separate
 The bundle is an iOS 6 runtime candidate: its arm64 slice satisfies build
 coverage but initialization refuses iOS 7+.
 
-Remaining work includes tap-to-open confirmation, native dismissal/history and
-lifecycle validation, and coordinated production packaging/socket migration
-with rollback. The literal badge probe must not become production unread-count
+On 2026-10-18, the owner confirmed tap-to-open and the native notification
+lifecycle checks: dismissal, clearing, retained history, repeated notifications
+and restart behavior. These two validation items are complete based on owner
+confirmation; no new device test or callback trace was collected in this turn.
+Remaining work is coordinated production packaging/socket migration with
+rollback. The literal badge probe must not become production unread-count
 policy. Badge replacement/clearing and persistent unread-count behavior have
 not been established by the visible badge-4 test. No new badge policy is part
 of the owner's requested proof-of-display experiment.
@@ -98,15 +101,14 @@ share the trust boundary. Reply text is not logged or written to disk.
 History access is synchronized; publication/withdrawal occur outside the lock.
 IPC publication runs on the main thread, following the successful probe. The
 server owns the provider, and socket callbacks borrow it until invalidation.
-The actual private API threading, teardown and filter contracts still require
-native validation before production migration. Policy tests use fake private
-classes, so they cannot establish these OS contracts.
+The owner confirmed the observable native lifecycle behavior on 2026-10-18.
+This does not independently establish every private threading/teardown contract.
+Policy tests use fake private classes, so they cannot establish OS contracts.
 
 The optional cleared-info signatures are documented in the historical
 [Ryan Petrich provider template](https://gist.github.com/rpetrich/2340050).
-Their use and opaque array round-trip on our iOS 6 device have not yet been
-observed. In particular, validate individual dismissal, section clearing and
-subsequent list queries, not just successful publication.
+The owner has confirmed dismissal and clearing behavior. The exact optional
+callback form and opaque array round-trip have not been independently traced.
 
 ## Local validation
 
@@ -140,7 +142,53 @@ draining, exclusive receiver ownership, socket permissions, stale socket
 recovery and symlink refusal. It uses an owned temporary directory and never
 opens the production socket or accesses phone data.
 
-## Next milestone
+## Production migration preparation (2026-10-18)
+
+The production Makefile now packages the native provider at
+`/System/Library/BulletinBoardPlugins/StrappyNotificationProvider.bundle`
+in place of `StrappyBulletin.dylib` and its Substrate filter. The provider uses
+`receiver.sock`; strappyd and the STN1 protocol are unchanged. Glass (1009),
+Strappy identity, bounded memory-only history and runtime iOS 6 gating remain.
+Production has no diagnostic badge code or unread-count policy. Explicit
+diagnostic builds retain `provider-candidate.sock` and the literal badge probe.
+
+The package preflight refuses an installed/unpacked test-provider package before
+unpacking the shared bundle path. Remove that package with dpkg first. Upgrading
+the Strappy package lets dpkg remove the old owned dylib/filter; no script
+manually deletes system files. The provider also refuses an existing live socket
+even when its owner does not hold the new lock (the legacy receiver). Dead
+sockets can be recovered after restart. Installation prints a restart reminder;
+it does not restart SpringBoard automatically. See the
+[cutover and rollback procedure](ios6-provider-migration.md).
+
+This is prepared code/package work, not a completed device cutover. The last
+recorded device state above remains unchanged until deployment.
+
+Validation for this preparation:
+
+- Full clean production release builds and package validation passed for iOS
+  armv7/arm64 and macOS PPC/i386/x86_64/arm64, without compiler warnings.
+- Clean diagnostic ZIP and device-test DEB builds, static analysis and package
+  validation passed; production-provider static analysis also passed.
+- The offline Linux suite passed. Package tests passed for both production DEBs:
+  provider present, old receiver/filter and diagnostic sender absent, production
+  socket selected, literal badge code absent, and candidate preflight ordered
+  before the new install script's service stop. Preflight tests cover installed,
+  unpacked, broken, absent and removed packages, plus query failures.
+- Both production and diagnostic native macOS fixtures cross-compiled with
+  warnings treated as errors. Native execution was skipped because the configured
+  Mac hostname `ichigodaifuku.local` did not resolve. The updated fixture covers
+  refusal of a live receiver without a lock, payload-free probing, stale-socket
+  recovery, and absence of diagnostic badge updates in production.
+- No phone installation, notification send or SpringBoard restart was performed.
+  The owner reported seeing a notification during preparation; it is not evidence
+  of this migration, which was still local.
+
+Logs are retained under `build/provider-migration-*.log`. Run the package test
+with `python3 source/daemon/tests/notification_package_test.py` followed by the
+rootful and rootless production DEB paths to repeat its artifact checks.
+
+## Original next milestone
 
 Prepare production packaging and migration with one receiver owning the real
 socket. Remove the old owned dylib/filter and coordinate a SpringBoard restart;

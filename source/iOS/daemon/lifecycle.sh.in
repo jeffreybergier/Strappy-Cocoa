@@ -42,3 +42,30 @@ strappy_service() {
             ;;
     esac
 }
+
+# The removable experiment owns the same bundle path. Refuse before unpacking;
+# the operator removes that package with dpkg, never by deleting its files.
+strappy_provider_preflight() {
+    if ! command -v dpkg-query >/dev/null 2>&1; then
+        echo 'Strappy: dpkg-query is required to check notification bundle ownership.' >&2
+        return 1
+    fi
+    strappy_query_result=0
+    strappy_candidate_status=$(dpkg-query -W -f='${Status}' \
+        com.altivecintelligence.strappy.notification-provider-test 2>/dev/null) || strappy_query_result=$?
+    case "$strappy_query_result" in
+        0) ;;
+        1) strappy_candidate_status='' ;; # Package is not in the database.
+        *)
+            echo 'Strappy: notification package ownership query failed.' >&2
+            return 1
+            ;;
+    esac
+    case "$strappy_candidate_status" in
+        ''|*' not-installed'|*' config-files') ;;
+        *)
+            echo 'Strappy: remove com.altivecintelligence.strappy.notification-provider-test with dpkg before installing this package.' >&2
+            return 1
+            ;;
+    esac
+}

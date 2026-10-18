@@ -1,6 +1,6 @@
 /* Native macOS Foundation fixture for the actual provider implementation.
  * Fake private classes/functions verify policy, not Apple's implementation.
- * No socket activation, SpringBoard, credentials or device access. */
+ * Only temporary fixture sockets; no SpringBoard, credentials or device access. */
 #import <Foundation/Foundation.h>
 #include <assert.h>
 #include <stdio.h>
@@ -228,6 +228,18 @@ int main(void)
   close(fd);
   [provider stopReceiving];
   assert(lstat(fixtureSocket, &after) != 0 && errno == ENOENT);
+  /* A live legacy receiver does not hold our lock: do not steal its socket. */
+  fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  assert(bind(fd, (void *)&address, sizeof(address)) == 0);
+  assert(lstat(fixtureSocket, &before) == 0);
+  [provider startReceiving];
+  assert(lstat(fixtureSocket, &after) == 0 && before.st_ino == after.st_ino);
+  assert(fcntl(fd, F_SETFL, O_NONBLOCK) == 0);
+  assert(recv(fd, &packet, sizeof(packet), 0) == -1 && errno == EAGAIN);
+  [provider stopReceiving];
+  assert(lstat(fixtureSocket, &after) == 0 && before.st_ino == after.st_ino);
+  close(fd);
+  unlink(fixtureSocket);
   /* Simulate a dead process's socket: its lock has been released. */
   fd = socket(AF_UNIX, SOCK_DGRAM, 0);
   assert(bind(fd, (void *)&address, sizeof(address)) == 0);
@@ -251,10 +263,14 @@ int main(void)
       9000000000000000000LL + i);
     [provider acceptPacket:&packet];
     [provider acceptPacket:&packet]; /* Duplicate must not update again. */
+#if XP_PROVIDER_DIAGNOSTIC
     if (i >= 4) {
       assert([testBadge intValue] == (int)i);
       assert(badgeUpdates == i - 3);
     } else assert(badgeUpdates == 0);
+#else
+    assert(badgeUpdates == 0);
+#endif
   }
   [provider release]; [testBadge release]; testBadge = nil;
   [pool drain];

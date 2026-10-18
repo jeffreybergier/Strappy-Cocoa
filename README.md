@@ -150,16 +150,18 @@ how those fields appear on the lock screen and in unlocked banners. Raw provider
 diagnostics are not shown. Cancellation, shutdown interruption, and background
 Database Study do not produce alerts.
 
-The DEB includes `StrappyBulletin.dylib` and its SpringBoard-only MobileSubstrate
-filter. MobileSubstrate must already be available, and SpringBoard must restart
-once after installation or receiver updates. The installer prints this reminder
-without restarting the phone UI automatically. This first receiver uses the
-private iOS 6 banner/lock-screen path verified on gomadango; other OS versions
-are not established by cross-building both architectures. It does not register
-Notification Center history or notification settings. Delivery is best-effort:
-a missing or busy receiver never affects the prompt result. See
-[the investigation](docs/deb-notifications-experiment.md) for native evidence,
-DND behavior, and remaining validation.
+The DEB includes a native iOS 6 BulletinBoard provider, loaded by SpringBoard
+without a MobileSubstrate filter. It publishes with Strappy's name/icon,
+Notification Center history, notification settings, and the built-in Glass
+sound. Sound and presentation follow the system's settings. SpringBoard must
+restart after installation or provider updates; the installer prints a reminder.
+The runtime is restricted to iOS 6; other versions are not supported by this
+provider despite cross-building both architectures. Delivery is best-effort:
+a missing or busy receiver never affects the prompt result. Production badge
+counting/clearing is not implemented. See the
+[native findings](docs/ios6-notification-provider.md) and
+[production migration procedure](docs/ios6-provider-migration.md). The package
+migration is prepared but has not yet been deployed to gomadango.
 
 Offline daemon coverage, including Unicode previews, errors, durable retries,
 cancellation and a missing receiver:

@@ -2,7 +2,7 @@
  * Publication/withdrawal and socket lifecycle run on the main thread. Queries
  * may arrive on other threads: synchronize history; publish outside the lock.
  * History is memory-only, bounded to 32 bulletins and 256 recent run IDs.
- * No user content is logged or persisted. Native lifecycle validation pending.
+ * No user content is logged or persisted.
  */
 #import <Foundation/Foundation.h>
 #import <CoreFoundation/CoreFoundation.h>
@@ -20,10 +20,17 @@
 #include <string.h>
 #include "../../../daemon/strappy_notifications.h"
 
-/* Deliberately cannot take the production receiver's socket in this milestone. */
+/* Diagnostic builds retain their isolated endpoint and literal badge probe. */
+#ifndef XP_PROVIDER_DIAGNOSTIC
+#define XP_PROVIDER_DIAGNOSTIC 0
+#endif
 #ifndef XP_PROVIDER_DIRECTORY
 #define XP_PROVIDER_DIRECTORY STRAPPY_NOTIFICATION_DIRECTORY
+#if XP_PROVIDER_DIAGNOSTIC
 #define XP_PROVIDER_SOCKET XP_PROVIDER_DIRECTORY "/provider-candidate.sock"
+#else
+#define XP_PROVIDER_SOCKET STRAPPY_NOTIFICATION_SOCKET
+#endif
 #define XP_PROVIDER_LOCK XP_PROVIDER_SOCKET ".lock"
 #endif
 static NSString *const kSection = @"com.altivecintelligence.Strappy";
@@ -66,6 +73,7 @@ static id XPGet(id target, NSString *name)
 
 /* Main-thread diagnostic only: reserved sender IDs 4..99 set literal badges.
  * This is not unread-count policy and must not migrate to daemon routing. */
+#if XP_PROVIDER_DIAGNOSTIC
 static void XPSetTestBadge(const char *run)
 {
   if (strlen(run) != 19 || strncmp(run, "90000000000000000", 17)) return;
@@ -91,6 +99,8 @@ static void XPSetTestBadge(const char *run)
     syslog(LOG_NOTICE, "StrappyProvider: test badge update raised exception");
   }
 }
+
+#endif
 
 @interface XPStrappyNotificationProvider : NSObject {
   NSMutableArray *history_;
@@ -338,7 +348,9 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
     if (evicted) withdraw_(self, evicted);
     add_(self, request);
     syslog(LOG_NOTICE, "StrappyProvider: publication returned");
+#if XP_PROVIDER_DIAGNOSTIC
     XPSetTestBadge(packet->run);
+#endif
   } @catch (NSException *exception) {
     /* Keep the recent ID: an exception may occur after publication. */
     [self clearedInfoForBulletins:[NSArray arrayWithObject:request]];
@@ -372,7 +384,7 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
       !S_ISDIR(status.st_mode) || status.st_uid != geteuid() ||
       (status.st_mode & 077)) return;
   /* A lifetime lock permits recovery after a SpringBoard crash without
-   * stealing another provider instance's live socket. Never touch production. */
+   * stealing another provider instance's live socket. */
   int candidateLock = open(XP_PROVIDER_LOCK,
     O_RDWR | O_CREAT | O_NOFOLLOW, 0600);
   if (candidateLock < 0) return;
@@ -383,18 +395,30 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
     close(candidateLock); return;
   }
   lockFD_ = candidateLock;
-  if (!lstat(XP_PROVIDER_SOCKET, &status)) {
-    if (!S_ISSOCK(status.st_mode) || status.st_uid != geteuid() ||
-        unlink(XP_PROVIDER_SOCKET)) { [self stopReceiving]; return; }
-  } else if (errno != ENOENT) { [self stopReceiving]; return; }
-  fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-  if (fd < 0) { [self stopReceiving]; return; }
   memset(&address, 0, sizeof(address));
   address.sun_family = AF_UNIX;
   if (strlen(XP_PROVIDER_SOCKET) >= sizeof(address.sun_path)) {
-    close(fd); [self stopReceiving]; return;
+    [self stopReceiving]; return;
   }
   strcpy(address.sun_path, XP_PROVIDER_SOCKET);
+  if (!lstat(XP_PROVIDER_SOCKET, &status)) {
+    if (!S_ISSOCK(status.st_mode) || status.st_uid != geteuid()) {
+      [self stopReceiving]; return;
+    }
+    /* The legacy receiver has no flock. Refuse its live endpoint too; only
+     * recover a socket whose connect explicitly reports a dead receiver.
+     * A connect check does not send a notification. */
+    int probe = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (probe < 0) { [self stopReceiving]; return; }
+    int connected = connect(probe, (struct sockaddr *)&address, sizeof(address));
+    int failure = errno;
+    close(probe);
+    if (!connected || failure != ECONNREFUSED || unlink(XP_PROVIDER_SOCKET)) {
+      [self stopReceiving]; return;
+    }
+  } else if (errno != ENOENT) { [self stopReceiving]; return; }
+  fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+  if (fd < 0) { [self stopReceiving]; return; }
   flags = fcntl(fd, F_GETFL, 0);
   if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) ||
       fcntl(fd, F_SETFD, FD_CLOEXEC) ||
@@ -417,7 +441,7 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   source_ = CFSocketCreateRunLoopSource(kCFAllocatorDefault, receiver_, 0);
   if (!source_) { [self stopReceiving]; return; }
   CFRunLoopAddSource(CFRunLoopGetMain(), source_, kCFRunLoopCommonModes);
-  syslog(LOG_NOTICE, "StrappyProvider: candidate receiver ready");
+  syslog(LOG_NOTICE, "StrappyProvider: receiver ready at %s", XP_PROVIDER_SOCKET);
 }
 
 - (void)stopReceiving;
