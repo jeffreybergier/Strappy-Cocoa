@@ -586,6 +586,22 @@ static id XPAppKitLegacyWebFrameViewForView(NSView *view)
 
 @implementation NSTableView (XPAppKit)
 
+- (void)XP_reloadVisibleRow:(NSInteger)row;
+{
+  SEL reload = @selector(reloadDataForRowIndexes:columnIndexes:);
+  if (row < 0 || row >= [self numberOfRows] ||
+      !NSIntersectsRect([self rectOfRow:row], [self visibleRect])) return;
+  if ([self respondsToSelector:reload]) {
+    [self performSelector:reload
+      withObject:[NSIndexSet indexSetWithIndex:(NSUInteger)row]
+      withObject:[NSIndexSet indexSetWithIndexesInRange:
+        NSMakeRange(0, [[self tableColumns] count])]];
+  } else {
+    /* Tiger's cell-based table asks its data source again while drawing. */
+    [self setNeedsDisplayInRect:[self rectOfRow:row]];
+  }
+}
+
 - (BOOL)XP_supportsGroupRows
 {
   /* Source-list highlighting and delegate group rows both arrived in 10.5.

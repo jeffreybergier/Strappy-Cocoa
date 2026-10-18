@@ -19,6 +19,7 @@ typedef struct strappy_session_reader strappy_session_reader;
 typedef struct strappy_sidebar_record {
   long long session_id;
   int has_new_answers;
+  int prompt_in_flight; /* Latest committed run, captured with this snapshot. */
   long long last_activity_at_ms;
   char *name;
   char *model_name;

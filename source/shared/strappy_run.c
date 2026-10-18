@@ -23,6 +23,25 @@ int strappy_run_read(sqlite3_stmt *q, strappy_run_record *r)
     r->updated_ms = sqlite3_column_int64(q, 14);
     return r->request_key && r->prompt && r->status_kind && r->status_reason && r->status_key;
 }
+int strappy_run_is_active(const char *path, long long session, int *active)
+{
+    sqlite3 *db = NULL;
+    sqlite3_stmt *q = NULL;
+    int rc;
+    *active = 0;
+    if (!strappy_db_open_reader(path, &db, NULL)) return 0;
+    rc = sqlite3_prepare_v2(db, "SELECT state IN (1,2) FROM prompt_runs "
+        "WHERE session_id=?1 ORDER BY id DESC LIMIT 1", -1, &q, NULL);
+    if (rc == SQLITE_OK) {
+        sqlite3_bind_int64(q, 1, session);
+        rc = sqlite3_step(q);
+    }
+    if (rc == SQLITE_ROW) *active = sqlite3_column_int(q, 0);
+    sqlite3_finalize(q);
+    sqlite3_close(db);
+    return rc == SQLITE_ROW || rc == SQLITE_DONE;
+}
+
 int strappy_run_latest(const char *path, long long session, strappy_run_record *r)
 {
     sqlite3 *db = NULL; sqlite3_stmt *q = NULL; int rc;

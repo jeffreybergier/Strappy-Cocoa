@@ -40,10 +40,7 @@ static NSString *StrappySessionDisplayTimestamp(NSNumber *timestamp)
 
 static BOOL StrappySessionPromptIsInFlight(NSDictionary *session)
 {
-  NSNumber *identifier;
-
-  identifier = [session objectForKey:@"id"];
-  return [StrappySession isPromptInFlightForSessionIdentifier:identifier];
+  return [[session objectForKey:@"prompt_in_flight"] boolValue];
 }
 
 static NSString *StrappySessionSubtitle(NSDictionary *session)
@@ -147,12 +144,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(sessionPromptActivityDidChange:)
-           name:StrappySessionPromptDidStartNotification
-         object:nil];
-  [[NSNotificationCenter defaultCenter]
-    addObserver:self
-       selector:@selector(sessionPromptActivityDidChange:)
-           name:StrappySessionPromptDidFinishNotification
+           name:StrappySessionListActivityDidChangeNotification
          object:nil];
 
   [[NSNotificationCenter defaultCenter] addObserver:self
@@ -187,6 +179,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
 - (void)reloadData
 {
+  [pendingPromptStates_ removeAllObjects];
   if (!sidebarCollection_) sidebarCollection_ = [[AICollectionController alloc]
       initWithTarget:self selector:@selector(sidebarLoaded:) builder:[StrappySession class]];
   NSDictionary *request=[NSDictionary dictionaryWithObject:@"sidebar" forKey:@"kind"];
@@ -222,6 +215,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   }
   if ([sidebarCollection_ prepareResult:result snapshotKey:@"collection"
       previousSnapshot:[[self collectionTableAdapter] snapshot]]) return;
+  [sessions applyPromptStates:pendingPromptStates_];
   [self setSessions:sessions];
   [self setSections:sections];
   [[self collectionTableAdapter] applySnapshot:[result objectForKey:@"collection"]];
@@ -370,31 +364,17 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification
 {
-  StrappySession *session;
-  NSNumber *identifier;
-  NSDictionary *summary;
-
-  session = [notification object];
-  identifier = nil;
-  if ([session isKindOfClass:[StrappySession class]]) {
-    identifier = [session sessionIdentifier];
+  NSDictionary *states = [notification userInfo];
+  if (!pendingPromptStates_) pendingPromptStates_ = [[NSMutableDictionary alloc] init];
+  [pendingPromptStates_ addEntriesFromDictionary:states];
+  NSMutableArray *paths = [NSMutableArray array];
+  for (NSNumber *identifier in [[self sessions] applyPromptStates:states]) {
+    NSIndexPath *path = [self indexPathForSessionIdentifier:identifier];
+    if (path && [[[self tableView] indexPathsForVisibleRows] containsObject:path])
+      [paths addObject:path];
   }
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    summary = [[notification userInfo] objectForKey:@"session"];
-    if ([summary isKindOfClass:[NSDictionary class]]) {
-      identifier = [summary objectForKey:@"id"];
-    }
-  }
-  if ([identifier isKindOfClass:[NSNumber class]]) {
-    NSIndexPath *indexPath;
-
-    indexPath = [self indexPathForSessionIdentifier:identifier];
-    if (indexPath != nil) {
-      [[self tableView]
-        reloadRowsAtIndexPaths:[NSArray arrayWithObject:indexPath]
-              withRowAnimation:UITableViewRowAnimationNone];
-    }
-  }
+  if ([paths count]) [[self tableView] reloadRowsAtIndexPaths:paths
+    withRowAnimation:UITableViewRowAnimationNone];
 }
 
 - (void)modelCatalogDidChange:(NSNotification *)notification
@@ -434,8 +414,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
     return NO;
   }
 
-  if (StrappySessionPromptIsInFlight(session) ||
-      [StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier]) {
+  if (StrappySessionPromptIsInFlight(session)) {
     return NO;
   }
 
@@ -475,6 +454,11 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
     return;
   }
 
+  if ([StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier]) {
+    [self reloadData];
+    return;
+  }
+
   [[StrappyAsync commandTarget:[StrappySession class] title:NSLocalizedString(@"Delete conversation",nil) receiver:self completion:@selector(sessionDeleted:) context:sessionIdentifier] deleteSessionWithIdentifier:sessionIdentifier error:NULL];
 }
 
@@ -496,12 +480,16 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 
 - (UIView *)sessionStatusAccessoryViewForUnread:(BOOL)unread;
 {
-  UIColor *blue = [UIColor colorWithRed:0.0f green:(122.0f / 255.0f)
-                                 blue:1.0f alpha:1.0f];
-  UIImage *image = [AIFontAwesome imageForIcon:unread ? AIFACircle : AIFAArrowsSpin
-    style:AIFontAwesomeStyleSolid iconSize:10.0f canvasSize:14.0f
-    color:blue scale:0.0f];
-  return image ? [[UIImageView alloc] initWithImage:image] : nil;
+  static UIImage *images[2];
+  NSUInteger index = unread ? 1U : 0U;
+  if (!images[index]) {
+    UIColor *blue = [UIColor colorWithRed:0.0f green:(122.0f / 255.0f)
+                                   blue:1.0f alpha:1.0f];
+    images[index] = [AIFontAwesome imageForIcon:unread ? AIFACircle : AIFAArrowsSpin
+      style:AIFontAwesomeStyleSolid iconSize:10.0f canvasSize:14.0f
+      color:blue scale:0.0f];
+  }
+  return images[index] ? [[UIImageView alloc] initWithImage:images[index]] : nil;
 }
 
 - (void)notifySelectedSession

@@ -92,7 +92,7 @@ struct strappy_session_reader {
 
 #define STRAPPY_SIDEBAR_SELECT \
   "SELECT p.session_id,p.last_activity_at_ms,s.name,COALESCE(m.name," \
-    "s.model_id," STRAPPY_DB_DEFAULT_MODEL_SQL ",''),COALESCE(a.has_new_answers,0) FROM (" \
+    "s.model_id," STRAPPY_DB_DEFAULT_MODEL_SQL ",''),COALESCE(a.has_new_answers,0),COALESCE(r.active,0) FROM (" \
     "SELECT session_id,last_activity_at_ms FROM session_activity "
 #define STRAPPY_SIDEBAR_ORDER \
     "ORDER BY last_activity_at_ms DESC,session_id DESC LIMIT ?3 "
@@ -100,6 +100,7 @@ struct strappy_session_reader {
   ") p JOIN sessions s ON s.id=p.session_id LEFT JOIN models m ON m.id=" \
     "COALESCE(s.model_id," STRAPPY_DB_DEFAULT_MODEL_SQL ") " \
     "LEFT JOIN session_attention a ON a.session_id=p.session_id " \
+    "LEFT JOIN sidebar_runs r ON r.session_id=p.session_id " \
   "ORDER BY p.last_activity_at_ms DESC,p.session_id DESC;"
 
 static int strappy_sidebar_error(strappy_session_reader *reader, char **error_out)
@@ -140,7 +141,20 @@ int strappy_db_sidebar_open(const char *path, strappy_session_reader **out,
   sqlite3_stmt *count_stmt = NULL;
   sqlite3_int64 count = 0;
   int rc;
-  static const char *const tables[] = { "session_activity", "sessions", "models", "app_preferences", "session_attention", NULL };
+  /* Capture only display state, including the latest run's boolean. Never
+   * copy prompt text or hold the main database snapshot while scrolling. */
+  static const char *snapshot =
+    "PRAGMA temp_store=FILE; BEGIN;"
+    "CREATE TEMP TABLE session_activity AS SELECT * FROM main.session_activity;"
+    "CREATE TEMP TABLE sessions AS SELECT * FROM main.sessions;"
+    "CREATE TEMP TABLE models AS SELECT * FROM main.models;"
+    "CREATE TEMP TABLE app_preferences AS SELECT * FROM main.app_preferences;"
+    "CREATE TEMP TABLE session_attention AS SELECT * FROM main.session_attention;"
+    "CREATE TEMP TABLE sidebar_runs AS SELECT s.id AS session_id,"
+      "COALESCE((SELECT state IN (1,2) FROM main.prompt_runs r "
+        "WHERE r.session_id=s.id ORDER BY r.id DESC LIMIT 1),0) AS active "
+      "FROM main.sessions s;"
+    "COMMIT;";
   if (out == NULL) {
     strappy_set_error(error_out, "Missing session sidebar output.");
     return 0;
@@ -155,13 +169,14 @@ int strappy_db_sidebar_open(const char *path, strappy_session_reader **out,
   rc = strappy_db_open_reader(path, &reader->db, error_out) ? SQLITE_OK : SQLITE_ERROR;
   if (rc == SQLITE_OK) {
     sqlite3_busy_timeout(reader->db, 5000);
-    rc = strappy_db_reader_snapshot(reader->db, tables, error_out) ? SQLITE_OK : SQLITE_ERROR;
+    rc = strappy_db_exec(reader->db, snapshot, "Could not capture sidebar", error_out) ? SQLITE_OK : SQLITE_ERROR;
     if (rc == SQLITE_OK) rc = sqlite3_exec(reader->db,
       "CREATE UNIQUE INDEX temp.activity_id ON session_activity(session_id);"
       "CREATE INDEX temp.activity_order ON session_activity(last_activity_at_ms DESC,session_id DESC);"
       "CREATE UNIQUE INDEX temp.session_id ON sessions(id);"
       "CREATE UNIQUE INDEX temp.model_id ON models(id);"
-      "CREATE UNIQUE INDEX temp.attention_id ON session_attention(session_id);", NULL, NULL, NULL);
+      "CREATE UNIQUE INDEX temp.attention_id ON session_attention(session_id);"
+      "CREATE UNIQUE INDEX temp.sidebar_run_id ON sidebar_runs(session_id);", NULL, NULL, NULL);
   }
   if (rc == SQLITE_OK)
     rc = sqlite3_prepare_v2(reader->db, "SELECT count(*) FROM session_activity;", -1, &count_stmt, NULL);
@@ -282,6 +297,7 @@ static int strappy_sidebar_read_statement(strappy_session_reader *reader,
     record->name = strappy_db_column_string(stmt, 2);
     record->model_name = strappy_db_column_string(stmt, 3);
     record->has_new_answers = sqlite3_column_int(stmt, 4) ? 1 : 0;
+    record->prompt_in_flight = sqlite3_column_int(stmt, 5) ? 1 : 0;
     if (record->name == NULL || record->model_name == NULL) {
       strappy_set_error(error_out, "Could not allocate sidebar row.");
       strappy_sidebar_reset(reader, stmt);

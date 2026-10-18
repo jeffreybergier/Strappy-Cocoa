@@ -3,19 +3,25 @@
 #import "StrappySessionSections.h"
 
 extern NSString * const StrappySessionListReadFailedNotification;
+/* Main-thread committed run-state push: userInfo maps session IDs to booleans. */
+extern NSString * const StrappySessionListActivityDidChangeNotification;
 
-/* Main-thread, immutable DB snapshot with a bounded cache of sidebar rows. */
+/* Main-thread ordered DB snapshot with bounded pages and pushed run state. */
 @interface StrappySessionRows : NSArray <StrappySessionListSource> {
  @private
   NSArray *collectionIdentifiers_;
   void *reader_;
   NSMutableDictionary *pages_;
   NSMutableArray *pageOrder_;
+  NSMutableDictionary *promptStates_;
   NSError *readError_;
 }
 - (id)initWithDatabasePath:(NSString *)path error:(NSError **)error;
 - (NSUInteger)countSinceTimestamp:(long long)timestamp;
 - (NSUInteger)indexForSessionIdentifier:(NSNumber *)identifier;
+/* Main-thread only; applies committed pushes without changing row order.
+ * Returns IDs present in this snapshot. Later cache misses use the same state. */
+- (NSArray *)applyPromptStates:(NSDictionary *)states;
 - (NSArray *)collectionIdentifiers;
 - (NSError *)readError;
 @end

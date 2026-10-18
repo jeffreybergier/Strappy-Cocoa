@@ -25,7 +25,7 @@ static const AIFontAwesomeIcon kStrappySessionToolbarPlusIcon =
 static const AIFontAwesomeIcon kStrappySessionToolbarMinusIcon =
   AIFAMinus;
 static const AIFontAwesomeIcon kStrappySessionPromptActiveIcon =
-  AIFAArrowsRotate;
+  AIFAArrowsSpin;
 
 enum {
   kStrappySessionToolbarDelete = 0,
@@ -113,7 +113,7 @@ static NSColor *StrappySecondaryTextColor(BOOL selected)
 
 static BOOL StrappyRowIsPromptInFlight(NSDictionary *row)
 {
-  return [StrappySession isPromptInFlightForSessionIdentifier:[row objectForKey:@"id"]];
+  return [[row objectForKey:@"prompt_in_flight"] boolValue];
 }
 
 static CGFloat StrappyBackingScaleForView(NSView *view)
@@ -129,32 +129,34 @@ static CGFloat StrappyBackingScaleForView(NSView *view)
   return (scale > 1.0) ? scale : 1.0;
 }
 
-static void StrappyDrawTintedImage(NSImage *image,
-                                   NSRect rect,
-                                   NSColor *color)
+/* Main-thread image cache: rasterization/tinting must not repeat per redraw. */
+static NSImage *StrappySessionStatusImage(BOOL processing, CGFloat scale)
 {
-  NSImage *tintedImage;
-  NSRect imageRect;
-
-  if ((image == nil) || (color == nil)) {
-    return;
+  static NSImage *images[2] = { nil, nil };
+  static CGFloat cachedScale = 0.0;
+  NSUInteger index = processing ? 1U : 0U;
+  NSImage *image;
+  NSRect rect;
+  if (scale != cachedScale) {
+    [images[0] release]; [images[1] release];
+    images[0] = nil; images[1] = nil; cachedScale = scale;
   }
-
-  imageRect = NSMakeRect(0.0, 0.0, [image size].width, [image size].height);
-  tintedImage = [[[NSImage alloc] initWithSize:[image size]] autorelease];
-  [tintedImage lockFocus];
-  [image drawAtPoint:NSZeroPoint
-            fromRect:imageRect
-           operation:XPCompositingOperationSourceOver
-            fraction:1.0];
-  [color set];
-  NSRectFillUsingOperation(imageRect, XPCompositingOperationSourceIn);
-  [tintedImage unlockFocus];
-
-  [tintedImage drawInRect:rect
-                 fromRect:imageRect
-                operation:XPCompositingOperationSourceOver
-                 fraction:1.0];
+  if (images[index]) return images[index];
+  image = [AIFontAwesome imageForIcon:processing ?
+    kStrappySessionPromptActiveIcon : AIFACircle
+    style:AIFontAwesomeStyleSolid iconSize:kStrappyPromptIconSize
+    canvasSize:kStrappyPromptIconCanvasSize scale:scale];
+  if (!image) return nil;
+  rect = NSMakeRect(0, 0, [image size].width, [image size].height);
+  images[index] = [[NSImage alloc] initWithSize:[image size]];
+  [images[index] lockFocus];
+  [image drawAtPoint:NSZeroPoint fromRect:rect
+    operation:XPCompositingOperationSourceOver fraction:1.0];
+  [[NSColor colorWithCalibratedRed:0.0 green:122.0 / 255.0
+    blue:1.0 alpha:1.0] set];
+  NSRectFillUsingOperation(rect, XPCompositingOperationSourceIn);
+  [images[index] unlockFocus];
+  return images[index];
 }
 
 @protocol StrappySessionTableViewMenu <NSObject>
@@ -285,7 +287,7 @@ static void StrappyDrawTintedImage(NSImage *image,
 
     titleY += kStrappyTimestampHeight + kStrappyTimestampGap;
   }
-  if (promptInFlight) {
+  if (promptInFlight || [[row objectForKey:@"has_new_answers"] boolValue]) {
     NSImage *image;
 
     promptIconRect =
@@ -296,14 +298,10 @@ static void StrappyDrawTintedImage(NSImage *image,
                      kStrappyPromptIconCanvasSize) / 2.0),
                  kStrappyPromptIconCanvasSize,
                  kStrappyPromptIconCanvasSize);
-    image = [AIFontAwesome imageForIcon:kStrappySessionPromptActiveIcon
-                                  style:AIFontAwesomeStyleSolid
-                               iconSize:kStrappyPromptIconSize
-                             canvasSize:kStrappyPromptIconCanvasSize
-                                  scale:scale];
-    StrappyDrawTintedImage(image,
-                           promptIconRect,
-                           StrappySecondaryTextColor(selected));
+    image = StrappySessionStatusImage(promptInFlight, scale);
+    [image drawInRect:promptIconRect
+      fromRect:NSMakeRect(0, 0, [image size].width, [image size].height)
+      operation:XPCompositingOperationSourceOver fraction:1.0];
   }
 
   titleRect = NSMakeRect(NSMinX(frame) + kStrappyPadLeft,
@@ -447,12 +445,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   [[NSNotificationCenter defaultCenter]
     addObserver:self
        selector:@selector(sessionPromptActivityDidChange:)
-           name:StrappySessionPromptDidStartNotification
-         object:nil];
-  [[NSNotificationCenter defaultCenter]
-    addObserver:self
-       selector:@selector(sessionPromptActivityDidChange:)
-           name:StrappySessionPromptDidFinishNotification
+           name:StrappySessionListActivityDidChangeNotification
          object:nil];
   [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(modelCatalogDidChange:)
     name:StrappySessionDidUpdateNotification object:nil];
@@ -594,32 +587,16 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 - (void)sessionPromptActivityDidChange:(NSNotification *)notification
 {
-  StrappySession *session;
+  NSDictionary *states = [notification userInfo];
+  if (!pendingPromptStates_) pendingPromptStates_ = [[NSMutableDictionary alloc] init];
+  [pendingPromptStates_ addEntriesFromDictionary:states];
+  NSEnumerator *enumerator = [[sessionRows_ applyPromptStates:states] objectEnumerator];
   NSNumber *identifier;
-  NSDictionary *summary;
-
-  session = [notification object];
-  identifier = nil;
-  if ([session isKindOfClass:[StrappySession class]]) {
-    identifier = [session sessionIdentifier];
+  while ((identifier = [enumerator nextObject])) {
+    NSInteger row = [self rowForSessionIdentifier:identifier];
+    if (row >= 0) [tableView_ XP_reloadVisibleRow:row];
   }
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    summary = [[notification userInfo] objectForKey:@"session"];
-    if ([summary isKindOfClass:[NSDictionary class]]) {
-      identifier = [summary objectForKey:@"id"];
-    }
-  }
-  if (![identifier isKindOfClass:[NSNumber class]]) {
-    return;
-  }
-
-  {
-    NSInteger row;
-    row = [self rowForSessionIdentifier:identifier];
-    if (row < 0) return;
-    [tableView_ setNeedsDisplayInRect:[tableView_ rectOfRow:row]];
-    [self updateToolbarSegments];
-  }
+  [self updateToolbarSegments];
 }
 
 - (void)modelCatalogDidChange:(NSNotification *)notification
@@ -664,6 +641,7 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 - (void)reloadData
 {
+  [pendingPromptStates_ removeAllObjects];
   if (!sidebarCollection_) sidebarCollection_ = [[AICollectionController alloc]
       initWithTarget:self selector:@selector(sidebarLoaded:) builder:[StrappySession class]];
   NSDictionary *request=[NSDictionary dictionaryWithObject:@"sidebar" forKey:@"kind"];
@@ -698,6 +676,7 @@ static void StrappyDrawTintedImage(NSImage *image,
   }
   if ([sidebarCollection_ prepareResult:result snapshotKey:@"collection"
       previousSnapshot:[tableView_collection_ snapshot]]) return;
+  [sessions applyPromptStates:pendingPromptStates_];
   rows = [[result objectForKey:@"tableRows"] retain];
   [rows_ release];
   rows_ = rows;
@@ -844,8 +823,7 @@ static void StrappyDrawTintedImage(NSImage *image,
     return NO;
   }
 
-  if (StrappyRowIsPromptInFlight(rowData) ||
-      [StrappySession isPromptInFlightForSessionIdentifier:sessionIdentifier]) {
+  if (StrappyRowIsPromptInFlight(rowData)) {
     return NO;
   }
 
@@ -1143,6 +1121,7 @@ static void StrappyDrawTintedImage(NSImage *image,
 
 - (void)dealloc
 {
+  [pendingPromptStates_ release];
   [sidebarCollection_ invalidate]; [sidebarCollection_ release];
   [tableView_collection_ invalidate]; [tableView_collection_ release];
   [[NSNotificationCenter defaultCenter] removeObserver:self];

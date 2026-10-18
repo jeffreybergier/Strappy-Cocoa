@@ -14,6 +14,8 @@ typedef struct strappy_run_record {
     long long status_started_ms, retry_until_ms, updated_ms;
     unsigned int retry_after_seconds, retry_attempt, retry_max_attempts;
 } strappy_run_record;
+/* Lightweight committed status; no prompt/status strings are materialized. */
+int strappy_run_is_active(const char *path, long long session, int *active);
 unsigned int strappy_run_active_count(const char *path);
 char *strappy_run_status_json(const strappy_run_record *run);
 void strappy_run_destroy(strappy_run_record *run);

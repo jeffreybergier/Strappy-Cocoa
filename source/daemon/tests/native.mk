@@ -10,6 +10,12 @@ TEST_PRODUCTS ?= auth-probe schema-probe schema-reader-probe
 PRODUCTS = $(TEST_PRODUCTS)
 OUTPUT_DIR = $(BUILD_ROOT)/tests/$(PLATFORM)/daemon/$(CONFIG)
 PACKAGE_PRODUCTS =
+sidebar-probe_TYPE = executable
+sidebar-probe_SOURCES = sidebar_harness.c $(STRAPPY_STORE_SOURCES)
+sidebar-probe_FLAGS = $(auth-probe_FLAGS)
+sidebar-probe_CORE = static
+sidebar-probe_SIGN = $(auth-probe_SIGN)
+sidebar-probe_LDFLAGS = $(auth-probe_LDFLAGS)
 auth-probe_TYPE = executable
 auth-probe_SOURCES = auth_harness.c ../strappy_auth.c $(STRAPPY_STORE_SOURCES)
 auth-probe_FLAGS = -DSTRAPPY_DB_WRITER=1 -I../ -I../../shared

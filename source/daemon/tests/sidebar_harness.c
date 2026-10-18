@@ -1,10 +1,11 @@
 #define _POSIX_C_SOURCE 200809L
+#define _DARWIN_C_SOURCE 1
 #include "strappy_db.h"
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 static char *error;
@@ -40,9 +41,9 @@ static void activity(sqlite3 *db, long long expected)
 }
 static double seconds(void)
 {
-  struct timespec time;
-  clock_gettime(CLOCK_MONOTONIC, &time);
-  return (double)time.tv_sec + (double)time.tv_nsec / 1000000000.0;
+  struct timeval time;
+  gettimeofday(&time, NULL);
+  return (double)time.tv_sec + (double)time.tv_usec / 1000000.0;
 }
 static void remove_database(const char *path)
 {
@@ -102,6 +103,9 @@ int main(void)
   sql(db,"DELETE FROM turns WHERE id=2;");
   require(integer(db,"SELECT last_activity_at_ms FROM session_activity WHERE session_id=2;")==200,"cascading item deletion restores creation");
   sql(db,"UPDATE sessions SET created_at_ms=110 WHERE id=1;"); activity(db,110);
+  sql(db,"INSERT INTO prompt_runs(session_id,request_key,prompt,state,created_at_ms,updated_at_ms) "
+    "VALUES(1,'old-active','do not load this prompt in sidebar',2,1,1),"
+    "(1,'latest-terminal','',3,2,2),(2,'accepted','',1,3,3);");
   require(strappy_db_sidebar_open(path,&reader,&error),"open read snapshot");
   require(strappy_db_sidebar_count(reader)==2,"snapshot count");
   {
@@ -111,6 +115,8 @@ int main(void)
     require(!strappy_db_sidebar_ids(reader,ids,1,&error),"identity projection rejects truncation");
     free(error); error=NULL;
   }
+  sql(db,"UPDATE prompt_runs SET state=2 WHERE request_key='latest-terminal';"
+    "UPDATE prompt_runs SET state=6 WHERE request_key='accepted';");
   sql(db,"UPDATE sessions SET name='Changed',created_at_ms=500 WHERE id=1;"
     "INSERT INTO session_attention(session_id,has_new_answers) VALUES(1,1);");
   require(strappy_db_sidebar_read(reader,0,&page,&error),"read old snapshot after write");
@@ -118,6 +124,8 @@ int main(void)
     strcmp(page.records[1].name,"Renamed")==0,"snapshot preserves order and values");
   require(!page.records[0].has_new_answers && !page.records[1].has_new_answers,
     "missing attention row defaults read; old snapshot ignores later unread change");
+  require(page.records[0].prompt_in_flight && !page.records[1].prompt_in_flight,
+    "snapshot captures latest run only and ignores later run transitions");
   strappy_db_sidebar_page_destroy(&page);
   require(strappy_db_sidebar_count_since(reader,200,&count,&error) && count==1,"snapshot counts remain consistent");
   { long long ids[2]; require(strappy_db_sidebar_ids(reader,ids,2,&error) && ids[0]==2 && ids[1]==1,
@@ -127,6 +135,8 @@ int main(void)
     strcmp(page.records[0].name,"Changed")==0,"new snapshot sees new order and title");
   require(page.records[0].has_new_answers && !page.records[1].has_new_answers,
     "refreshed snapshot exposes per-session unread state");
+  require(page.records[0].prompt_in_flight && !page.records[1].prompt_in_flight,
+    "refresh sees running and interrupted transitions");
   strappy_db_sidebar_page_destroy(&page);
   strappy_db_sidebar_close(reader); strappy_db_sidebar_close(new_reader);
   reader=NULL; new_reader=NULL;
@@ -149,7 +159,7 @@ int main(void)
   activity(db,600);
   require(integer(db,"PRAGMA user_version;")==1,"schema version stays pinned");
   sql(db,"DELETE FROM turns WHERE id=1;"); activity(db,500);
-  sql(db,"DELETE FROM sessions;");
+  sql(db,"DELETE FROM sessions; DELETE FROM prompt_runs;");
   require(strappy_db_sidebar_open(path,&reader,&error) && strappy_db_sidebar_count(reader)==0,"empty snapshot");
   require(strappy_db_sidebar_read(reader,0,&page,&error) && page.count==0,"empty page");
   require(strappy_db_sidebar_index(reader,1,&index,&error) && index==(size_t)-1,"absent identity");
@@ -198,6 +208,8 @@ int main(void)
     for(index=0;index<page.count;index++) {
       require(sqlite3_step(expected)==SQLITE_ROW &&
         page.records[index].session_id==(long long)sqlite3_column_int64(expected,0),"all rows in exact order without omissions");
+      require(!page.records[index].prompt_in_flight,
+        "sessions without runs are idle");
       previous=page.records[index].session_id;
     }
     /* count is needed by the loop increment after freeing the page. */
@@ -214,6 +226,18 @@ int main(void)
   strappy_db_sidebar_page_destroy(&page);
   require(integer(db,"SELECT count(*) FROM pragma_foreign_key_check;")==0,"foreign keys valid");
   strappy_db_sidebar_close(reader);
+  if (getenv("STRAPPY_SIDEBAR_FIXTURE")) {
+    sqlite3 *copy = NULL;
+    sqlite3_backup *backup;
+    require(sqlite3_open(getenv("STRAPPY_SIDEBAR_FIXTURE"), &copy)==SQLITE_OK,
+      "open optional native UI fixture");
+    backup=sqlite3_backup_init(copy,"main",db,"main");
+    require(backup && sqlite3_backup_step(backup,-1)==SQLITE_DONE,
+      "export isolated native fixture");
+    require(sqlite3_backup_finish(backup)==SQLITE_OK,"finish fixture export");
+    sql(copy,"PRAGMA journal_mode=DELETE;");
+    sqlite3_close(copy);
+  }
   sqlite3_close(db);
   printf("Sidebar harness passed: 20,000 sessions; eager %.2f ms; lazy snapshot + 4 counts + first page %.2f ms; max sequential page %llu VM steps.\n",
     eager_time*1000.0,lazy_time*1000.0,max_steps);

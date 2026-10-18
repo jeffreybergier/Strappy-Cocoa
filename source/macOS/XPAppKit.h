@@ -185,6 +185,8 @@
 #define XPTableViewStyleSourceList 3
 
 @interface NSTableView (XPAppKit)
+/* Main-thread content-only update for one visible row; preserves selection. */
+- (void)XP_reloadVisibleRow:(NSInteger)row;
 - (BOOL)XP_supportsGroupRows;
 - (void)XP_setFloatsGroupRows:(BOOL)floats;
 - (void)XP_setSourceListStyle;

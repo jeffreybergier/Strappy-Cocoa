@@ -749,10 +749,25 @@ static void StrappyMergeOptions(StrappySessionOptions *target,
   if (mask & StrappySessionOptionRoundLimit) [target setRoundLimit:[source roundLimit]];
 }
 
+NSString * const StrappySessionListActivityDidChangeNotification =
+  @"StrappySessionListActivityDidChangeNotification";
 static AIStoreObserver *StrappyStoreObserver;
 static void StrappyStoreChanged(unsigned int topics, long long session)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  /* The C feed runs off-main after commit. Read only the changed status,
+   * once per push, never from a cell callback. Read failure forces resync. */
+  if (topics == STRAPPY_STORE_RUN && session > 0) {
+    int active;
+    if (strappy_run_is_active([[StrappySession sessionsDatabasePath]
+        fileSystemRepresentation], session, &active)) {
+      [StrappyAsync postNotificationName:
+        StrappySessionListActivityDidChangeNotification object:nil
+        userInfo:[NSDictionary dictionaryWithObject:
+          [NSNumber numberWithBool:active] forKey:
+          [NSNumber numberWithLongLong:session]]];
+    } else session = 0;
+  }
   [StrappyStoreObserver publishTopics:topics
     scope:[NSNumber numberWithLongLong:session] generation:0];
   [pool release];
@@ -838,7 +853,8 @@ static uint64_t StrappyObservationToken;
         [NSNumber numberWithUnsignedInt:topics], @"topics",
         [NSNumber numberWithUnsignedInt:globalTopics], @"globalTopics",
         scopes ? scopes : [NSDictionary dictionary], @"scopes", nil]];
-    [StrappyAsync postNotificationName:StrappySessionDidUpdateNotification object:nil];
+    if (globalTopics || (topics & (STRAPPY_STORE_SESSION | STRAPPY_STORE_LEDGER)))
+      [StrappyAsync postNotificationName:StrappySessionDidUpdateNotification object:nil];
   }
   if (topics & STRAPPY_STORE_CATALOG) {
     @synchronized(self) { ++StrappyCredentialGeneration; [StrappyCredentialCache removeAllObjects]; }
@@ -891,15 +907,11 @@ static uint64_t StrappyObservationToken;
 
 + (BOOL)isPromptInFlightForSessionIdentifier:(NSNumber *)sessionIdentifier
 {
-  strappy_run_record run;
-  BOOL active = NO;
-  if ([sessionIdentifier isKindOfClass:[NSNumber class]] &&
-      strappy_run_latest([[self sessionsDatabasePath] fileSystemRepresentation],
-        [sessionIdentifier longLongValue], &run)) {
-    active = run.state == STRAPPY_RUN_ACCEPTED || run.state == STRAPPY_RUN_RUNNING;
-    strappy_run_destroy(&run);
-  }
-  return active;
+  int active = 0;
+  if ([sessionIdentifier isKindOfClass:[NSNumber class]])
+    (void)strappy_run_is_active([[self sessionsDatabasePath] fileSystemRepresentation],
+      [sessionIdentifier longLongValue], &active);
+  return active ? YES : NO;
 }
 
 + (BOOL)isModelCatalogRefreshInFlight
@@ -1091,7 +1103,8 @@ static uint64_t StrappyObservationToken;
     strappy_run_destroy(&run);
   }
   @synchronized(self) { previous = promptInFlight_; promptInFlight_ = active; }
-  summary = [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier_ error:nil];
+  summary = (topics & (STRAPPY_STORE_SESSION | STRAPPY_STORE_LEDGER)) ?
+    [StrappySession sessionSummaryForSessionIdentifier:sessionIdentifier_ error:nil] : nil;
   if (summary != nil) {
     StrappySessionOptions *storedOptions;
     [self updateCachedSummary:summary];
@@ -4166,6 +4179,7 @@ NSString * const StrappySessionListReadFailedNotification =
   }
   pages_ = [[NSMutableDictionary alloc] init];
   pageOrder_ = [[NSMutableArray alloc] init];
+  promptStates_ = [[NSMutableDictionary alloc] init];
   return self;
 }
 
@@ -4175,6 +4189,7 @@ NSString * const StrappySessionListReadFailedNotification =
   strappy_db_sidebar_close((strappy_session_reader *)reader_);
   [pages_ release];
   [pageOrder_ release];
+  [promptStates_ release];
   [readError_ release];
   [super dealloc];
 }
@@ -4227,6 +4242,7 @@ NSString * const StrappySessionListReadFailedNotification =
   char *message;
 
   if (![identifier isKindOfClass:[NSNumber class]]) return NSNotFound;
+  if (collectionIdentifiers_) return [collectionIdentifiers_ indexOfObject:identifier];
   message = NULL;
   if (!strappy_db_sidebar_index((strappy_session_reader *)reader_,
                                 [identifier longLongValue], &index, &message)) {
@@ -4234,6 +4250,34 @@ NSString * const StrappySessionListReadFailedNotification =
     return NSNotFound;
   }
   return index == (size_t)-1 ? NSNotFound : (NSUInteger)index;
+}
+
+- (NSArray *)applyPromptStates:(NSDictionary *)states;
+{
+  NSMutableArray *changed = [NSMutableArray array];
+  NSNumber *identifier;
+  NSEnumerator *enumerator = [states keyEnumerator];
+  while ((identifier = [enumerator nextObject])) {
+    NSUInteger index = [self indexForSessionIdentifier:identifier];
+    if (index == NSNotFound) continue;
+    NSNumber *state = [states objectForKey:identifier];
+    if ([[promptStates_ objectForKey:identifier] isEqual:state]) continue;
+    [promptStates_ setObject:state forKey:identifier];
+    [changed addObject:identifier];
+    NSNumber *key = [NSNumber XP_numberWithUnsignedInteger:
+      (index / STRAPPY_SIDEBAR_PAGE_SIZE) * STRAPPY_SIDEBAR_PAGE_SIZE];
+    NSArray *page = [pages_ objectForKey:key];
+    if (page) {
+      NSUInteger row = index % STRAPPY_SIDEBAR_PAGE_SIZE;
+      NSMutableDictionary *updated = [NSMutableDictionary
+        dictionaryWithDictionary:[page objectAtIndex:row]];
+      [updated setObject:state forKey:@"prompt_in_flight"];
+      NSMutableArray *replacement = [NSMutableArray arrayWithArray:page];
+      [replacement replaceObjectAtIndex:row withObject:updated];
+      [pages_ setObject:replacement forKey:key];
+    }
+  }
+  return changed;
 }
 
 - (id)objectAtIndex:(NSUInteger)index
@@ -4267,6 +4311,8 @@ NSString * const StrappySessionListReadFailedNotification =
         [rows addObject:[NSDictionary dictionaryWithObjectsAndKeys:
           [NSNumber numberWithLongLong:record->session_id], @"id",
           [NSNumber numberWithBool:record->has_new_answers], @"has_new_answers",
+          ([promptStates_ objectForKey:[NSNumber numberWithLongLong:record->session_id]] ?:
+            [NSNumber numberWithBool:record->prompt_in_flight]), @"prompt_in_flight",
           [NSNumber numberWithLongLong:record->last_activity_at_ms], @"last_activity_at_ms",
           [StrappySession stringFromCStringOrEmpty:record->name], @"name",
           [StrappySession stringFromCStringOrEmpty:record->model_name], @"model_name",

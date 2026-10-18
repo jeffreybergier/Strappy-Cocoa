@@ -104,7 +104,15 @@ flowchart TB
    Objective-C files that can import the C "backend"
 - Linux test suite runs in the docker container and tests the C "backend"
 - Session sidebars read a consistent SQLite snapshot, fetch 32 lightweight
-  summaries per page, and cache at most 128 summaries. Date sections store
+  summaries per page, and cache at most 128 summaries. Processing state is part
+  of each summary: rendering and edit-availability callbacks never open the
+  live database. Scoped run changes from the C store feed read only that
+  session's committed boolean on the monitor worker and push it to the main
+  thread; only the affected visible rows refresh. Status overrides survive page
+  eviction and pending snapshot replacement. Global/reconnect and structural
+  changes still replace the ordered snapshot. Deletion rechecks live state.
+  Both platforms cache their blue processing/unread icons, with processing
+  taking precedence. Date sections store
   ranges rather than copies of every session. The `session_activity` table is
   populated once for existing histories and maintained transactionally by
   triggers; activity follows the last conversation item by sequence, falling
@@ -112,6 +120,34 @@ flowchart TB
   The offline `sidebar_harness` tests ordering, snapshot isolation, backfill,
   cascades, and indexed paging with 20,000 sessions, and prints a local timing
   comparison against the eager loader (which also benefits from the new index).
+- Native session-list regressions use an isolated 20,000-session fixture. Export
+  it after building the host harness:
+
+  ```sh
+  STRAPPY_SIDEBAR_FIXTURE="$PWD/build/tests/sidebar-fixture.sqlite" \
+    build/tests/linux/daemon/sidebar_harness
+  ```
+
+  Run `python3 source/daemon/tests/session_scroll_test.py macOS` or `iOS` to
+  build the actual AppKit/UIKit cell tests. Stage the Mac ZIP below `~/Desktop`
+  and run its executable there. Install the isolated iOS test IPA with `appinst`
+  and launch `strappy-session-scroll-test://run`; its container's
+  `Documents/session-scroll-result.txt` must report PASS. A crash or RUNNING
+  marker is a failure. Tests trap live status queries from cells, exercise cache
+  eviction, status pushes, scroll jumps, refresh races, and icon precedence.
+  Build the C database regression with:
+
+  ```sh
+  make -C source/daemon/tests -f native.mk PLATFORM=macOS \
+    TEST_PRODUCTS=sidebar-probe debug
+  ```
+
+  Use `PLATFORM=iOS` for the phone and deploy its
+  `Intermediates/signed/sidebar-probe`. On 2026-10-18, both native suites passed
+  on x4-vm (Tiger PowerPC) and koolphone5 (iOS 8.4.1 armv7). For 128 status
+  accesses, the former per-row reader took 3,436 ms on Tiger and 1,151 ms on the
+  phone; paged cached reads took 18.88 ms and 6.08 ms respectively. These are
+  data-access microbenchmarks, not measured scrolling frame rates.
 - Database preferences use a read-only catalog snapshot with a temporary SQLite
   index of the filtered row order. Full records load in pages of 32 with a
   128-row cache; application sections and selection lookup use only metadata.

@@ -12,6 +12,7 @@
 
 @interface SessionListViewController : AICollectionTableViewController {
   AICollectionController *sidebarCollection_;
+  NSMutableDictionary *pendingPromptStates_;
   BOOL pendingSelectionNotification_;
 }
 

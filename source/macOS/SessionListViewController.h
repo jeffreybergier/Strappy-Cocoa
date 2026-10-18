@@ -19,6 +19,7 @@
   AICollectionTableAdapter *tableView_collection_;
  @private
   AICollectionController *sidebarCollection_;
+  NSMutableDictionary *pendingPromptStates_;
   NSScrollView *scrollView_;
   NSTableView  *tableView_;
   NSView       *toolbarView_;
