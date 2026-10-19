@@ -103,10 +103,17 @@ Rootless package SHA-256:
   receiver connection probe returns 1, and the StrappyAlerts directory is absent
   after restart. Manual diagnostic initialization does not register the provider
   or open the receiver and is not evidence of automatic loading.
-- [x] Owner can reach account configuration in the installed app; no account
-  is configured on this phone.
-- [ ] Confirm a foreground prompt after the owner configures an account.
+- [x] Owner configures an account and confirms a foreground prompt completes.
+- [x] Owner confirms production notifications do not appear on this phone.
 - [ ] Run notification/badge visual acceptance after receiver readiness works.
+
+A separate modern UserNotifications probe subsequently passed owner-observed
+banner, default sound, badge set/clear, notification removal, tap-to-app, and
+lock-screen tests.
+It requests authorization and posts directly under Strappy's bundle identity,
+without integrating into strappyd or loading the legacy provider. Glass via an
+absolute system sound-file path fell back to the default sound. See the
+[probe instructions and acceptance checklist](../source/daemon/tests/user_notification_device/README.md).
 
 Before installation, neither `/System/Library/BulletinBoardPlugins` nor its
 `/var/jb` counterpart existed. The package owns the provider under
