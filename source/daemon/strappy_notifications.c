@@ -90,8 +90,21 @@ void strappy_notifications_finished(long long run, int state,
                                     const char *error)
 {
   const char *path = strappy_notification_platform_socket();
-  if (!path || (state != STRAPPY_RUN_COMPLETED && state != STRAPPY_RUN_FAILED))
+  if ((!path && !strappy_notification_platform_modern()) || (state != STRAPPY_RUN_COMPLETED && state != STRAPPY_RUN_FAILED))
     return;
+  if (strappy_notification_platform_modern()) {
+    strappy_notification_packet packet;
+    memset(&packet, 0, sizeof(packet));
+    strappy_notification_preview(packet.title, title,
+                                 STRAPPY_NOTIFICATION_TITLE_CHARACTERS);
+    strappy_notification_preview(packet.body,
+      state == STRAPPY_RUN_FAILED ? strappy_notifications_error_body(error) : response,
+      STRAPPY_NOTIFICATION_BODY_CHARACTERS);
+    if (!packet.title[0]) strcpy(packet.title, "Strappy");
+    if (!strappy_notification_platform_post(run, packet.title, packet.body))
+      syslog(LOG_NOTICE, "StrappyNotifications: modern queue unavailable or full");
+    return;
+  }
   if (!strappy_notifications_send(path, run, title,
         state == STRAPPY_RUN_FAILED ? strappy_notifications_error_body(error) : response))
     syslog(LOG_NOTICE, "StrappyNotifications: receiver unavailable or busy");

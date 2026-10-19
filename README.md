@@ -186,13 +186,24 @@ how those fields appear on the lock screen and in unlocked banners. Raw provider
 diagnostics are not shown. Cancellation, shutdown interruption, and background
 Database Study do not produce alerts.
 
-The DEB includes a native BulletinBoard provider, loaded by SpringBoard
-without a MobileSubstrate filter. It publishes with Strappy's name/icon,
-Notification Center history, notification settings, and the built-in Glass
-sound. Sound and presentation follow the system's settings. SpringBoard must
-restart after installation or provider updates; the installer prints a reminder.
-The provider uses runtime-checked private APIs on iOS 6 and later, including the
-iOS 8 icon lookup selector. Alert delivery remains best-effort: a missing or busy
+strappyd dynamically loads UserNotifications and selects the modern route when
+`UNUserNotificationCenter` exists. It initializes the center for Strappy's bundle
+identity, requests alert/sound/badge authorization using the proven daemon SPI,
+and submits completion notifications directly. No permission UI is added to
+Strappy. The daemon's signed entitlement allows only Strappy's bundle identity.
+Glass uses the Mail-style tone-topic API when available, with default sound as
+the fallback. Modern framework calls run on a separate worker; completion
+submission only enqueues a bounded copy of the preview.
+
+When that class is absent, the existing BulletinBoard provider handles alerts
+and badges. The DEB includes that provider, loaded by SpringBoard without a
+MobileSubstrate filter. It publishes with Strappy's name/icon, Notification
+Center history, notification settings, and Glass sound. SpringBoard must restart
+after installation or provider updates on this legacy route. The provider uses
+runtime-checked private APIs on iOS 6 and later, including the iOS 8 icon lookup.
+Sound and presentation follow the system's settings on both routes.
+
+Alert delivery remains best-effort: a missing or busy
 receiver never affects the prompt result. Per-session unread flags persist in
 SQLite; the badge counts unread sessions. Opening a session immediately clears
 its flag and sends the current absolute count, including zero, without an alert.

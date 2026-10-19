@@ -62,6 +62,10 @@ Strappy_COCOA = static
 Strappy_SQLITE = 1
 strappyd_TYPE = daemon
 strappyd_SOURCES = ../daemon/strappyd.c $(STRAPPY_IPC_SOURCES) $(STRAPPY_STORE_SOURCES) $(STRAPPY_EXECUTION_SOURCES) $(STRAPPY_CREDENTIAL_SOURCES)
+strappyd_GROUPS = notifications
+GROUP_notifications_SOURCES = ../shared/XPFoundation/XPDaemonNotifications.m
+GROUP_notifications_OBJCFLAGS = -fblocks
+GROUP_notifications_MEMORY = mrc
 strappyd_CORE = static
 strappyd_COCOA = static
 strappyd_FLAGS = -DSTRAPPY_DB_WRITER=1 -I../shared -I../daemon

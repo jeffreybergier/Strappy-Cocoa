@@ -9,6 +9,7 @@ PROBE_INSTALL = Library/MobileSubstrate/DynamicLibraries/StrappyBulletinProbe
 strappyd-bulletin-probe_TYPE = daemon
 strappyd-bulletin-probe_SOURCES = $(strappyd_SOURCES) $(PROBE_SOURCE)/probe.c
 strappyd-bulletin-probe_FLAGS = $(strappyd_FLAGS) -DSTRAPPY_BULLETIN_PROBE=1
+strappyd-bulletin-probe_GROUPS = $(strappyd_GROUPS)
 strappyd-bulletin-probe_CORE = static
 strappyd-bulletin-probe_COCOA = static
 strappyd-bulletin-probe_GENERATED = $(strappyd_GENERATED)

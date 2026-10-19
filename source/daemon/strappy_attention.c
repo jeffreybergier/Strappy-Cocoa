@@ -161,6 +161,7 @@ static void *badge_worker(void *unused)
   char reply_path[sizeof(reply.sun_path)];
   dev_t device=0; ino_t inode=0;
   const char *path=strappy_notification_platform_socket();
+  int modern=strappy_notification_platform_modern();
   (void)unused;
   memset(&destination,0,sizeof(destination)); destination.sun_family=AF_UNIX;
   memset(&reply,0,sizeof(reply)); reply.sun_family=AF_UNIX;
@@ -173,10 +174,10 @@ static void *badge_worker(void *unused)
     sqlite3 *db=NULL; sqlite3_stmt *q=NULL;
     strappy_badge_packet packet;
     long long revision=0, count=0;
-    int pending=0, stop, retry=path != NULL;
+    int pending=0, stop, retry=path != NULL || modern;
     unsigned long snapshot;
     strappy_attention_lock(); stop=stopping; snapshot=generation;
-    if (!stop && path && strappy_db_open(database,&db,NULL)) {
+    if (!stop && (path || modern) && strappy_db_open(database,&db,NULL)) {
       if (sqlite3_prepare_v2(db,"SELECT revision,pending,"
           "(SELECT COUNT(*) FROM session_attention WHERE has_new_answers=1) "
           "FROM notification_badge WHERE id=1",-1,&q,NULL)==SQLITE_OK && sqlite3_step(q)==SQLITE_ROW) {
@@ -188,6 +189,18 @@ static void *badge_worker(void *unused)
     }
     strappy_attention_unlock();
     if (stop) break;
+    if (pending && modern &&
+        strappy_notification_platform_badge(revision,count)) {
+      strappy_attention_lock();
+      if (strappy_db_open(database,&db,NULL)) {
+        if (sqlite3_prepare_v2(db,"UPDATE notification_badge SET pending=0 WHERE id=1 AND revision=?",-1,&q,NULL)==SQLITE_OK) {
+          sqlite3_bind_int64(q,1,revision);
+          if (sqlite3_step(q)==SQLITE_DONE) pending=0;
+        }
+        sqlite3_finalize(q); q=NULL; strappy_db_release(db); db=NULL;
+      }
+      strappy_attention_unlock();
+    }
     if (pending && destination.sun_path[0] && fd<0) {
       struct stat st;
       /* Parent is the provider's private mobile-owned directory. Refuse any
@@ -259,8 +272,10 @@ int strappy_attention_start(const char *path, strappy_ipc_server *s)
 {
   if (started || !path || !s) return 0;
   database=strdup(path); if (!database) return 0;
+  strappy_notification_platform_start();
   server=s; stopping=0; memset(observers,0,sizeof(observers));
   if (pthread_create(&worker,NULL,badge_worker,NULL)) {
+    strappy_notification_platform_stop();
     free(database); database=NULL; server=NULL; return 0;
   }
   started=1; return 1;
@@ -269,5 +284,7 @@ void strappy_attention_stop(void)
 {
   if (!started) return;
   strappy_attention_lock(); stopping=1; wake_badge(); strappy_attention_unlock();
-  pthread_join(worker,NULL); free(database); database=NULL; server=NULL; started=0;
+  pthread_join(worker,NULL);
+  strappy_notification_platform_stop();
+  free(database); database=NULL; server=NULL; started=0;
 }

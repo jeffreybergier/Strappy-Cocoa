@@ -562,3 +562,8 @@ $(BUILD_DIR)/attention_harness: attention_harness.c ../strappy_attention.c ../st
 attention-test: $(BUILD_DIR)/attention_harness
 	python3 -c 'import tempfile,subprocess; from pathlib import Path; d=tempfile.TemporaryDirectory(prefix="strappy-attention-",dir="/tmp"); subprocess.run(["$(BUILD_DIR)/attention_harness",str(Path(d.name)/"fixture")],check=True)'
 test: attention-test
+
+# Recording-only Foundation fixture; run on a Mac, not the Linux host suite.
+.PHONY: modern-notifications-test
+modern-notifications-test:
+	python3 modern_notifications_test.py

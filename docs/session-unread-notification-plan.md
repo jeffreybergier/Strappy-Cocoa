@@ -4,6 +4,48 @@ Design, implementation and device experiments, started 2026-10-18. The policy
 below is implemented for the iOS app and daemon. macOS retains its existing
 app-owned notification presentation policy.
 
+## Modern daemon integration (2026-10-19)
+
+The daemon now selects direct UserNotifications submission when the dynamically
+loaded `UNUserNotificationCenter` class exists; otherwise it keeps the existing
+legacy provider transport. There is no OS-version table or delivery-time backend
+switch. Private calls use checked signatures and NSInvocation in the iOS-only
+`XPDaemonNotifications` bridge. The modern frameworks are not linked at launch.
+
+Initialization repeats the successful probe's bundle-specific center and
+alert/sound/badge authorization request. It adds no app permission screen.
+Initialization failure is logged without affecting prompt execution. Glass uses
+alert type 5 and the dedicated `com.altivecintelligence.Strappy.completion` topic;
+missing tone APIs fall back to the default sound. The daemon's entitlement lists
+only `com.altivecintelligence.Strappy` as a notification recipient.
+
+The existing database commit, unread, observation, cancellation, and preview
+policies are unchanged. Modern alerts use a 32-entry memory queue and stable
+run-based identifiers. A worker serializes framework operations with five-second
+callback deadlines. Alerts remain best-effort and are not retried on an ambiguous
+callback result. Badge snapshots use the existing durable queue, coalesce to the
+latest value, and acknowledge only their exact revision after a successful native
+callback. Badge values are never embedded in alert content. Late callbacks own
+independent reply objects and cannot acknowledge newer revisions or access torn
+down daemon state. An OS operation that times out cannot be canceled by this
+bridge; callback success remains submission evidence, not proof of presentation.
+
+Validation: the full offline Linux suite and clean armv7/arm64 iOS plus
+ppc/i386/x86_64/arm64 macOS release builds passed without compiler warnings.
+The recording-only modern bridge fixture passed on x9-vm (macOS 10.9/x86_64),
+covering class selection, authorization, missing selectors/signature mismatch,
+content, bounded queue, badge revisions/zero, late callbacks, and shutdown.
+Run that fixture on a Mac with
+`make -C source/daemon/tests modern-notifications-test`.
+The fixture never loads notification frameworks or changes system settings.
+Rootful/rootless package validation and provider ownership checks passed; both
+signed daemon slices contain the narrow notification entitlement. iOS static
+analysis found no diagnostics in the new bridge; it reported a possible null
+source in the unchanged debug-capture memcpy in `strappy_client.c:1230`.
+Production iOS daemon display, sound, permission changes, and reboot behavior
+still require native device acceptance; the earlier probe results below remain
+separate evidence. No production device was redeployed for this integration.
+
 ## Acceptance checklist (reviewed 2026-10-19)
 
 - [x] Confirm observed-session suppression and foreground alerts for another
