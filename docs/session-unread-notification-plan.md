@@ -42,9 +42,10 @@ Rootful/rootless package validation and provider ownership checks passed; both
 signed daemon slices contain the narrow notification entitlement. iOS static
 analysis found no diagnostics in the new bridge; it reported a possible null
 source in the unchanged debug-capture memcpy in `strappy_client.c:1230`.
-Production iOS daemon display, sound, permission changes, and reboot behavior
-still require native device acceptance; the earlier probe results below remain
-separate evidence. No production device was redeployed for this integration.
+Production notification delivery on pinkphone is now owner-confirmed; see the
+latest deployment record below. Individual modern sound/badge cases, permission
+changes and reboot behavior still need separate production acceptance. Earlier
+standalone probe results remain separate evidence.
 
 ## Pinkphone modern deployment follow-up (2026-10-19)
 
@@ -64,6 +65,45 @@ The startup fix defers the initial list read until the readiness push, with a
 three-second fallback to report a genuinely unavailable service. It does not
 block the main thread, bypass the reader gate, or change the notification route.
 
+The fix shipped as `8a0f436` and was installed on pinkphone. All 39 installed
+regular files matched the package and IPC v8 readiness passed. The owner
+confirmed the app works after the fix. Logs, symbols and the verified rollback
+package are in `build/device-runs/pinkphone-startup-readiness-20261019/`.
+
+## Latest production deployments (2026-10-19)
+
+All three devices now have build `8a0f436`, including modern notifications from
+`2ba1d5f` and the initial-service-readiness fix. All 39 package-owned regular
+files matched on each device, and native IPC v8 store/execution readiness passed.
+These are deployment-time checks, not a continuously refreshed device inventory.
+
+| Device | Native system | Notification route | Owner confirmation |
+| --- | --- | --- | --- |
+| pinkphone-rsa | iOS 15.0, arm64, rootless | Modern UserNotifications | Notifications work; app works after startup fix. |
+| koolphone5 | iOS 8.4.1, armv7, rootful | Legacy provider | Prior `ad47a44` acceptance below passed; fresh visual test of `8a0f436` awaits confirmation. |
+| gomadango | iOS 6.1.3, armv7, rootful | Legacy provider | Owner confirms the new installation is working. |
+
+Both legacy devices logged legacy backend selection. SpringBoard was restarted
+and the new process's production receiver readiness and a live socket connection
+were verified. No new Strappy/strappyd crash-report filenames appeared during
+these deployment checks. Modern pinkphone installation did not need a respring.
+No synthetic notification or model request was sent during these installations.
+Owner confirmations do not imply every sound, badge, lock-screen or reboot case
+was repeated on the latest build.
+
+Retained local artifacts (also staged under `/var/mobile/tmp_altivec/` using the
+same run-directory names) include packages, verified rollback payloads, matching
+symbols and logs:
+
+- `build/device-runs/pinkphone-startup-readiness-20261019/`
+- `build/device-runs/koolphone5-8a0f436/`
+- `build/device-runs/gomadango-8a0f436/`
+
+Gomadango's retained older DEB differed from its installed signed binaries, so
+rollback was reconstructed from exactly the installed package-owned regular
+files and dpkg control scripts; all 39 file hashes matched before installation.
+See `rollback-provenance.txt` and `deployment.txt` in that run directory.
+
 ## Acceptance checklist (reviewed 2026-10-19)
 
 - [x] Confirm observed-session suppression and foreground alerts for another
@@ -78,10 +118,9 @@ block the main thread, bypass the reader gate, or change the notification route.
 - [x] Confirm processing/unread row icons visually (owner confirmation,
   2026-10-19).
 
-The latest recorded deployments are `56e1ef0` on pinkphone-rsa (notification
-receiver not ready), `ad47a44` on koolphone5, and `b881428` on gomadango
-(following `f37bf03` and `02b1b34`). Remaining compatibility work is tracked in the
-[current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
+The [latest deployments](#latest-production-deployments-2026-10-19) supersede
+older installed-build statements below. Remaining compatibility work is tracked
+in the [current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
 Dated test records below preserve the scope of each original observation.
 
 ## Koolphone5 production acceptance (2026-10-19)

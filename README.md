@@ -217,6 +217,13 @@ and unread/badge implementation are installed on gomadango. The owner confirmed
 observed-session suppression, foreground alerts for another session, background
 alerts, and badge transitions 2 → 1 → cleared by opening each unread session.
 
+As of 2026-10-19, build `8a0f436` is installed on pinkphone-rsa (iOS 15 modern
+route), koolphone5 (iOS 8 legacy route), and gomadango (iOS 6 legacy route).
+The owner confirms pinkphone notifications and its startup-warning fix, and
+confirms gomadango is working. See the
+[latest deployment and acceptance record](docs/session-unread-notification-plan.md#latest-production-deployments-2026-10-19)
+for verification scope, rollback artifacts and remaining checks.
+
 Offline daemon coverage, including Unicode previews, errors, durable retries,
 cancellation and a missing receiver:
 

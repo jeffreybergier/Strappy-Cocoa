@@ -45,21 +45,25 @@ what was known at the time; their pending statements do not override this list.
   the standalone UserNotifications probe delivers alerts and badges, and the
   owner confirms Glass using Mail's alert-type/topic tone-selection mechanism.
   See the [successful Glass sequence](../source/daemon/tests/user_notification_device/README.md#successful-glass-technique-2026-10-19).
-- [ ] Integrate and validate that modern route in strappyd; the standalone
-  success does not change the installed production backend.
-- [ ] Resolve pinkphone-rsa (iOS 15.0 arm64/rootless) automatic provider
-  discovery/registration: installed bundle loads and initializes in the isolated
-  diagnostic, but no production receiver appears after SpringBoard restart.
-  See the [native test record](session-unread-notification-plan.md#pinkphone-rootless-production-test-2026-10-19).
-
-- [ ] Repeat production visual acceptance on other intended supported versions,
-  including arm64 and rootless installations. Cross-builds and package checks
-  alone do not establish native compatibility.
+- [x] Integrate the modern route into strappyd (`2ba1d5f`), selected by runtime
+  `UNUserNotificationCenter` class availability, retaining the legacy route when
+  absent. Owner confirms production notifications on pinkphone-rsa.
+- [x] Fix the initial service-readiness warning (`8a0f436`); owner confirms the
+  app works on pinkphone. Deploy that build to all three phones.
+- [ ] Complete individual modern production sound/badge, lock-screen and reboot
+  acceptance cases. Standalone probe evidence is recorded separately.
+- [ ] Confirm fresh visual delivery on koolphone5 with `8a0f436`; previous
+  `ad47a44` acceptance remains valid for that earlier build.
+- [ ] Repeat production visual acceptance on other intended supported versions.
+  Cross-builds and package checks alone do not establish native compatibility.
 - [ ] Resolve the iOS 5 notification support boundary: the provider rejects
   pre-iOS-6 runtimes. Implement and validate support or document the limitation.
 
-### Optional investigations, not blockers for the demonstrated iOS 6 behavior
+### Optional investigations, not blockers for the demonstrated routes
 
+- [ ] Investigate pinkphone legacy provider automatic discovery if that route
+  is needed there. Its earlier failure is historical, not a blocker for the
+  working modern backend.
 - [ ] Retest the custom WAV with silent mode off, if custom sound is wanted.
   Built-in Glass is already confirmed; the earlier WAV result was inconclusive.
 - [ ] Trace private threading/teardown and optional cleared-info callback
@@ -71,23 +75,17 @@ what was known at the time; their pending statements do not override this list.
 
 ### Deployment and evidence
 
-Production build `56e1ef0` is installed on pinkphone-rsa (iOS 15.0 arm64,
-rootless). Its daemon is ready, but its notification receiver is not;
-[the test record](session-unread-notification-plan.md#pinkphone-rootless-production-test-2026-10-19)
-records the automatic discovery/registration failure separately from successful
-isolated provider initialization and the later successful standalone modern
-notification/Glass tests. The sound-test fixture and topic cleanup remain
-paused; see the [cleanup checklist](../source/daemon/tests/user_notification_device/README.md#paused-device-state-and-cleanup).
+Build `8a0f436` is installed on pinkphone-rsa (iOS 15.0 arm64/rootless),
+koolphone5 (iOS 8.4.1 armv7) and gomadango (iOS 6.1.3 armv7). Package hashes and
+IPC readiness passed on all three; legacy receiver readiness passed on both
+older phones. The owner confirms modern notifications and the startup fix on
+pinkphone, and confirms gomadango is working. Fresh koolphone5 visual confirmation
+for this build remains pending; its earlier full acceptance is preserved below.
+See the [latest deployment record](session-unread-notification-plan.md#latest-production-deployments-2026-10-19)
+for exact scope and retained rollback, symbols and logs.
 
-On 2026-10-19, production build `ad47a44` was installed on koolphone5;
-[its deployment and visual test record](session-unread-notification-plan.md#koolphone5-production-acceptance-2026-10-19)
-records the completed production acceptance checks.
-
-The latest gomadango installation recorded in these documents is `b881428`,
-following `6a239a9` (provider migration), `f37bf03` (unread/badges), and `02b1b34`
-(synchronous Send). This is a documentary record, not a fresh device inventory.
-The 2026-10-19 owner confirmation supplies acceptance evidence without a new
-build fingerprint or instrumented suspension trace.
+The standalone sound-test fixture and diagnostic topic cleanup remain unverified;
+see the [cleanup checklist](../source/daemon/tests/user_notification_device/README.md#paused-device-state-and-cleanup).
 
 See the [policy and acceptance record](session-unread-notification-plan.md),
 [migration and rollback procedure](ios6-provider-migration.md), and
@@ -114,7 +112,8 @@ The candidate listens at:
 /var/mobile/Library/Application Support/StrappyAlerts/provider-candidate.sock
 ```
 
-**The daemon sends to `receiver.sock`, now owned by the production provider.**
+**On the legacy route, the daemon sends to `receiver.sock`, owned by the
+production provider.** Modern runtimes use direct UserNotifications submission.
 The explicit diagnostic Makefiles retain the separate candidate endpoint;
 production traffic is never routed to it. No synthetic notification is sent at load time. There is no sender,
 launchd job, Substrate filter, or installation script in the candidate archive.

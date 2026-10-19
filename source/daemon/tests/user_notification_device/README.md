@@ -54,7 +54,9 @@ The test does not establish the minimal necessary entitlement set.
 ## Pinkphone results, 2026-10-19
 
 Target: iPhone8,4, iOS 15.0 (19A346), rootless Dopamine, SSH as mobile.
-Production Strappy/strappyd remain at build `56e1ef0`.
+Production was at `56e1ef0` during this isolated probe. Subsequent integration
+and deployment of `8a0f436` are recorded in the
+[production results](../../../../docs/session-unread-notification-plan.md#latest-production-deployments-2026-10-19).
 
 - [x] Inspect Mail's actual `maild` binary: `UNUserNotificationCenter`
   `initWithBundleIdentifier:`, `addNotificationRequest:withCompletionHandler:`,
@@ -90,9 +92,9 @@ Production Strappy/strappyd remain at build `56e1ef0`.
 - [x] Owner confirms lock-screen presentation with default sound using the
   final probe build.
 - [ ] Check behavior across respring/reboot with this modern route.
-- [ ] Integrate only after review: production permission setup, runtime backend
-  selection, unread badge reconciliation, observed-session suppression, and
-  failure/retry handling still belong to future work.
+- [x] Integrate into strappyd (`2ba1d5f`) with runtime backend selection,
+  authorization initialization, existing unread/observation policy and bounded
+  callback handling. Owner confirms production notifications on pinkphone.
 
 Raw local artifacts: `build/experiments/pinkphone-un-probe/` (callback logs and
 build products) and `build/research/pinkphone-mail-ios15/` (Mail extraction and
@@ -104,7 +106,7 @@ does not repair or use it.
 
 Native confirmation is on pinkphone's iOS 15.0 arm64/rootless installation only.
 The probe posts under Strappy's app identity using the already authorized
-`UNUserNotificationCenter`; strappyd has not been changed or redeployed.
+`UNUserNotificationCenter`; strappyd was unchanged during this isolated test.
 
 Disassembly of `maild`'s
 `MFUserNotificationSoundController addSoundIfNecessaryForNotificationContent:suppressionContexts:`
@@ -158,8 +160,9 @@ Evidence under `build/experiments/pinkphone-un-sound/`:
 
 ## Paused device state and cleanup
 
-At the owner's pause after the successful test, the following remain pending.
-This documentation update does not resume device tests or perform cleanup.
+The diagnostic cleanup below was paused after the successful probe. Subsequent
+production deployment verified the package files, but did not establish fixture
+or topic cleanup. This documentation update does not perform device cleanup.
 
 - [ ] Clear the diagnostic notification with `probe-tones-v3 clear`.
 - [ ] Clear the diagnostic topic override with `probe-tones-v3 tone-reset`.
@@ -168,11 +171,15 @@ This documentation update does not resume device tests or perform cleanup.
   That fixture owns the uniquely named
   `/var/jb/Applications/Strappy.app/StrappyManualChime.wav` and
   `/var/jb/usr/libexec/strappy-un-probe`; it does not replace Strappy's executable.
-- [ ] Verify production package-owned files against
-  `build/experiments/pinkphone-un-sound/production-before.sha256`.
+- [x] Verify production package-owned files against the newly installed
+  `8a0f436` package (all 39 match). The probe-era
+  `build/experiments/pinkphone-un-sound/production-before.sha256` is historical;
+  the later production upgrade intentionally changed those binaries.
 - [ ] Remove obsolete staged sound-test bundles/binaries when no longer needed.
 - [ ] Finish validation and commit the currently uncommitted probe extensions
   and WAV generator separately from this documentation update.
 
-Normal Strappy notification authorization remains enabled. Integration into
-strappyd and the production sound-selection policy remain future work.
+Normal Strappy notification authorization remains enabled. Production now uses
+the separate `com.altivecintelligence.Strappy.completion` topic for Glass;
+diagnostic topic cleanup must not reset that production topic. Fixture removal,
+modern restart testing and the uncommitted probe extensions remain open.

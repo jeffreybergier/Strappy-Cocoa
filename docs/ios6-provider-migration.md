@@ -14,8 +14,10 @@ See [the investigation](ios6-notification-provider.md) for native observations.
 - [x] Retain exact rollback packages, payload manifests, matching symbols and logs.
 - [x] Deploy subsequent unread/badge, synchronous Send and unread-row builds.
 
-The latest deployment recorded here is `b881428`; its retained artifacts are at
-`build/device-runs/gomadango-unread-row-b881428/`. See the
+The latest gomadango deployment is `8a0f436`, owner-confirmed working on
+2026-10-19. Its verified rollback, package manifests, symbols and logs are in
+`build/device-runs/gomadango-8a0f436/`. See the
+[latest three-device deployment record](session-unread-notification-plan.md#latest-production-deployments-2026-10-19), the
 [production test record](session-unread-notification-plan.md) and
 [current checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
 The original migration procedure and rollback guidance below are historical;
@@ -25,8 +27,9 @@ its badge-4 and initial iOS-6-only restrictions describe the initial cutover.
 
 The Strappy DEB now owns the native provider bundle and no longer ships the
 Substrate dylib/filter. dpkg handles removal of obsolete owned files on upgrade.
-The daemon still uses `receiver.sock`; diagnostic packages use their separate
-socket and must be removed before installing production because they own the
+The legacy daemon route uses `receiver.sock`; modern runtimes with
+`UNUserNotificationCenter` use direct submission. Diagnostic packages use a
+separate socket and must be removed before installing production because they own the
 same bundle path. The production provider contains no literal test-badge code.
 Existing badge 4 is not cleared by this migration; badge policy is separate work.
 
@@ -54,6 +57,12 @@ rollback; a matching version alone is insufficient. Candidate 0.1.5 is retained
 at `build/device-runs/gomadango-provider-candidate-v8/package.deb`. Record SHA-256
 hashes, `dpkg-deb -I` metadata and `dpkg-deb -c` file lists for all staged packages.
 Do not use force-overwrite or force-architecture flags.
+
+If reconstructing rollback from installed files, archive an explicit list of
+package-owned regular files with recursion disabled, plus the required dpkg
+control metadata/scripts. Never recursively archive directory entries from
+`dpkg -L`: shared application directories can include unrelated files or data.
+Compare every payload hash with the installed files before upgrading.
 
 Record package versions, daemon/SpringBoard PIDs and relevant crash reports.
 Finish active prompts before the window; the installer stops strappyd. Confirm
