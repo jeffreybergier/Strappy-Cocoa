@@ -18,10 +18,63 @@ app-owned notification presentation policy.
 - [x] Confirm processing/unread row icons visually (owner confirmation,
   2026-10-19).
 
-The latest deployment recorded below is `b881428`, following `f37bf03` and
-`02b1b34`. Remaining cross-device compatibility work is tracked in the
+The latest recorded deployments are `ad47a44` on koolphone5 and `b881428` on
+gomadango (following `f37bf03` and `02b1b34`). Remaining compatibility work is tracked in the
 [current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
 Dated test records below preserve the scope of each original observation.
+
+## Koolphone5 production acceptance (2026-10-19)
+
+Installed the rootful production package from `ad47a44` on koolphone5,
+iPhone5,2 / iOS 8.4.1 (12H321) / armv7, upgrading the installed 1.1.2 package
+to 1.2.0. New package SHA-256:
+
+`d1b23b5cdb458b9a9e38341069e5a3ad865238235c303fdaf433b1675a9e03ba`
+
+- [x] Pass the offline Linux suite and rootful/rootless package checks. The
+  preceding clean iOS/macOS build passed without compiler warnings.
+- [x] Prepare rollback: retained DEBs did not match the installed build, so
+  reconstruct a package from its package-owned files and dpkg control scripts.
+  All 38 installed regular-file hashes matched the reconstructed payload.
+- [x] Install with dpkg, verify all 39 new regular-file hashes and provider
+  ownership, and restart SpringBoard once.
+- [x] Verify IPC v8 store/execution readiness and a live production receiver
+  connection. SpringBoard PID 3076 logged `receiver.sock` readiness at
+  19:20:08 device time. No new crash report filenames appeared during these checks.
+- [x] Owner confirms a background completion notification, sound and badge.
+- [x] Owner confirms opening the app and reading that session clears the badge.
+- [x] Owner confirms no banner or sound while staying in the completing session.
+- [x] Owner confirms banner and sound for another session's completion while
+  the app is foregrounded.
+- [x] Owner confirms two unread sessions produce badge 2, then opening each
+  session reduces it to 1 and clears it.
+- [x] Owner confirms lock-screen presentation and opening Strappy from the
+  notification.
+- [x] Owner confirms Strappy notification settings registration, Notification
+  Center history, dismissal and clearing.
+- [x] Owner confirms badge 1 survives a SpringBoard restart, and a new
+  completion afterward still produces a notification, sound and badge.
+
+The owner-confirmed results establish actual display and badge behavior, beyond
+API submission/readback. All listed koolphone5 production acceptance checks
+have passed; this does not establish compatibility on another OS/architecture.
+
+For the final restart check, the owner first confirmed the prompt had finished
+and Home Screen showed badge 1. SpringBoard restarted once for this check, from
+PID 3076 to 3145; the new process logged production receiver readiness at
+19:29:30 device time. The live socket and IPC v8 readiness probes passed again.
+The owner then confirmed badge persistence and fresh completion delivery.
+The final crash-directory comparison showed no new report filenames during
+installation or acceptance testing.
+
+Packages, payload manifests, installer/readiness logs, crash inventories and
+matching armv7 symbols are retained under
+`build/device-runs/koolphone5-notifications-ad47a44/`. Remote staging is
+`/var/mobile/tmp_altivec/koolphone5-notifications-ad47a44/`. The rollback package
+is reconstructed from the installed payload, not an original release archive;
+its provenance is retained alongside it. No user database or credentials were
+included in that package. Older isolated DEB notification probes were left
+installed under their separate identities.
 
 ## Agreed simpler behavior
 

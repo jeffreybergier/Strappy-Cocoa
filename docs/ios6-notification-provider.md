@@ -27,13 +27,23 @@ what was known at the time; their pending statements do not override this list.
 - [x] Run offline policy/execution tests, clean builds for both iOS and all four
   Mac architectures, provider analysis and rootful/rootless package checks.
 - [x] Test candidate loading and actual badge readback on iOS 8.4.1 armv7;
-  this is narrower evidence than the iOS 6 production visual tests.
+  this preceded the production visual test below.
+- [x] Confirm production background notification, sound, unread badge and
+  clearing on opening the session on koolphone5 (iOS 8.4.1 armv7, 2026-10-19).
+- [x] Confirm observed-session suppression on koolphone5: no banner or sound
+  while staying in the completing session.
+- [x] Confirm foreground alerts for another session and unread-session badge
+  transitions 2 → 1 → cleared on koolphone5.
+- [x] Confirm lock-screen presentation, tap-to-open, notification settings and
+  Notification Center history/dismissal/clearing on koolphone5.
+- [x] Complete koolphone5 production acceptance: badge 1 survives SpringBoard
+  restart and a fresh completion afterward delivers notification, sound and badge.
 
 ### Outstanding compatibility work
 
-- [ ] Repeat full production visual acceptance on iOS 8 and other intended
-  supported versions, including arm64 and rootless installations. Cross-builds
-  and package checks alone do not establish native compatibility.
+- [ ] Repeat production visual acceptance on other intended supported versions,
+  including arm64 and rootless installations. Cross-builds and package checks
+  alone do not establish native compatibility.
 - [ ] Resolve the iOS 5 notification support boundary: the provider rejects
   pre-iOS-6 runtimes. Implement and validate support or document the limitation.
 
@@ -50,7 +60,11 @@ what was known at the time; their pending statements do not override this list.
 
 ### Deployment and evidence
 
-The latest installation recorded in these documents is `b881428` on gomadango,
+On 2026-10-19, production build `ad47a44` was installed on koolphone5;
+[its deployment and visual test record](session-unread-notification-plan.md#koolphone5-production-acceptance-2026-10-19)
+records the completed production acceptance checks.
+
+The latest gomadango installation recorded in these documents is `b881428`,
 following `6a239a9` (provider migration), `f37bf03` (unread/badges), and `02b1b34`
 (synchronous Send). This is a documentary record, not a fresh device inventory.
 The 2026-10-19 owner confirmation supplies acceptance evidence without a new
