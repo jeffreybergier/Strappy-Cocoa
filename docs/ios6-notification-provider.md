@@ -41,6 +41,12 @@ what was known at the time; their pending statements do not override this list.
 
 ### Outstanding compatibility work
 
+- [x] Demonstrate an independent modern notification route on pinkphone-rsa:
+  the standalone UserNotifications probe delivers alerts and badges, and the
+  owner confirms Glass using Mail's alert-type/topic tone-selection mechanism.
+  See the [successful Glass sequence](../source/daemon/tests/user_notification_device/README.md#successful-glass-technique-2026-10-19).
+- [ ] Integrate and validate that modern route in strappyd; the standalone
+  success does not change the installed production backend.
 - [ ] Resolve pinkphone-rsa (iOS 15.0 arm64/rootless) automatic provider
   discovery/registration: installed bundle loads and initializes in the isolated
   diagnostic, but no production receiver appears after SpringBoard restart.
@@ -69,7 +75,9 @@ Production build `56e1ef0` is installed on pinkphone-rsa (iOS 15.0 arm64,
 rootless). Its daemon is ready, but its notification receiver is not;
 [the test record](session-unread-notification-plan.md#pinkphone-rootless-production-test-2026-10-19)
 records the automatic discovery/registration failure separately from successful
-isolated provider initialization.
+isolated provider initialization and the later successful standalone modern
+notification/Glass tests. The sound-test fixture and topic cleanup remain
+paused; see the [cleanup checklist](../source/daemon/tests/user_notification_device/README.md#paused-device-state-and-cleanup).
 
 On 2026-10-19, production build `ad47a44` was installed on koolphone5;
 [its deployment and visual test record](session-unread-notification-plan.md#koolphone5-production-acceptance-2026-10-19)

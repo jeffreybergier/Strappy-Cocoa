@@ -112,7 +112,13 @@ banner, default sound, badge set/clear, notification removal, tap-to-app, and
 lock-screen tests.
 It requests authorization and posts directly under Strappy's bundle identity,
 without integrating into strappyd or loading the legacy provider. Glass via an
-absolute system sound-file path fell back to the default sound. See the
+absolute system sound-file path fell back to the default sound, as did a generated
+WAV tested in the helper and app bundles. A subsequent Mail-style tone test
+**succeeded with owner-confirmed Glass**: `TLToneManager` selects `texttone:Glass`
+for a Strappy-only topic, and a mutable `UNNotificationSound` created with alert
+type 5 receives that topic before submission. No separate audio playback is used.
+This is a manual probe result, not production integration; the test fixture and
+topic cleanup were paused at the owner's request. See the
 [probe instructions and acceptance checklist](../source/daemon/tests/user_notification_device/README.md).
 
 Before installation, neither `/System/Library/BulletinBoardPlugins` nor its

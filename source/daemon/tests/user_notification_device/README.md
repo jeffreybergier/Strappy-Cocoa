@@ -28,10 +28,14 @@ Commands:
 | `authorize` | Request badge, sound, and alert authorization; changes persistent system permission state. |
 | `send` | Submit one immediate notification with the default sound. |
 | `send-glass` | Experimental absolute system-file sound; played the default sound in the native test. |
+| `send-custom` | Request `StrappyManualChime.wav`; both tested bundle locations fell back to default sound. |
+| `send-tone-glass` | Select Glass for the isolated test topic and submit using Mail's tone-selection API; owner confirmed Glass. |
+| `tone-reset` | Remove the test topic's tone override; does not change Mail's account or global tone settings. |
 | `badge-one` | Set Strappy's badge to 1, independently of unread sessions. |
 | `badge-clear` | Set Strappy's badge to 0, independently of unread sessions. |
 | `clear` | Request removal of only this diagnostic's pending/delivered notification. |
 | `inspect-sounds` | Print Strappy's data-container URL and runtime sound factory signatures. |
+| `inspect-tones` | Print ToneLibrary method signatures and the name/path resolved for `texttone:Glass`. |
 
 Use badge commands only during a coordinated manual test; they temporarily
 override the app's badge rather than deriving it from the database. `clear`
@@ -72,10 +76,17 @@ Production Strappy/strappyd remain at build `56e1ef0`.
   `/System/Library/Audio/UISounds/sms-received3.caf`: submission succeeds, but
   owner hears the default sound again. This is a failed custom-sound test.
 - [x] LaunchServices reports no Strappy data container on this installation.
-- [ ] Prove Glass/custom sound from a supported resource location. Apple's
+- [x] Test an original three-note PCM WAV in the sending helper's bundle:
+  helper resolves the resource, submission succeeds, owner hears default sound.
+- [x] Test the WAV in the recipient Strappy app bundle, installed by a separate
+  removable fixture package: submission succeeds, owner hears default sound.
+  These failures do not establish that all bundled custom sounds are unsupported.
+- [x] Prove Glass using Mail's alert-type/topic mechanism: owner explicitly
+  confirms "it worked! it was glass!" See the exact sequence below.
+- [ ] Optional: resolve arbitrary sound-file delivery. Apple's
   [soundNamed: documentation](https://developer.apple.com/documentation/usernotifications/unnotificationsound/init(named:)?language=objc)
-  specifies app/group `Library/Sounds` or the app bundle. No production app
-  files were modified for the absolute-path test.
+  specifies app/group `Library/Sounds` or the app bundle. The successful Glass
+  path selects a built-in tone rather than providing a file to `soundNamed:`.
 - [x] Owner confirms lock-screen presentation with default sound using the
   final probe build.
 - [ ] Check behavior across respring/reboot with this modern route.
@@ -88,3 +99,80 @@ build products) and `build/research/pinkphone-mail-ios15/` (Mail extraction and
 pseudocode). These are ignored, not shipped or committed. The production legacy
 provider's receiver remains unavailable on pinkphone; this independent probe
 does not repair or use it.
+
+## Successful Glass technique, 2026-10-19
+
+Native confirmation is on pinkphone's iOS 15.0 arm64/rootless installation only.
+The probe posts under Strappy's app identity using the already authorized
+`UNUserNotificationCenter`; strappyd has not been changed or redeployed.
+
+Disassembly of `maild`'s
+`MFUserNotificationSoundController addSoundIfNecessaryForNotificationContent:suppressionContexts:`
+(entry `0x1000bb74c`) shows a call to `soundWithAlertType:5`, followed by
+`mutableCopy`, `setAlertTopic:` with the selected mail account ID, and `setSound:`
+on the notification content. The tone-setting call found in
+`MFAccountsRemovalService _deleteAccount:` (`0x10005a1c0`) passes nil to
+`setCurrentToneIdentifier:forAlertType:topic:` for type 5 and that account's
+topic, clearing its override. This is cleanup evidence, not a discovered Mail
+sound-picker implementation.
+
+The working probe uses this equivalent sequence (illustrative Objective-C;
+the actual probe checks private selectors and invokes them through NSInvocation):
+
+```objectivec
+NSString *topic = @"com.altivecintelligence.Strappy.manual-probe";
+TLToneManager *manager = [TLToneManager sharedToneManager];
+[manager setCurrentToneIdentifier:@"texttone:Glass"
+                    forAlertType:5
+                           topic:topic];
+id sound = [[UNNotificationSound soundWithAlertType:5] mutableCopy];
+[sound setAlertTopic:topic];
+[content setSound:sound];
+[sound release];
+// Submit content in a UNNotificationRequest through Strappy's center.
+```
+
+Identifier case matters: ToneLibrary's own `TL.strings` contains
+`texttone:Glass`. Runtime `nameForToneIdentifier:` returns `Glass`, and
+`filePathForToneIdentifier:` returns
+`/System/Library/Audio/UISounds/sms-received3.caf`. The earlier lowercase candidate
+did not resolve to Glass and was not used to send a tone-selected notification.
+The successful run reads back `texttone:Glass` for the diagnostic topic and
+receives a successful submission callback; owner listening confirms playback.
+
+This uses a Strappy-only topic, not a real mail account or the unscoped global
+tone setter. It does not change Mail's chosen sound, bypass Silent Mode, or play
+audio separately. No sound file is supplied by this successful code path. The
+failed WAV fixture was still installed during the successful test, so repeat
+after fixture removal to independently confirm that installation is irrelevant.
+
+This is a promising mechanism for user-selectable built-in tones. Only Glass
+has been audibly verified; arbitrary imported tones, a picker UI, persistence
+across restart, and the minimal required entitlements remain untested.
+
+Evidence under `build/experiments/pinkphone-un-sound/`:
+`sender-bundle.log`, `recipient-bundle.log`, `tone-glass-correct-info.log`, and
+`tone-glass-send.log`. Mail pseudocode is in
+`build/research/pinkphone-mail-ios15/maild-sound-selection-pseudocode.txt` and
+`maild-tone-reset-pseudocode.txt`.
+
+## Paused device state and cleanup
+
+At the owner's pause after the successful test, the following remain pending.
+This documentation update does not resume device tests or perform cleanup.
+
+- [ ] Clear the diagnostic notification with `probe-tones-v3 clear`.
+- [ ] Clear the diagnostic topic override with `probe-tones-v3 tone-reset`.
+  The staged executable is under `/var/mobile/tmp_altivec/strappy-un-probe/`.
+- [ ] Remove `com.altivecintelligence.strappy.sound-probe` through dpkg.
+  That fixture owns the uniquely named
+  `/var/jb/Applications/Strappy.app/StrappyManualChime.wav` and
+  `/var/jb/usr/libexec/strappy-un-probe`; it does not replace Strappy's executable.
+- [ ] Verify production package-owned files against
+  `build/experiments/pinkphone-un-sound/production-before.sha256`.
+- [ ] Remove obsolete staged sound-test bundles/binaries when no longer needed.
+- [ ] Finish validation and commit the currently uncommitted probe extensions
+  and WAV generator separately from this documentation update.
+
+Normal Strappy notification authorization remains enabled. Integration into
+strappyd and the production sound-selection policy remain future work.
