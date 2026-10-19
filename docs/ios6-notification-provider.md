@@ -41,6 +41,11 @@ what was known at the time; their pending statements do not override this list.
 
 ### Outstanding compatibility work
 
+- [ ] Resolve pinkphone-rsa (iOS 15.0 arm64/rootless) automatic provider
+  discovery/registration: installed bundle loads and initializes in the isolated
+  diagnostic, but no production receiver appears after SpringBoard restart.
+  See the [native test record](session-unread-notification-plan.md#pinkphone-rootless-production-test-2026-10-19).
+
 - [ ] Repeat production visual acceptance on other intended supported versions,
   including arm64 and rootless installations. Cross-builds and package checks
   alone do not establish native compatibility.
@@ -59,6 +64,12 @@ what was known at the time; their pending statements do not override this list.
   the working DEB notification route.
 
 ### Deployment and evidence
+
+Production build `56e1ef0` is installed on pinkphone-rsa (iOS 15.0 arm64,
+rootless). Its daemon is ready, but its notification receiver is not;
+[the test record](session-unread-notification-plan.md#pinkphone-rootless-production-test-2026-10-19)
+records the automatic discovery/registration failure separately from successful
+isolated provider initialization.
 
 On 2026-10-19, production build `ad47a44` was installed on koolphone5;
 [its deployment and visual test record](session-unread-notification-plan.md#koolphone5-production-acceptance-2026-10-19)

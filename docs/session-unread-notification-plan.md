@@ -18,8 +18,9 @@ app-owned notification presentation policy.
 - [x] Confirm processing/unread row icons visually (owner confirmation,
   2026-10-19).
 
-The latest recorded deployments are `ad47a44` on koolphone5 and `b881428` on
-gomadango (following `f37bf03` and `02b1b34`). Remaining compatibility work is tracked in the
+The latest recorded deployments are `56e1ef0` on pinkphone-rsa (notification
+receiver not ready), `ad47a44` on koolphone5, and `b881428` on gomadango
+(following `f37bf03` and `02b1b34`). Remaining compatibility work is tracked in the
 [current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
 Dated test records below preserve the scope of each original observation.
 
@@ -75,6 +76,68 @@ is reconstructed from the installed payload, not an original release archive;
 its provenance is retained alongside it. No user database or credentials were
 included in that package. Older isolated DEB notification probes were left
 installed under their separate identities.
+
+## Pinkphone rootless production test (2026-10-19)
+
+Target: `pinkphone-rsa`, iPhone8,4 (iPhone SE), iOS 15.0 (19A346), arm64,
+rootless Dopamine layout under `/var/jb`; SSH as mobile with passwordless sudo.
+Installed production build `56e1ef0`, upgrading package 1.1.2 to 1.2.0.
+Rootless package SHA-256:
+
+`f0552db7cc0ba65153913afc9ca90b0b00d2648561194307971d206371f953d1`
+
+- [x] Verify the old daemon's IPC v5 readiness before installation.
+- [x] Reconstruct rollback from package-owned installed regular files and dpkg
+  control metadata; all 38 file hashes match. The retained archive did not match.
+  Exclude the system `/var` and `/var/jb` directory symlinks from reconstruction.
+- [x] Pass rootless notification payload/preflight checks and build/validate the
+  existing loader diagnostic for armv7/arm64 without compiler warnings.
+- [x] Install the rootless DEB with dpkg and verify all 39 installed regular-file
+  hashes and production provider package ownership.
+- [x] Verify production IPC v8 store/execution readiness.
+- [x] Restart SpringBoard once (PID 279 → 2683) and confirm it is running.
+- [x] Load the installed provider in the isolated diagnostic: BulletinBoard loads,
+  both publication/withdrawal symbols exist, the principal class conforms to
+  `BBDataProvider`, and initialization succeeds (CF version 1854.00).
+- [ ] Establish automatic provider discovery/registration. The production
+  receiver connection probe returns 1, and the StrappyAlerts directory is absent
+  after restart. Manual diagnostic initialization does not register the provider
+  or open the receiver and is not evidence of automatic loading.
+- [x] Owner can reach account configuration in the installed app; no account
+  is configured on this phone.
+- [ ] Confirm a foreground prompt after the owner configures an account.
+- [ ] Run notification/badge visual acceptance after receiver readiness works.
+
+Before installation, neither `/System/Library/BulletinBoardPlugins` nor its
+`/var/jb` counterpart existed. The package owns the provider under
+`/var/jb/System/Library/BulletinBoardPlugins/`. These observations narrow the
+current failure to automatic discovery/registration; they do not establish that
+iOS 15 removed the provider APIs or that presentation would work after loading.
+
+The ordinary loader diagnostic was killed with exit 137 before producing its
+report, both as mobile and root. Thinning to arm64 did not resolve it. Adding
+its specific arm64 SHA-256 code-directory hash with `jbctl trustcache add` did
+not resolve it either; that diagnostic hash remains in the jailbreak trust cache
+(no global cache clearing was attempted). A staging-only copy signed with
+platform/no-sandbox/no-container entitlements then ran. These entitlements were
+not added to the production provider. Loading the staged provider reported a
+sandbox `mmap` denial, including as root. Loading the installed bundle through
+an owned staging symlink succeeded. No diagnostic invoked registration, sent a
+bulletin or opened a receiver. A separately signed readiness helper only tested
+the production socket connection; it did not send a notification.
+
+No usable on-device `log` executable or `/var/log/syslog` was found. The
+readiness finding uses the actual socket probe and directory check, not an
+absence of log messages. The isolated loader report does not prove behavior
+inside SpringBoard or its automatic search paths.
+
+Packages, manifests, rollback provenance, arm64 symbols and diagnostic reports
+are retained under `build/device-runs/pinkphone-notifications-56e1ef0/`.
+Remote staging is `/var/mobile/tmp_altivec/pinkphone-notifications-56e1ef0/`.
+The new production package remains installed; the matching reconstructed rollback
+is staged as `rollback.deb`. Restore with `sudo -n dpkg -i ./rollback.deb` from
+that directory, then restart SpringBoard once and verify the old daemon. Do not
+manually remove installed provider files or change the bootstrap symlinks.
 
 ## Agreed simpler behavior
 
