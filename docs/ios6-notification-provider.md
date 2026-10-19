@@ -1,62 +1,65 @@
 # Native Strappy notification provider candidate
 
-## Current findings and handoff (2026-10-18)
+## Current checklist (2026-10-19)
 
-**Current production build: `f37bf03`.** The unread/badge implementation is now
-installed on gomadango. The owner confirmed observed-session suppression,
-foreground alerts for another session, background alerts, two unread sessions
-producing badge 2, and opening each session reducing it to 1 and then clearing it.
-See the [approach, timings and production test record](session-unread-notification-plan.md).
-The earlier provider investigation and migration evidence follows.
+This is the authoritative status checklist for the notification investigation on
+`experiment/ios-sandbox-ipc`. Checked native results apply to gomadango
+(iOS 6.1.3, armv7) unless another target is named. Historical entries below record
+what was known at the time; their pending statements do not override this list.
 
-On gomadango (iPhone5,2, iOS 6.1.3), the owner confirmed:
+### Completed
 
-- A visible banner and Notification Center entry using Strappy's name/icon.
-- Strappy's entry in Settings > Notifications, with sounds and badges enabled.
-- Audible built-in Glass sound (SystemSoundID 1009), with silent mode off.
-- A visible badge of **4** on Strappy's icon after diagnostic test 4. SpringBoard
-  also reported that its badge readback matched 4.
+- [x] Demonstrate notifications without converting Strappy to a sandboxed IPA.
+- [x] Load a native BulletinBoard provider and replace the Substrate receiver.
+- [x] Confirm Strappy name/icon, notification settings, banners, lock-screen
+  presentation, Notification Center history, and built-in Glass sound.
+- [x] Confirm tap-to-open, dismissal, clearing, repeated delivery and restart
+  behavior through owner observation.
+- [x] Deploy the production migration, verify package ownership/socket readiness,
+  remove the candidate package, and retain rollback packages and matching symbols.
+- [x] Confirm real-prompt completion through the production provider.
+- [x] Implement durable unread-session state and acknowledged/retried badge
+  updates; confirm badge transitions 2 → 1 → cleared by opening sessions.
+- [x] Confirm observed-session suppression and alerts for another session while
+  Strappy remains foregrounded.
+- [x] Confirm completion while the UI is suspended or terminated and correct
+  processing/unread row icons (owner confirmation, 2026-10-19).
+- [x] Run offline policy/execution tests, clean builds for both iOS and all four
+  Mac architectures, provider analysis and rootful/rootless package checks.
+- [x] Test candidate loading and actual badge readback on iOS 8.4.1 armv7;
+  this is narrower evidence than the iOS 6 production visual tests.
 
-Earlier no-sound observations were invalidated when the owner discovered the
-phone was in silent mode. Glass subsequently worked. The custom WAV has not
-been retested under the corrected conditions, so its implementation is not a
-confirmed failure. The provider explicitly attaches a BBSound; we did not
-establish that omitting sound causes iOS to supply a default.
+### Outstanding compatibility work
 
-**Production migration is installed on gomadango.** On 2026-10-18, package
-built from `6a239a9` replaced the old Substrate receiver. Candidate package
-0.1.5 was removed through dpkg first. The native provider now owns
-`receiver.sock`; strappyd keeps its existing packet format and destination.
-SpringBoard PID 4046 logged provider registration and production socket readiness;
-strappyd restarted as PID 4031. A payload-free connection check as mobile passed.
-All installed production payload hashes matched the staged package, obsolete
-receiver/filter files were absent, and no new crash reports appeared.
+- [ ] Repeat full production visual acceptance on iOS 8 and other intended
+  supported versions, including arm64 and rootless installations. Cross-builds
+  and package checks alone do not establish native compatibility.
+- [ ] Resolve the iOS 5 notification support boundary: the provider rejects
+  pre-iOS-6 runtimes. Implement and validate support or document the limitation.
 
-The earlier literal badge-4 experiment remains only a diagnostic result. That
-initial production build excluded it and had no badge count/clear policy.
-That initial provider was iOS 6-only. The subsequent
-[unread/badge implementation](session-unread-notification-plan.md) removes the
-upper version guard, adds badge counting, and tests a candidate on iOS 8.4.1. The owner confirmed that a real prompt completion through the installed
-production package worked. They also confirmed that a later respring preserved
-the badge. See the
-[deployment record](#production-device-cutover-2026-10-18) below.
+### Optional investigations, not blockers for the demonstrated iOS 6 behavior
 
-On 2026-10-18, the owner confirmed tap-to-open and the native notification
-lifecycle checks: dismissal, clearing, retained history, repeated notifications
-and restart behavior. These two validation items are complete based on owner
-confirmation; no new device test or callback trace was collected in this turn.
-Production packaging/socket migration is installed with rollback artifacts
-retained, and the owner confirmed the real-prompt notification. The literal badge probe must not become production unread-count
-policy. Badge replacement/clearing and persistent unread-count behavior have
-not been established by the visible badge-4 test. No new badge policy is part
-of the owner's requested proof-of-display experiment.
+- [ ] Retest the custom WAV with silent mode off, if custom sound is wanted.
+  Built-in Glass is already confirmed; the earlier WAV result was inconclusive.
+- [ ] Trace private threading/teardown and optional cleared-info callback
+  contracts if deeper API evidence is needed. Observable lifecycle behavior and
+  bounded policy tests are complete, but do not prove every private contract.
+- [ ] Establish enforced sandbox access only if an IPA conversion is pursued.
+  The original sandbox probe did not prove enforcement and is not needed for
+  the working DEB notification route.
 
-Clean candidate armv7/arm64 builds, native macOS fixtures, static analysis and
-package checks passed. Full clean production builds/package validation passed
-for both iOS and all four Mac architectures without compiler warnings. These
-cross-build results do not extend the on-device compatibility claim beyond
-this iOS 6 phone. The chronological experiment records below preserve the
-observations and subsequent corrections.
+### Deployment and evidence
+
+The latest installation recorded in these documents is `b881428` on gomadango,
+following `6a239a9` (provider migration), `f37bf03` (unread/badges), and `02b1b34`
+(synchronous Send). This is a documentary record, not a fresh device inventory.
+The 2026-10-19 owner confirmation supplies acceptance evidence without a new
+build fingerprint or instrumented suspension trace.
+
+See the [policy and acceptance record](session-unread-notification-plan.md),
+[migration and rollback procedure](ios6-provider-migration.md), and
+[original sandbox results](ios-sandbox-experiment.md). Detailed chronological
+records below preserve observations and corrections; they are historical.
 
 ## Architecture
 
@@ -137,8 +140,8 @@ The ZIP contains `StrappyNotificationProvider.bundle/Info.plist` and its signed
 armv7/arm64 `MH_BUNDLE` executable. The custom WAV remains in source but is not
 packaged; the selected Glass sound is supplied by iOS. The ZIP is an offline
 artifact, not the separately built device-test DEB. The
-build directory also retains matching dSYMs. Production packaging migration
-belongs to the next milestone.
+build directory also retains matching dSYMs. Production packaging migration was subsequently completed; see the current
+checklist above.
 
 On a native Mac:
 

@@ -1,9 +1,27 @@
 # Session unread state, observation and badges
 
-Design, implementation and device experiments, 2026-10-18. The policy below is
-implemented for the iOS app and daemon. macOS retains its existing app-owned
-notification presentation policy. Production build `f37bf03` is installed on
-gomadango, where the owner confirmed the core end-to-end behavior below.
+Design, implementation and device experiments, started 2026-10-18. The policy
+below is implemented for the iOS app and daemon. macOS retains its existing
+app-owned notification presentation policy.
+
+## Acceptance checklist (reviewed 2026-10-19)
+
+- [x] Confirm observed-session suppression and foreground alerts for another
+  session on gomadango.
+- [x] Confirm background completion banners/sound and unread-session badge
+  transitions 2 → 1 → cleared on gomadango.
+- [x] Validate failures, repeated answers, deletion, disconnect/lease expiry,
+  lost acknowledgments and restart recovery in automated harnesses.
+- [x] Deploy synchronous Send without a prompt background assertion.
+- [x] Confirm completion while the UI is suspended or terminated (owner
+  confirmation, 2026-10-19; no new instrumented trace collected).
+- [x] Confirm processing/unread row icons visually (owner confirmation,
+  2026-10-19).
+
+The latest deployment recorded below is `b881428`, following `f37bf03` and
+`02b1b34`. Remaining cross-device compatibility work is tracked in the
+[current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
+Dated test records below preserve the scope of each original observation.
 
 ## Agreed simpler behavior
 
@@ -90,9 +108,11 @@ duplicating daemon work. Both platform composers clear text only on acceptance.
 The iOS app no longer requests background execution time for prompts. It still
 ends observation on deactivation/backgrounding and reacquires it on activation.
 The system can suspend the app while strappyd completes work and SpringBoard
-presents the notification and badge. The earlier visual tests recorded here validated the
-notification policy with the old background task present; actual suspended-app
-completion remains a separate follow-up device test after this change.
+presents the notification and badge. On 2026-10-19, the owner confirmed the
+follow-up device acceptance checks work, including completion while the UI is
+suspended or terminated. This closes the suspended-app completion follow-up
+based on owner confirmation; no new instrumentation or device logs were
+collected for this confirmation.
 
 The updated native submission fixture passed on koolphone5 (iOS 8.4.1, armv7):
 a simulated 300 ms option-save delay held Send until rejection (about 516 ms
@@ -145,8 +165,9 @@ PID 5138 passed store/execution IPC readiness; SpringBoard PID 5151 logged
 production receiver readiness at 23:55:07 device time. No new crash reports
 appeared during these checks. Matching packages, armv7 symbols and logs are under
 `build/device-runs/gomadango-unread-row-b881428/`, with remote staging at
-`/var/mobile/tmp_altivec/gomadango-unread-row-b881428/`. Visual confirmation of
-the processing and unread row icons remains pending.
+`/var/mobile/tmp_altivec/gomadango-unread-row-b881428/`. On 2026-10-19, the owner
+confirmed that the processing and unread row icons display correctly, completing
+the outstanding visual acceptance check.
 
 ## Implementation validation
 

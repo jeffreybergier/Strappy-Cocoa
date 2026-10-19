@@ -1,10 +1,18 @@
 # Isolated iOS 6 native BulletinBoard provider test
 
-Status: tested successfully on gomadango and removed on 2026-10-17 UTC.
-The production notification implementation is unchanged. See native results
-below; the instructions are retained as the original test recipe. This test asks whether Apple's native
-loader accepts a custom provider, then whether that provider can publish one
-fixed bulletin. It does not try to establish a complete notification service.
+## Probe checklist (reviewed 2026-10-19)
+
+- [x] Verify that the native loader accepts a custom provider on gomadango.
+- [x] Publish the isolated fixed bulletin and remove the probe package.
+- [x] Implement the subsequent production provider with Strappy identity,
+  bounded history, socket ownership, dismissal and teardown handling.
+- [x] Complete production migration and retain rollback artifacts.
+- [x] Confirm production notification lifecycle and unread/badge behavior.
+
+The [current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19)
+owns remaining compatibility work and optional private-API investigation.
+The original recipe and dated handoffs below are historical; the probe itself
+left production unchanged, but subsequent work replaced the production receiver.
 
 See [investigation history](deb-notifications-experiment.md#provider-investigation-handoff-2026-10-17)
 for prior commits, native results, binary provenance and online sources.
@@ -338,7 +346,7 @@ preview or approved error text in body. Distinguish those fields from the app
 name/icon supplied by system presentation. Retain useful app-launch behavior;
 session-specific navigation is not established by this experiment.
 
-### Work still required
+### Historical work list (superseded by the current checklist)
 
 1. Implement provider lifecycle, IPC readiness, bounded retained bulletin state,
    stable identities, dismissal/withdrawal and teardown. Do not ship the probe's
@@ -371,7 +379,7 @@ window. Existing ignored local/device evidence should be preserved. No test
 notification/settings-entry disappearance was explicitly confirmed after removal;
 check for a residual test entry before interpreting a later settings observation.
 
-## Production provider implementation follow-up
+## Historical production provider implementation follow-up
 
 The subsequent native candidate has now been implemented and tested on
 gomadango with Strappy's real identity. The owner confirmed its banner,

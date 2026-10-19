@@ -3,16 +3,20 @@
 2026-10-17, branch `experiment/ios-sandbox-ipc`, koolphone5: iPhone5,2,
 iOS 8.4.1 (12H321), armv7, mobile UID 501.
 
-Latest handoff: the owner confirmed **visible Home-screen and lock-screen
-notifications** from the iOS 6 daemon-to-SpringBoard probe. With Do Not Disturb
-enabled, the screen stayed off and the notification was visible after the owner
-woke it with Home, as expected. Notification Center history and notification
-settings registration remain unimplemented by this probe. The test component
-remains installed on gomadango. See [native results and continuation instructions](#native-results-and-handoff-2026-10-17)
-before rerunning or changing the experiment. Production completion integration
-is implemented below and was installed on gomadango. The owner confirmed a
-production alert for session 30. The later single-message formatting experiment
-was reverted at the owner's request; separate title/body fields are restored.
+## Experiment checklist (reviewed 2026-10-19)
+
+- [x] Demonstrate visible local notifications from an unsandboxed DEB on iOS 8.
+- [x] Demonstrate daemon-to-SpringBoard Home-screen and lock-screen alerts on
+  iOS 6, including owner-observed DND behavior.
+- [x] Integrate real production completion alerts and restore separate title/body
+  fields after the single-message formatting experiment.
+- [x] Investigate the native provider route and complete the subsequent
+  production migration, history/settings integration and unread/badge policy.
+
+The [current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19)
+owns outstanding work and compatibility limits. The dated records below are
+historical: statements about installed probes, pending migration or unimplemented
+history/settings describe those earlier stages, not current production status.
 
 ## Result
 

@@ -5,12 +5,21 @@ readiness passed, and the owner confirmed the real-prompt notification worked. T
 dismissal, clearing, history, repeated notifications and restart behavior.
 See [the investigation](ios6-notification-provider.md) for native observations.
 
-The subsequent unread/badge build `f37bf03` is also installed on gomadango and
-passed the owner-guided core notification and badge tests. See the
-[production test record and approach](session-unread-notification-plan.md).
-The original migration procedure and rollback guidance below remain historical
-context; the current retained deployment is
-`build/device-runs/gomadango-attention-f37bf03/`.
+## Migration checklist (reviewed 2026-10-19)
+
+- [x] Remove the candidate package before installing the production provider.
+- [x] Verify production package ownership and removal of the obsolete receiver.
+- [x] Restart SpringBoard and verify new-process receiver and daemon readiness.
+- [x] Confirm real-prompt delivery, app identity and notification lifecycle.
+- [x] Retain exact rollback packages, payload manifests, matching symbols and logs.
+- [x] Deploy subsequent unread/badge, synchronous Send and unread-row builds.
+
+The latest deployment recorded here is `b881428`; its retained artifacts are at
+`build/device-runs/gomadango-unread-row-b881428/`. See the
+[production test record](session-unread-notification-plan.md) and
+[current checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
+The original migration procedure and rollback guidance below are historical;
+its badge-4 and initial iOS-6-only restrictions describe the initial cutover.
 
 ## Package and compatibility
 

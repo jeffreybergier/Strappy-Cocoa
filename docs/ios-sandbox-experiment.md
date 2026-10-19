@@ -11,6 +11,21 @@ that demonstrated result.
 The experiment is authorized to depart from AGENTS.md's unsandboxed DEB-only
 rule. Production packaging and the installed service are unchanged.
 
+## Experiment checklist (reviewed 2026-10-19)
+
+- [x] Build isolated permission variants and record native IPC/SQLite results.
+- [x] Confirm visible local notification delivery from the tested probes.
+- [x] Identify the limitation: actual filesystem access succeeded despite policy
+  denials, so sandbox enforcement was not established.
+- [x] Establish through the subsequent DEB experiment that an IPA/storage
+  conversion is unnecessary for the demonstrated notification result.
+- [ ] Optional, only if pursuing IPA conversion: test under an enforcing sandbox,
+  establish narrow shared-store/socket access, and validate the full app flow.
+
+This experiment is complete for the notification investigation. The future
+conversion work below is conditional, not a notification release requirement.
+See the [current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
+
 ## Questions and research
 
 Can a container-installed IPA use the existing authenticated Unix socket at
