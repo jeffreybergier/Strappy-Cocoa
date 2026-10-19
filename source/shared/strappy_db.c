@@ -441,6 +441,16 @@ void strappy_db_set_service_ready(const char *path, int ready)
   pthread_mutex_unlock(&strappy_db_readiness_mutex);
 }
 
+int strappy_db_service_ready(const char *path)
+{
+  int ready;
+  pthread_mutex_lock(&strappy_db_readiness_mutex);
+  ready = path != NULL && strappy_db_ready_path != NULL &&
+          strcmp(path, strappy_db_ready_path) == 0;
+  pthread_mutex_unlock(&strappy_db_readiness_mutex);
+  return ready;
+}
+
 int strappy_db_open_reader(const char *path, sqlite3 **out, char **error_out)
 {
   sqlite3 *db = NULL;
@@ -448,11 +458,7 @@ int strappy_db_open_reader(const char *path, sqlite3 **out, char **error_out)
   *out = NULL;
 #ifdef STRAPPY_DB_UI
   {
-    int ready;
-    pthread_mutex_lock(&strappy_db_readiness_mutex);
-    ready = path != NULL && strappy_db_ready_path != NULL && strcmp(path, strappy_db_ready_path) == 0;
-    pthread_mutex_unlock(&strappy_db_readiness_mutex);
-    if (!ready) { strappy_set_error(error_out, "The background service is unavailable or incompatible. Reopen Strappy after the service is ready."); return 0; }
+    if (!strappy_db_service_ready(path)) { strappy_set_error(error_out, "The background service is unavailable or incompatible. Reopen Strappy after the service is ready."); return 0; }
   }
 #endif
   if (path == NULL || path[0] == '\0' ||

@@ -1,5 +1,6 @@
 #include "strappy_store_client.h"
 #include "strappy_db.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -9,7 +10,11 @@ static void changed(unsigned int topics, long long session)
 {
     char *error = NULL;
     (void)session; (void)topics;
-    puts(strappy_db_check_reader(database_path, &error) ? "ready" : "unavailable");
+    int ready = strappy_db_service_ready(database_path);
+    assert(!strappy_db_service_ready(NULL));
+    assert(!strappy_db_service_ready("/not-the-monitored-store"));
+    assert(ready == strappy_db_check_reader(database_path, &error));
+    puts(ready ? "ready" : "unavailable");
     fflush(stdout);
     free(error);
 }

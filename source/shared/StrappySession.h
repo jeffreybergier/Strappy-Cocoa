@@ -166,6 +166,9 @@ enum {
 + (void)setSessionObservationActive:(BOOL)active;
 
 + (void)bootstrapProcess;
+/* Thread-safe service handshake state; readiness changes publish the normal
+ * session-update notification. Does not establish schema/storage health. */
++ (BOOL)isBackgroundServiceReady;
 + (NSString *)sessionsDatabasePath;
 + (BOOL)initializeSessionStoreWithError:(NSError **)error;
 + (BOOL)prepareProviderCredentialsWithError:(NSError **)error;

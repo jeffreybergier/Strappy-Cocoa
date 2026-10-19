@@ -1177,6 +1177,12 @@ static uint64_t StrappyObservationToken;
   [pool release];
 }
 
++ (BOOL)isBackgroundServiceReady;
+{
+  return strappy_db_service_ready([[self sessionsDatabasePath]
+    fileSystemRepresentation]) ? YES : NO;
+}
+
 + (void)bootstrapProcess
 {
   char *strappyError;

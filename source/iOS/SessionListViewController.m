@@ -75,6 +75,7 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
 @property (nonatomic, copy) NSNumber *pendingDeleteSessionIdentifier;
 @property (nonatomic, assign) BOOL creatingSession;
 - (BOOL)rebuildSections;
+- (void)initialServiceWaitDidExpire;
 - (void)sidebarReadFailed:(NSNotification *)notification;
 - (void)dateBoundariesDidChange:(NSNotification *)notification;
 - (void)strappySessionDidUpdate:(NSNotification *)notification;
@@ -177,8 +178,36 @@ static NSString *StrappySessionSubtitle(NSDictionary *session)
   [self XP_presentViewController:navigationController animated:YES];
 }
 
+- (void)initialServiceWaitDidExpire;
+{
+  initialServiceWaitExpired_ = YES;
+  [self reloadData];
+}
+
 - (void)reloadData
 {
+  /* The monitor connects asynchronously. Its first readiness notification
+   * retries this load; a bounded fallback still reports a genuinely missing
+   * service. Never show the initial not-yet-connected state as a failure. */
+  if (![[self collectionTableAdapter] snapshot] &&
+      !initialServiceWaitExpired_ && ![StrappySession isBackgroundServiceReady]) {
+    [[self addButton] setEnabled:NO];
+    [[self settingsButton] setEnabled:NO];
+    if (!initialServiceWaitStarted_) {
+      initialServiceWaitStarted_ = YES;
+      [self performSelector:@selector(initialServiceWaitDidExpire)
+                 withObject:nil afterDelay:3.0];
+    }
+    return;
+  }
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+    selector:@selector(initialServiceWaitDidExpire) object:nil];
+  initialServiceWaitExpired_ = YES;
+  if (initialServiceWaitStarted_) {
+    initialServiceWaitStarted_ = NO;
+    [[self addButton] setEnabled:YES];
+    [[self settingsButton] setEnabled:YES];
+  }
   [pendingPromptStates_ removeAllObjects];
   if (!sidebarCollection_) sidebarCollection_ = [[AICollectionController alloc]
       initWithTarget:self selector:@selector(sidebarLoaded:) builder:[StrappySession class]];
@@ -705,6 +734,8 @@ clickedButtonAtIndex:(NSInteger)buttonIndex
 
 - (void)dealloc
 {
+  [NSObject cancelPreviousPerformRequestsWithTarget:self
+    selector:@selector(initialServiceWaitDidExpire) object:nil];
   [sidebarCollection_ invalidate];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
 }

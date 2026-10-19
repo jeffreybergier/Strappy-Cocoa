@@ -14,6 +14,8 @@
   AICollectionController *sidebarCollection_;
   NSMutableDictionary *pendingPromptStates_;
   BOOL pendingSelectionNotification_;
+  BOOL initialServiceWaitStarted_;
+  BOOL initialServiceWaitExpired_;
 }
 
 @property (nonatomic, assign) id<SessionListViewControllerDelegate> delegate;

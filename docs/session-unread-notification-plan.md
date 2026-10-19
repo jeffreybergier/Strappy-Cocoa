@@ -46,6 +46,24 @@ Production iOS daemon display, sound, permission changes, and reboot behavior
 still require native device acceptance; the earlier probe results below remain
 separate evidence. No production device was redeployed for this integration.
 
+## Pinkphone modern deployment follow-up (2026-10-19)
+
+Installed `2ba1d5f` on pinkphone-rsa through the rootless package. All installed
+regular-file hashes matched, daemon PID changed 2669 to 3157, and IPC v8
+store/execution readiness passed. The owner subsequently confirmed notifications
+from the app are working. This confirmation does not separately establish each
+sound/badge/reboot acceptance case. Deployment artifacts and the verified prior
+package are retained in `build/device-runs/pinkphone-modern-2ba1d5f/`.
+
+The owner also reported an initial service-unavailable alert; after dismissal the
+app was usable. The daemon remained healthy. The old/new UI executables have
+identical SHA-256 hashes, and UI/monitor code did not change in that deployment.
+The initial conversation read can run before the asynchronous monitor completes
+its handshake. What changed the timing on this device is not established.
+The startup fix defers the initial list read until the readiness push, with a
+three-second fallback to report a genuinely unavailable service. It does not
+block the main thread, bypass the reader gate, or change the notification route.
+
 ## Acceptance checklist (reviewed 2026-10-19)
 
 - [x] Confirm observed-session suppression and foreground alerts for another
