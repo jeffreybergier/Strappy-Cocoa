@@ -1,21 +1,17 @@
 # Isolated iOS 6 native BulletinBoard provider test
 
-## Probe checklist (reviewed 2026-10-19)
+## Evidence scope
 
-- [x] Verify that the native loader accepts a custom provider on gomadango.
-- [x] Publish the isolated fixed bulletin and remove the probe package.
-- [x] Implement the subsequent production provider with Strappy identity,
-  bounded history, socket ownership, dismissal and teardown handling.
-- [x] Complete production migration and retain rollback artifacts.
-- [x] Confirm production notification lifecycle and unread/badge behavior.
+The native loader accepted the custom provider on gomadango; the isolated fixed
+bulletin was published and the probe package removed. The subsequent production
+provider supplies Strappy identity, history/settings, Glass sound and unread
+badges. Production migration and notification lifecycle were confirmed in the
+[current technical findings](ios6-notification-provider.md).
 
-The [current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19)
-owns remaining compatibility work and optional private-API investigation.
-The original recipe and dated handoffs below are historical; the probe itself
-left production unchanged, but subsequent work replaced the production receiver.
-
-See [investigation history](deb-notifications-experiment.md#provider-investigation-handoff-2026-10-17)
-for prior commits, native results, binary provenance and online sources.
+The dated procedures and results below are historical. All outstanding merge and
+optional work is tracked in [TODO.md](../TODO.md).
+See the [investigation history](deb-notifications-experiment.md#provider-investigation-evidence-2026-10-17)
+for the native loading evidence.
 
 ## Implementation and evidence
 
@@ -272,20 +268,13 @@ macOS PPC/i386/x86_64/arm64 without warnings; logs are
 `build/production-clean-provider-native.log` and
 `build/production-build-provider-native.log`.
 
-## Next-session handoff: production Strappy identity
+## Production Strappy identity and integration
 
-Owner request after the successful test: tomorrow upgrade daemon notifications
-using this technique, presenting as **Strappy**, with the real application's
-icon and bundle identity. This turn documents that intention only; production
-integration and another phone installation have not been performed.
+The isolated test in `084643d` and native results in `36fef13` established the
+provider route. Subsequent production integration preserves the following app
+identity and transport boundaries.
 
-Start with commits `084643d` (isolated provider) and `36fef13` (native success,
-cleanup, runner corrections), plus the evidence paths above. The installed
-production implementation remains the earlier Substrate receiver; the successful
-probe has been removed. Do not confuse a successful experiment with a deployed
-production migration.
-
-### Identity to preserve
+### Application identity
 
 Verified directly from `source/iOS/Info.plist`:
 
@@ -296,20 +285,12 @@ Verified directly from `source/iOS/Info.plist`:
 - Debian production package identifier: `com.altivecintelligence.strappy`
   (lowercase s). This is not the application bundle identifier.
 
-Use the application identity for provider section identity, bulletin section,
-notification settings association, and app-launch action. Give the provider
-bundle its own distinct internal identifier: matching the notification's app
-identity does not require two bundles with the same CFBundleIdentifier.
-Keep the test package's identity and “Strappy Provider Probe” name out of the
-production presentation.
+The provider uses the application identity for section identity, notification
+settings association and app launch, with a distinct bundle identifier for the
+provider itself. The fixed probe did not validate the real app's icon or tap
+routing; later production observations are recorded in the provider findings.
 
-Do not assume section identity alone resolves the correct icon. Verify native
-icon resolution for the installed app and inspect the iOS 6 section-icon APIs
-if an explicit icon is required. Banner, Notification Center, lock-screen, and
-Settings presentation all need observation. The fixed probe did not validate
-the real app's icon, its identity, or tap routing.
-
-### Intended architecture and integration points
+### Legacy architecture and integration points
 
 The proven route is:
 
@@ -325,59 +306,35 @@ This is not evidence that strappyd can publish directly just by linking
 BulletinBoard. The daemon remains the event producer; a registered provider
 inside SpringBoard performs publication.
 
-Review these existing sources before changing them:
+Source responsibilities at the time of the isolated experiment:
 
-- `source/daemon/strappy_notifications.c`: completion/error payload creation and
-  Unix datagram sending; preserve existing event eligibility, deduplication,
-  bounded UTF-8 previews, and error-message policy.
+- `source/daemon/strappy_notifications.c`: completion/error payloads, bounded
+  UTF-8 previews, event eligibility and Unix datagram transport.
 - `source/shared/XPFoundation/strappy_notification_platform.c`: platform socket
-  selection; preserve platform boundaries and macOS behavior.
-- `source/iOS/notifications/XPStrappyBulletin.m`: current socket validation,
-  receiver lifecycle and direct-controller presentation. Reuse established
-  transport protections while replacing presentation with provider publication.
-- `source/daemon/tests/provider_probe/XPProviderProbe.m`: verified native-provider
-  loading, section methods, publication and withdrawal entry points. It is a
-  diagnostic, not a production-ready receiver.
-- `source/iOS/Makefile`: packaging of the current dylib/filter and future native
-  bundle. Keep the declarative common build/packaging pipeline.
+  selection and separation from macOS behavior.
+- `source/iOS/notifications/XPStrappyBulletin.m`: the earlier receiver's socket
+  validation, lifecycle and direct-controller presentation.
+- `source/daemon/tests/provider_probe/XPProviderProbe.m`: diagnostic native
+  loading, section methods, publication and withdrawal entry points.
+- `source/iOS/Makefile`: declarative production packaging.
 
-Keep separate title/body behavior from `ac50d5f`: session name in title, reply
-preview or approved error text in body. Distinguish those fields from the app
-name/icon supplied by system presentation. Retain useful app-launch behavior;
-session-specific navigation is not established by this experiment.
+The title/body behavior restored in `ac50d5f` places the session name in the
+bulletin title and the reply preview or approved error text in its body. System
+presentation supplies the app name/icon. Session-specific navigation was not
+established by the isolated experiment.
 
-### Historical work list (superseded by the current checklist)
+### Receiver and evidence boundaries
 
-1. Implement provider lifecycle, IPC readiness, bounded retained bulletin state,
-   stable identities, dismissal/withdrawal and teardown. Do not ship the probe's
-   fixed message, persistent one-attempt file, staging logs or empty history
-   implementation as the production policy. Establish how list queries and
-   cleared state should work without replaying dismissed alerts.
-2. Establish the private API threading/lifetime contract. Main-thread publication
-   succeeded once; repeated and burst behavior are not validated. Preserve MRC
-   ownership, runtime checks, and the project's XP compatibility boundaries.
-3. Use only one receiver for the production socket. The old receiver can unlink
-   an existing socket; leaving both receivers active risks stealing delivery or
-   producing duplicates. Package migration must remove obsolete owned dylib/filter
-   files and coordinate the required respring before relying on the new path.
-4. Account for existing Strappy notification registration and saved settings,
-   especially the iOS 8 `SBAppUsesLocalNotifications` route. Do not overwrite user
-   settings or register competing providers for the same section. iOS 6 success
-   does not establish iOS 5, iOS 7+, rootless or arm64 runtime compatibility.
-5. Prepare a production-package rollback artifact and procedure before replacing
-   the working receiver. Native plugins may remain active in Substrate Safe Mode;
-   retain independent SSH recovery and avoid automatic/repeated restart loops.
-6. Run applicable offline notification/daemon tests, clean builds for all required
-   iOS/macOS slices, analyzer and package checks. Then agree on a new, bounded
-   production-phone test window. Confirm real Strappy identity/icon, settings,
-   Notification Center, title/body, app launch, repeated delivery, and cleanup;
-   record DND/mute/lock state and distinguish tested from untested behavior.
+A production socket has one receiver. The old receiver could unlink an existing
+socket, so coexistence risks lost or duplicate delivery. Package migration removes
+obsolete owned dylib/filter files and a respring unloads the old code. Native
+plugins can remain active in Substrate Safe Mode; independent SSH recovery and
+exact rollback packages are part of the migration procedure.
 
-Gomadango is the owner's production phone. Today's authorization covered the
-completed isolated test and removal; it is not an unattended future deployment
-window. Existing ignored local/device evidence should be preserved. No test
-notification/settings-entry disappearance was explicitly confirmed after removal;
-check for a residual test entry before interpreting a later settings observation.
+The isolated test did not establish every private API threading/lifetime
+contract or compatibility on other OS versions. Residual test settings-entry
+removal was not visually confirmed. Later production lifecycle evidence is
+recorded in [the provider findings](ios6-notification-provider.md).
 
 ## Historical production provider implementation follow-up
 
@@ -389,9 +346,7 @@ inconclusive because the phone was later found to be in silent mode; Glass
 worked after that was corrected. The custom WAV remains unverified.
 
 See [the current findings, architecture and device-test record](ios6-notification-provider.md).
-Candidate test package 0.1.5 remains installed on its separate socket. This is
-a later experiment than the removed probe described above: production packaging
-and the daemon destination remain unchanged, and the old Substrate receiver
-still handles production traffic. Native lifecycle/history, tap-to-open and
-coordinated production migration remain outstanding. The badge test establishes
-visible display only; it does not implement unread-count policy.
+At this historical stage, candidate test package 0.1.5 used a separate socket,
+and the old Substrate receiver still handled production traffic. Its literal
+badge test established visible display, not unread-count policy. The later
+production migration and unread implementation supersede that device state.

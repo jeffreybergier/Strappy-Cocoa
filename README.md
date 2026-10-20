@@ -177,6 +177,9 @@ flowchart TB
 
 ### Completion notifications
 
+Outstanding merge acceptance, cleanup and optional research are tracked in the
+[root notification checklist](TODO.md).
+
 On iOS, strappyd sends a completion alert after committing a successful or
 failed prompt when that session is not being observed by the app. The bulletin title is the chat's
 name (up to 100 Unicode characters); its body contains the first 400 Unicode

@@ -104,23 +104,23 @@ rollback was reconstructed from exactly the installed package-owned regular
 files and dpkg control scripts; all 39 file hashes matched before installation.
 See `rollback-provenance.txt` and `deployment.txt` in that run directory.
 
-## Acceptance checklist (reviewed 2026-10-19)
+## Acceptance results (2026-10-19)
 
-- [x] Confirm observed-session suppression and foreground alerts for another
+- Confirmed observed-session suppression and foreground alerts for another
   session on gomadango.
-- [x] Confirm background completion banners/sound and unread-session badge
+- Confirmed background completion banners/sound and unread-session badge
   transitions 2 → 1 → cleared on gomadango.
-- [x] Validate failures, repeated answers, deletion, disconnect/lease expiry,
+- Validated failures, repeated answers, deletion, disconnect/lease expiry,
   lost acknowledgments and restart recovery in automated harnesses.
-- [x] Deploy synchronous Send without a prompt background assertion.
-- [x] Confirm completion while the UI is suspended or terminated (owner
+- Deployed synchronous Send without a prompt background assertion.
+- Confirmed completion while the UI is suspended or terminated (owner
   confirmation, 2026-10-19; no new instrumented trace collected).
-- [x] Confirm processing/unread row icons visually (owner confirmation,
+- Confirmed processing/unread row icons visually (owner confirmation,
   2026-10-19).
 
 The [latest deployments](#latest-production-deployments-2026-10-19) supersede
-older installed-build statements below. Remaining compatibility work is tracked
-in the [current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
+older installed-build statements below. All outstanding acceptance and cleanup
+are tracked in [TODO.md](../TODO.md).
 Dated test records below preserve the scope of each original observation.
 
 ## Koolphone5 production acceptance (2026-10-19)
@@ -131,28 +131,28 @@ to 1.2.0. New package SHA-256:
 
 `d1b23b5cdb458b9a9e38341069e5a3ad865238235c303fdaf433b1675a9e03ba`
 
-- [x] Pass the offline Linux suite and rootful/rootless package checks. The
+- Passed the offline Linux suite and rootful/rootless package checks. The
   preceding clean iOS/macOS build passed without compiler warnings.
-- [x] Prepare rollback: retained DEBs did not match the installed build, so
-  reconstruct a package from its package-owned files and dpkg control scripts.
+- Prepared rollback: retained DEBs did not match the installed build, so
+  reconstructed a package from its package-owned files and dpkg control scripts.
   All 38 installed regular-file hashes matched the reconstructed payload.
-- [x] Install with dpkg, verify all 39 new regular-file hashes and provider
-  ownership, and restart SpringBoard once.
-- [x] Verify IPC v8 store/execution readiness and a live production receiver
+- Installed with dpkg, verified all 39 new regular-file hashes and provider
+  ownership, and restarted SpringBoard once.
+- Verified IPC v8 store/execution readiness and a live production receiver
   connection. SpringBoard PID 3076 logged `receiver.sock` readiness at
   19:20:08 device time. No new crash report filenames appeared during these checks.
-- [x] Owner confirms a background completion notification, sound and badge.
-- [x] Owner confirms opening the app and reading that session clears the badge.
-- [x] Owner confirms no banner or sound while staying in the completing session.
-- [x] Owner confirms banner and sound for another session's completion while
+- Owner confirms a background completion notification, sound and badge.
+- Owner confirms opening the app and reading that session clears the badge.
+- Owner confirms no banner or sound while staying in the completing session.
+- Owner confirms banner and sound for another session's completion while
   the app is foregrounded.
-- [x] Owner confirms two unread sessions produce badge 2, then opening each
+- Owner confirms two unread sessions produce badge 2, then opening each
   session reduces it to 1 and clears it.
-- [x] Owner confirms lock-screen presentation and opening Strappy from the
+- Owner confirms lock-screen presentation and opening Strappy from the
   notification.
-- [x] Owner confirms Strappy notification settings registration, Notification
+- Owner confirms Strappy notification settings registration, Notification
   Center history, dismissal and clearing.
-- [x] Owner confirms badge 1 survives a SpringBoard restart, and a new
+- Owner confirms badge 1 survives a SpringBoard restart, and a new
   completion afterward still produces a notification, sound and badge.
 
 The owner-confirmed results establish actual display and badge behavior, beyond
@@ -185,26 +185,27 @@ Rootless package SHA-256:
 
 `f0552db7cc0ba65153913afc9ca90b0b00d2648561194307971d206371f953d1`
 
-- [x] Verify the old daemon's IPC v5 readiness before installation.
-- [x] Reconstruct rollback from package-owned installed regular files and dpkg
+- Verified the old daemon's IPC v5 readiness before installation.
+- Reconstructed rollback from package-owned installed regular files and dpkg
   control metadata; all 38 file hashes match. The retained archive did not match.
-  Exclude the system `/var` and `/var/jb` directory symlinks from reconstruction.
-- [x] Pass rootless notification payload/preflight checks and build/validate the
+  Reconstruction excluded the system `/var` and `/var/jb` directory symlinks.
+- Passed rootless notification payload/preflight checks and built/validated the
   existing loader diagnostic for armv7/arm64 without compiler warnings.
-- [x] Install the rootless DEB with dpkg and verify all 39 installed regular-file
+- Installed the rootless DEB with dpkg and verified all 39 installed regular-file
   hashes and production provider package ownership.
-- [x] Verify production IPC v8 store/execution readiness.
-- [x] Restart SpringBoard once (PID 279 → 2683) and confirm it is running.
-- [x] Load the installed provider in the isolated diagnostic: BulletinBoard loads,
+- Verified production IPC v8 store/execution readiness.
+- Restarted SpringBoard once (PID 279 → 2683) and confirmed it was running.
+- Loaded the installed provider in the isolated diagnostic: BulletinBoard loads,
   both publication/withdrawal symbols exist, the principal class conforms to
   `BBDataProvider`, and initialization succeeds (CF version 1854.00).
-- [ ] Establish automatic provider discovery/registration. The production
+- Automatic provider discovery/registration failed in this legacy-route test. The production
   receiver connection probe returns 1, and the StrappyAlerts directory is absent
   after restart. Manual diagnostic initialization does not register the provider
   or open the receiver and is not evidence of automatic loading.
-- [x] Owner configures an account and confirms a foreground prompt completes.
-- [x] Owner confirms production notifications do not appear on this phone.
-- [ ] Run notification/badge visual acceptance after receiver readiness works.
+- Owner configures an account and confirms a foreground prompt completes.
+- Owner confirms production notifications do not appear on this phone.
+- Legacy notification/badge visual acceptance was unavailable because the
+  receiver was not ready; the later modern route supersedes this approach.
 
 A separate modern UserNotifications probe subsequently passed owner-observed
 banner, default sound, badge set/clear, notification removal, tap-to-app, and
@@ -218,7 +219,7 @@ for a Strappy-only topic, and a mutable `UNNotificationSound` created with alert
 type 5 receives that topic before submission. No separate audio playback is used.
 This is a manual probe result, not production integration; the test fixture and
 topic cleanup were paused at the owner's request. See the
-[probe instructions and acceptance checklist](../source/daemon/tests/user_notification_device/README.md).
+[probe instructions and evidence](../source/daemon/tests/user_notification_device/README.md).
 
 Before installation, neither `/System/Library/BulletinBoardPlugins` nor its
 `/var/jb` counterpart existed. The package owns the provider under

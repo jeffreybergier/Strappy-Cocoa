@@ -1,96 +1,48 @@
 # Native Strappy notification provider candidate
 
-## Current checklist (2026-10-19)
+## Verified behavior and compatibility (2026-10-19)
 
-This is the authoritative status checklist for the notification investigation on
-`experiment/ios-sandbox-ipc`. Checked native results apply to gomadango
-(iOS 6.1.3, armv7) unless another target is named. Historical entries below record
-what was known at the time; their pending statements do not override this list.
+The production implementation uses a native BulletinBoard provider on iOS 6/8
+and direct UserNotifications submission on iOS 15. Both routes work with the
+unsandboxed DEB installation. The native provider replaced the Substrate receiver.
 
-### Completed
+On gomadango (iOS 6.1.3, armv7), owner observations confirmed Strappy identity,
+notification settings, banners, lock-screen presentation, Notification Center
+history, Glass sound, tap-to-open, dismissal, clearing, repeated delivery and
+restart behavior. Production prompt completion, observed-session suppression,
+foreground alerts for another session, suspended/terminated UI completion,
+processing/unread icons and badge transitions 2 → 1 → cleared were confirmed.
 
-- [x] Demonstrate notifications without converting Strappy to a sandboxed IPA.
-- [x] Load a native BulletinBoard provider and replace the Substrate receiver.
-- [x] Confirm Strappy name/icon, notification settings, banners, lock-screen
-  presentation, Notification Center history, and built-in Glass sound.
-- [x] Confirm tap-to-open, dismissal, clearing, repeated delivery and restart
-  behavior through owner observation.
-- [x] Deploy the production migration, verify package ownership/socket readiness,
-  remove the candidate package, and retain rollback packages and matching symbols.
-- [x] Confirm real-prompt completion through the production provider.
-- [x] Implement durable unread-session state and acknowledged/retried badge
-  updates; confirm badge transitions 2 → 1 → cleared by opening sessions.
-- [x] Confirm observed-session suppression and alerts for another session while
-  Strappy remains foregrounded.
-- [x] Confirm completion while the UI is suspended or terminated and correct
-  processing/unread row icons (owner confirmation, 2026-10-19).
-- [x] Run offline policy/execution tests, clean builds for both iOS and all four
-  Mac architectures, provider analysis and rootful/rootless package checks.
-- [x] Test candidate loading and actual badge readback on iOS 8.4.1 armv7;
-  this preceded the production visual test below.
-- [x] Confirm production background notification, sound, unread badge and
-  clearing on opening the session on koolphone5 (iOS 8.4.1 armv7, 2026-10-19).
-- [x] Confirm observed-session suppression on koolphone5: no banner or sound
-  while staying in the completing session.
-- [x] Confirm foreground alerts for another session and unread-session badge
-  transitions 2 → 1 → cleared on koolphone5.
-- [x] Confirm lock-screen presentation, tap-to-open, notification settings and
-  Notification Center history/dismissal/clearing on koolphone5.
-- [x] Complete koolphone5 production acceptance: badge 1 survives SpringBoard
-  restart and a fresh completion afterward delivers notification, sound and badge.
+On koolphone5 (iOS 8.4.1, armv7), production build `ad47a44` passed background
+notification/sound, observed-session suppression, foreground alerts for another
+session, badge transitions, lock-screen/tap behavior, notification settings and
+history/dismissal/clearing. Badge 1 survived a SpringBoard restart, followed by
+successful fresh notification, sound and badge delivery.
 
-### Outstanding compatibility work
+The modern route was integrated in `2ba1d5f`; runtime availability of
+`UNUserNotificationCenter` selects it. The owner confirmed production delivery on
+pinkphone-rsa (iOS 15.0, arm64/rootless). The standalone probe separately
+established the Mail-style Glass tone mechanism. These observations do not
+establish every modern production sound, badge, permission-change or restart case.
+The legacy provider rejects pre-iOS-6 runtimes; iOS 5 notification support is not
+established. Cross-builds do not establish native support on untested versions.
 
-- [x] Demonstrate an independent modern notification route on pinkphone-rsa:
-  the standalone UserNotifications probe delivers alerts and badges, and the
-  owner confirms Glass using Mail's alert-type/topic tone-selection mechanism.
-  See the [successful Glass sequence](../source/daemon/tests/user_notification_device/README.md#successful-glass-technique-2026-10-19).
-- [x] Integrate the modern route into strappyd (`2ba1d5f`), selected by runtime
-  `UNUserNotificationCenter` class availability, retaining the legacy route when
-  absent. Owner confirms production notifications on pinkphone-rsa.
-- [x] Fix the initial service-readiness warning (`8a0f436`); owner confirms the
-  app works on pinkphone. Deploy that build to all three phones.
-- [ ] Complete individual modern production sound/badge, lock-screen and reboot
-  acceptance cases. Standalone probe evidence is recorded separately.
-- [ ] Confirm fresh visual delivery on koolphone5 with `8a0f436`; previous
-  `ad47a44` acceptance remains valid for that earlier build.
-- [ ] Repeat production visual acceptance on other intended supported versions.
-  Cross-builds and package checks alone do not establish native compatibility.
-- [ ] Resolve the iOS 5 notification support boundary: the provider rejects
-  pre-iOS-6 runtimes. Implement and validate support or document the limitation.
+Build `8a0f436`, including the initial-service-readiness fix, was deployed to all
+three phones. Package hashes and IPC readiness passed on all three; legacy
+receiver readiness passed on both older phones. The owner confirmed pinkphone's
+startup fix and gomadango operation. Koolphone5's visual acceptance applies to
+`ad47a44`, not a repeated test of `8a0f436`.
 
-### Optional investigations, not blockers for the demonstrated routes
+Offline policy/execution tests, clean iOS armv7/arm64 and macOS
+PPC/i386/x86_64/arm64 builds, provider analysis and rootful/rootless package checks
+passed. See the [policy and deployment evidence](session-unread-notification-plan.md),
+[migration and rollback procedure](ios6-provider-migration.md),
+[probe evidence](../source/daemon/tests/user_notification_device/README.md), and
+[original sandbox results](ios-sandbox-experiment.md). Dated entries below are
+historical observations, not current task lists.
 
-- [ ] Investigate pinkphone legacy provider automatic discovery if that route
-  is needed there. Its earlier failure is historical, not a blocker for the
-  working modern backend.
-- [ ] Retest the custom WAV with silent mode off, if custom sound is wanted.
-  Built-in Glass is already confirmed; the earlier WAV result was inconclusive.
-- [ ] Trace private threading/teardown and optional cleared-info callback
-  contracts if deeper API evidence is needed. Observable lifecycle behavior and
-  bounded policy tests are complete, but do not prove every private contract.
-- [ ] Establish enforced sandbox access only if an IPA conversion is pursued.
-  The original sandbox probe did not prove enforcement and is not needed for
-  the working DEB notification route.
-
-### Deployment and evidence
-
-Build `8a0f436` is installed on pinkphone-rsa (iOS 15.0 arm64/rootless),
-koolphone5 (iOS 8.4.1 armv7) and gomadango (iOS 6.1.3 armv7). Package hashes and
-IPC readiness passed on all three; legacy receiver readiness passed on both
-older phones. The owner confirms modern notifications and the startup fix on
-pinkphone, and confirms gomadango is working. Fresh koolphone5 visual confirmation
-for this build remains pending; its earlier full acceptance is preserved below.
-See the [latest deployment record](session-unread-notification-plan.md#latest-production-deployments-2026-10-19)
-for exact scope and retained rollback, symbols and logs.
-
-The standalone sound-test fixture and diagnostic topic cleanup remain unverified;
-see the [cleanup checklist](../source/daemon/tests/user_notification_device/README.md#paused-device-state-and-cleanup).
-
-See the [policy and acceptance record](session-unread-notification-plan.md),
-[migration and rollback procedure](ios6-provider-migration.md), and
-[original sandbox results](ios-sandbox-experiment.md). Detailed chronological
-records below preserve observations and corrections; they are historical.
+All merge acceptance, cleanup and optional follow-ups are tracked in
+[TODO.md](../TODO.md).
 
 ## Architecture
 
@@ -173,7 +125,7 @@ armv7/arm64 `MH_BUNDLE` executable. The custom WAV remains in source but is not
 packaged; the selected Glass sound is supplied by iOS. The ZIP is an offline
 artifact, not the separately built device-test DEB. The
 build directory also retains matching dSYMs. Production packaging migration was subsequently completed; see the current
-checklist above.
+verified behavior above.
 
 On a native Mac:
 
@@ -235,16 +187,13 @@ Logs are retained under `build/provider-migration-*.log`. Run the package test
 with `python3 source/daemon/tests/notification_package_test.py` followed by the
 rootful and rootless production DEB paths to repeat its artifact checks.
 
-## Original next milestone
+## Production migration constraints
 
-Prepare production packaging and migration with one receiver owning the real
-socket. Remove the old owned dylib/filter and coordinate a SpringBoard restart;
-do not install this candidate alongside a production provider for the same
-section. Reuse the app's icon resources if system identity resolution proves
-insufficient. Verify the real Strappy icon/name, app launch, settings, history,
-clearing, repeated completions, restart behavior and lock/DND policy during an
-agreed device window. This milestone does not establish native display or
-production readiness, nor authorize phone installation.
+Only one receiver can own the production socket. Package migration removes the
+old owned dylib/filter, and a SpringBoard restart unloads the old receiver. The
+candidate and production provider cannot coexist for the same section. The
+completed migration and native identity/lifecycle observations are recorded in
+[the migration record](ios6-provider-migration.md).
 
 ## Validation recorded 2026-10-18
 

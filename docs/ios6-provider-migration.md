@@ -5,21 +5,23 @@ readiness passed, and the owner confirmed the real-prompt notification worked. T
 dismissal, clearing, history, repeated notifications and restart behavior.
 See [the investigation](ios6-notification-provider.md) for native observations.
 
-## Migration checklist (reviewed 2026-10-19)
+## Migration results (2026-10-19)
 
-- [x] Remove the candidate package before installing the production provider.
-- [x] Verify production package ownership and removal of the obsolete receiver.
-- [x] Restart SpringBoard and verify new-process receiver and daemon readiness.
-- [x] Confirm real-prompt delivery, app identity and notification lifecycle.
-- [x] Retain exact rollback packages, payload manifests, matching symbols and logs.
-- [x] Deploy subsequent unread/badge, synchronous Send and unread-row builds.
+The candidate package was removed before production installation. Package
+ownership, obsolete-receiver removal, new-process receiver readiness and daemon
+readiness were verified after SpringBoard restart. Real-prompt delivery, app
+identity and notification lifecycle were confirmed. Exact rollback packages,
+payload manifests, matching symbols and logs were retained. Subsequent deployments
+included unread/badges, synchronous Send and unread-row behavior.
+
+Outstanding acceptance and cleanup are tracked in [TODO.md](../TODO.md).
 
 The latest gomadango deployment is `8a0f436`, owner-confirmed working on
 2026-10-19. Its verified rollback, package manifests, symbols and logs are in
 `build/device-runs/gomadango-8a0f436/`. See the
 [latest three-device deployment record](session-unread-notification-plan.md#latest-production-deployments-2026-10-19), the
 [production test record](session-unread-notification-plan.md) and
-[current checklist](ios6-notification-provider.md#current-checklist-2026-10-19).
+[merge checklist](../TODO.md).
 The original migration procedure and rollback guidance below are historical;
 its badge-4 and initial iOS-6-only restrictions describe the initial cutover.
 

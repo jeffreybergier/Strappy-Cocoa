@@ -3,20 +3,16 @@
 2026-10-17, branch `experiment/ios-sandbox-ipc`, koolphone5: iPhone5,2,
 iOS 8.4.1 (12H321), armv7, mobile UID 501.
 
-## Experiment checklist (reviewed 2026-10-19)
+## Evidence scope
 
-- [x] Demonstrate visible local notifications from an unsandboxed DEB on iOS 8.
-- [x] Demonstrate daemon-to-SpringBoard Home-screen and lock-screen alerts on
-  iOS 6, including owner-observed DND behavior.
-- [x] Integrate real production completion alerts and restore separate title/body
-  fields after the single-message formatting experiment.
-- [x] Investigate the native provider route and complete the subsequent
-  production migration, history/settings integration and unread/badge policy.
+The experiment established visible unsandboxed DEB notifications on iOS 8 and
+daemon-to-SpringBoard alerts on iOS 6. Subsequent work integrated production
+completion alerts, separate title/body fields, a native provider, notification
+history/settings, and unread/badge policy. See the
+[current technical findings](ios6-notification-provider.md).
 
-The [current notification checklist](ios6-notification-provider.md#current-checklist-2026-10-19)
-owns outstanding work and compatibility limits. The dated records below are
-historical: statements about installed probes, pending migration or unimplemented
-history/settings describe those earlier stages, not current production status.
+Dated records below describe earlier stages. All outstanding merge and optional
+work is tracked in [TODO.md](../TODO.md).
 
 ## Result
 
@@ -509,7 +505,7 @@ observations, not a general compatibility claim about every iOS 6 notification
 API. The earlier assertion that iOS 6 required a single message was premature.
 No shortcode stripping or other preview transformation was added.
 
-## Provider investigation handoff (2026-10-17)
+## Provider investigation evidence (2026-10-17)
 
 History reviewed through `ac50d5f`:
 
@@ -561,11 +557,6 @@ Apple-only hardcoded allowlist. Nor does it establish that linking BulletinBoard
 into an arbitrary daemon permits publication. Network push delivery and local
 bulletin publication remain separate concerns.
 
-Gomadango is the owner's production phone. Next prepare an isolated removable
-native-provider package, logging, and exact rollback instructions offline.
-Installation and SpringBoard restart require a separately agreed test window.
-Keep production Strappy, strappyd, their data and their Substrate receiver intact.
-
 Prepared the [isolated provider package and device runbook](ios6-provider-probe.md).
 The package uses native BulletinBoard bundle loading, a distinct section/package
 identity, an explicit one-shot sender and persistent attempt guard. No Substrate
@@ -596,9 +587,6 @@ Test settings-entry disappearance was not explicitly confirmed; no shared
 notification preferences were altered. See the [native results and limits](ios6-provider-probe.md#native-results-2026-10-17-utc-phone-logs-dated-october-18)
 for details. Production notification code remains unchanged.
 
-The owner requested a next-session production upgrade that presents notifications
-as the real **Strappy** app, including icon and bundle identity. The
-[production handoff](ios6-provider-probe.md#next-session-handoff-production-strappy-identity)
-records the exact identity, daemon/provider architecture, source entry points,
-socket ownership and package migration concerns, and remaining validation.
-Documentation only: no production integration or additional device action.
+The [production identity and integration reference](ios6-provider-probe.md#production-strappy-identity-and-integration)
+records the app identity, legacy daemon/provider architecture, source entry
+points and socket ownership constraints used by the subsequent migration.

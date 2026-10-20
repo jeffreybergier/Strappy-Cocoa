@@ -58,41 +58,41 @@ Production was at `56e1ef0` during this isolated probe. Subsequent integration
 and deployment of `8a0f436` are recorded in the
 [production results](../../../../docs/session-unread-notification-plan.md#latest-production-deployments-2026-10-19).
 
-- [x] Inspect Mail's actual `maild` binary: `UNUserNotificationCenter`
+- Inspected Mail's actual `maild` binary: `UNUserNotificationCenter`
   `initWithBundleIdentifier:`, `addNotificationRequest:withCompletionHandler:`,
   and `setBadgeNumber:withCompletionHandler:` are used by its notification/badge
   controllers. Its signed entitlement permits `com.apple.mobilemail`.
-- [x] Initialize the same API for Strappy from a separate foreground executable.
-- [x] Query initial settings: authorization NotDetermined, alert/sound/badge
+- Initialized the same API for Strappy from a separate foreground executable.
+- Queried initial settings: authorization NotDetermined, alert/sound/badge
   settings NotSupported. Submission nevertheless returned success; callback
   success alone is not presentation evidence.
-- [x] Request authorization: granted YES, no error. Subsequent settings report
+- Requested authorization: granted YES, no error. Subsequent settings report
   Authorized, banner style, and enabled alert/sound/badge/lock-screen/NC settings.
-- [x] Owner observes a banner. The initial phone was silenced, so that observation
+- Owner observes a banner. The initial phone was silenced, so that observation
   is not a sound test and cannot distinguish the first two closely spaced sends.
-- [x] Tapping the notification opens Strappy (owner confirmed).
-- [x] With Silent Mode off and Strappy backgrounded, owner confirms banner,
+- Tapping the notification opens Strappy (owner confirmed).
+- With Silent Mode off and Strappy backgrounded, owner confirms banner,
   default sound, and badge 1. Each command exits after its callback.
-- [x] Owner confirms diagnostic notification removal and badge clearing.
-- [x] Test `soundNamed:` with
+- Owner confirms diagnostic notification removal and badge clearing.
+- Tested `soundNamed:` with
   `/System/Library/Audio/UISounds/sms-received3.caf`: submission succeeds, but
   owner hears the default sound again. This is a failed custom-sound test.
-- [x] LaunchServices reports no Strappy data container on this installation.
-- [x] Test an original three-note PCM WAV in the sending helper's bundle:
+- LaunchServices reports no Strappy data container on this installation.
+- Tested an original three-note PCM WAV in the sending helper's bundle:
   helper resolves the resource, submission succeeds, owner hears default sound.
-- [x] Test the WAV in the recipient Strappy app bundle, installed by a separate
+- Tested the WAV in the recipient Strappy app bundle, installed by a separate
   removable fixture package: submission succeeds, owner hears default sound.
   These failures do not establish that all bundled custom sounds are unsupported.
-- [x] Prove Glass using Mail's alert-type/topic mechanism: owner explicitly
+- Demonstrated Glass using Mail's alert-type/topic mechanism: owner explicitly
   confirms "it worked! it was glass!" See the exact sequence below.
-- [ ] Optional: resolve arbitrary sound-file delivery. Apple's
+- Arbitrary sound-file delivery was not established. Apple's
   [soundNamed: documentation](https://developer.apple.com/documentation/usernotifications/unnotificationsound/init(named:)?language=objc)
   specifies app/group `Library/Sounds` or the app bundle. The successful Glass
   path selects a built-in tone rather than providing a file to `soundNamed:`.
-- [x] Owner confirms lock-screen presentation with default sound using the
+- Owner confirms lock-screen presentation with default sound using the
   final probe build.
-- [ ] Check behavior across respring/reboot with this modern route.
-- [x] Integrate into strappyd (`2ba1d5f`) with runtime backend selection,
+- Modern-route behavior across respring/reboot was not established by this probe.
+- Integrated into strappyd (`2ba1d5f`) with runtime backend selection,
   authorization initialization, existing unread/observation policy and bounded
   callback handling. Owner confirms production notifications on pinkphone.
 
@@ -145,8 +145,7 @@ receives a successful submission callback; owner listening confirms playback.
 This uses a Strappy-only topic, not a real mail account or the unscoped global
 tone setter. It does not change Mail's chosen sound, bypass Silent Mode, or play
 audio separately. No sound file is supplied by this successful code path. The
-failed WAV fixture was still installed during the successful test, so repeat
-after fixture removal to independently confirm that installation is irrelevant.
+failed WAV fixture was still installed during the successful test, so that observation alone does not establish independence from the fixture.
 
 This is a promising mechanism for user-selectable built-in tones. Only Glass
 has been audibly verified; arbitrary imported tones, a picker UI, persistence
@@ -158,28 +157,25 @@ Evidence under `build/experiments/pinkphone-un-sound/`:
 `build/research/pinkphone-mail-ios15/maild-sound-selection-pseudocode.txt` and
 `maild-tone-reset-pseudocode.txt`.
 
-## Paused device state and cleanup
+## Diagnostic fixture state
 
-The diagnostic cleanup below was paused after the successful probe. Subsequent
-production deployment verified the package files, but did not establish fixture
-or topic cleanup. This documentation update does not perform device cleanup.
+At the last recorded observation, diagnostic fixture/topic cleanup had not been
+verified. The staged `probe-tones-v3` executable under
+`/var/mobile/tmp_altivec/strappy-un-probe/` provides `clear` for the diagnostic
+notification and `tone-reset` for the diagnostic topic override.
 
-- [ ] Clear the diagnostic notification with `probe-tones-v3 clear`.
-- [ ] Clear the diagnostic topic override with `probe-tones-v3 tone-reset`.
-  The staged executable is under `/var/mobile/tmp_altivec/strappy-un-probe/`.
-- [ ] Remove `com.altivecintelligence.strappy.sound-probe` through dpkg.
-  That fixture owns the uniquely named
-  `/var/jb/Applications/Strappy.app/StrappyManualChime.wav` and
-  `/var/jb/usr/libexec/strappy-un-probe`; it does not replace Strappy's executable.
-- [x] Verify production package-owned files against the newly installed
-  `8a0f436` package (all 39 match). The probe-era
-  `build/experiments/pinkphone-un-sound/production-before.sha256` is historical;
-  the later production upgrade intentionally changed those binaries.
-- [ ] Remove obsolete staged sound-test bundles/binaries when no longer needed.
-- [ ] Finish validation and commit the currently uncommitted probe extensions
-  and WAV generator separately from this documentation update.
+The separate `com.altivecintelligence.strappy.sound-probe` package owns
+`/var/jb/Applications/Strappy.app/StrappyManualChime.wav` and
+`/var/jb/usr/libexec/strappy-un-probe`; it does not replace Strappy's executable.
+Removal uses dpkg. All 39 production package-owned files matched the installed
+`8a0f436` package. The probe-era
+`build/experiments/pinkphone-un-sound/production-before.sha256` is historical;
+that later production upgrade intentionally changed the binaries.
+
+The tone commands and optional sound packaging are local probe extensions that
+were uncommitted at the time of this record. The cleanup, reproducibility and
+validation tasks are tracked only in [TODO.md](../../../../TODO.md).
 
 Normal Strappy notification authorization remains enabled. Production now uses
 the separate `com.altivecintelligence.Strappy.completion` topic for Glass;
-diagnostic topic cleanup must not reset that production topic. Fixture removal,
-modern restart testing and the uncommitted probe extensions remain open.
+diagnostic topic cleanup must not reset that production topic.
