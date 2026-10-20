@@ -8,6 +8,31 @@ this consolidation does not establish any new device acceptance.
 
 ## Before merge
 
+- [ ] Implement and verify dynamic notification clearing when a session is
+  marked as read on koolphone5 (iOS 8) and pinkphone-rsa (iOS 15).
+  Deferred on 2026-10-20 for the next working session; no new visual acceptance
+  was performed. Both phones were reachable over SSH.
+  - Current code inspection: opening a session commits its read state and wakes
+    the badge worker, but does not request removal of delivered notifications.
+    The legacy provider withdraws history-limit evictions; the production modern
+    bridge has no notification-removal call.
+  - Connect committed session-read state to selective removal on both backends.
+    Existing notification identifiers contain run IDs; resolve the runs belonging
+    to the read session. Remove all notifications for that session while keeping
+    other unread sessions' notifications. Keep badge state derived from SQLite.
+  - Baseline and acceptance on each phone: complete prompts in sessions A and B
+    while outside the app; observe both notifications and badge 2. Open A and
+    verify its notifications disappear dynamically, B remains, and badge becomes
+    1. Open B and verify its notifications disappear and the badge clears.
+  - Repeat with multiple completions in A, lock-screen notifications, and opening
+    a session by tapping its notification. Check Notification Center as well as
+    the badge; API callback success alone does not establish visible removal.
+  - Cover completion/read races, repeated read acknowledgments, and daemon
+    restarts with focused automated checks and device verification. Ensure a
+    delayed clear cannot remove a newer unread completion.
+  - Run applicable offline checks and required clean iOS/macOS builds for code
+    changes. Record actual device observations separately from API results,
+    retaining logs and noting any untested cases.
 - [ ] Complete pinkphone-rsa production acceptance on the merge candidate:
   Glass sound with Silent Mode off, unread badges 2 → 1 → cleared, observed-session
   suppression, foreground alerts for another session, lock-screen/tap behavior,
