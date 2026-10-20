@@ -10,8 +10,10 @@
 
 static NSString * const kBundle = @"com.altivecintelligence.Strappy";
 static NSString * const kRequest = @"strappy.manual.un-probe";
+static NSString * const kToneTopic = @"com.altivecintelligence.Strappy.manual-probe";
 
-/* Object-only arguments/results. Callers own returned init/alloc objects. */
+/* Object/NSInteger arguments and object results; runtime ABI is checked.
+ * Callers own returned init/alloc objects. */
 static id XPInvoke(id target, NSString *name, NSArray *arguments)
 {
   SEL selector = NSSelectorFromString(name);
@@ -24,13 +26,19 @@ static id XPInvoke(id target, NSString *name, NSArray *arguments)
   [call setTarget:target];
   [call setSelector:selector];
   for (NSUInteger i = 0; i < [arguments count]; ++i) {
-    if ([signature getArgumentTypeAtIndex:i + 2][0] != '@') {
-      fprintf(stderr, "Unexpected non-object argument: %s\n", [name UTF8String]);
+    const char *type = [signature getArgumentTypeAtIndex:i + 2];
+    id value = [arguments objectAtIndex:i];
+    if (type[0] == '@') {
+      if (value == [NSNull null]) value = nil;
+      [call setArgument:&value atIndex:i + 2];
+    } else if (!strcmp(type, @encode(NSInteger)) &&
+        [value isKindOfClass:[NSNumber class]]) {
+      NSInteger integer = [value integerValue];
+      [call setArgument:&integer atIndex:i + 2];
+    } else {
+      fprintf(stderr, "Unexpected argument type: %s\n", [name UTF8String]);
       exit(2);
     }
-    id value = [arguments objectAtIndex:i];
-    if (value == [NSNull null]) value = nil;
-    [call setArgument:&value atIndex:i + 2];
   }
   [call invoke];
   id result = nil;
@@ -44,9 +52,12 @@ int main(int argc, char **argv)
       strcmp(argv[1], "send") && strcmp(argv[1], "clear") &&
       strcmp(argv[1], "authorize") && strcmp(argv[1], "badge-one") &&
       strcmp(argv[1], "badge-clear") && strcmp(argv[1], "inspect-sounds") &&
-      strcmp(argv[1], "send-glass"))) {
+      strcmp(argv[1], "send-glass") && strcmp(argv[1], "send-custom") &&
+      strcmp(argv[1], "inspect-tones") && strcmp(argv[1], "send-tone-glass") &&
+      strcmp(argv[1], "tone-reset"))) {
     fprintf(stderr, "Usage: strappy-un-probe "
-      "settings|send|send-glass|clear|authorize|badge-one|badge-clear|inspect-sounds\n");
+      "settings|send|send-glass|send-custom|send-tone-glass|tone-reset|clear|"
+      "authorize|badge-one|badge-clear|inspect-sounds|inspect-tones\n");
     return 2;
   }
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
@@ -55,6 +66,33 @@ int main(int argc, char **argv)
       "UserNotifications", RTLD_NOW | RTLD_GLOBAL)) {
     fprintf(stderr, "UserNotifications load failed: %s\n", dlerror());
     return 2;
+  }
+  if (!strcmp(argv[1], "inspect-tones")) {
+    dlopen("/System/Library/PrivateFrameworks/ToneLibrary.framework/ToneLibrary",
+      RTLD_NOW | RTLD_GLOBAL);
+    Class cls = NSClassFromString(@"TLToneManager");
+    id manager = XPInvoke(cls, @"sharedToneManager", [NSArray array]);
+    for (NSString *selector in [NSArray arrayWithObjects:
+        @"nameForToneIdentifier:", @"filePathForToneIdentifier:", nil]) {
+      id value = XPInvoke(manager, selector,
+        [NSArray arrayWithObject:@"texttone:Glass"]);
+      printf("Glass %s: %s\n", [selector UTF8String],
+        value ? [[value description] UTF8String] : "none");
+    }
+    for (unsigned int kind = 0; kind < 2; ++kind) {
+      unsigned int count = 0;
+      Method *methods = class_copyMethodList(kind ? object_getClass(cls) : cls,
+        &count);
+      for (unsigned int i = 0; i < count; ++i) {
+        const char *name = sel_getName(method_getName(methods[i]));
+        if (strstr(name, "one") || strstr(name, "lert"))
+          printf("%c %s %s\n", kind ? '+' : '-', name,
+            method_getTypeEncoding(methods[i]));
+      }
+      free(methods);
+    }
+    [pool drain];
+    return 0;
   }
   if (!strcmp(argv[1], "inspect-sounds")) {
     dlopen("/System/Library/Frameworks/MobileCoreServices.framework/"
@@ -77,6 +115,25 @@ int main(int argc, char **argv)
   id center = XPInvoke([NSClassFromString(@"UNUserNotificationCenter") alloc],
     @"initWithBundleIdentifier:", [NSArray arrayWithObject:kBundle]);
   if (!center) return 2;
+  BOOL toneGlass = !strcmp(argv[1], "send-tone-glass");
+  if (toneGlass || !strcmp(argv[1], "tone-reset")) {
+    dlopen("/System/Library/PrivateFrameworks/ToneLibrary.framework/ToneLibrary",
+      RTLD_NOW | RTLD_GLOBAL);
+    id manager = XPInvoke(NSClassFromString(@"TLToneManager"),
+      @"sharedToneManager", [NSArray array]);
+    XPInvoke(manager, @"setCurrentToneIdentifier:forAlertType:topic:",
+      [NSArray arrayWithObjects:toneGlass ? (id)@"texttone:Glass" : [NSNull null],
+        [NSNumber numberWithInteger:5], kToneTopic, nil]);
+    id selected = XPInvoke(manager, @"currentToneIdentifierForAlertType:topic:",
+      [NSArray arrayWithObjects:[NSNumber numberWithInteger:5], kToneTopic, nil]);
+    printf("Diagnostic topic selected tone: %s\n",
+      selected ? [[selected description] UTF8String] : "none");
+    if (!toneGlass) {
+      [center release];
+      [pool drain];
+      return 0;
+    }
+  }
   if (!strcmp(argv[1], "clear")) {
     NSArray *ids = [NSArray arrayWithObject:kRequest];
     XPInvoke(center, @"removePendingNotificationRequestsWithIdentifiers:",
@@ -133,10 +190,25 @@ int main(int argc, char **argv)
     XPInvoke(content, @"setBody:", [NSArray arrayWithObject:
       @"Standalone daemon-style notification probe. No prompt was sent."]);
     BOOL glass = !strcmp(argv[1], "send-glass");
+    BOOL custom = !strcmp(argv[1], "send-custom");
     id sound = XPInvoke(NSClassFromString(@"UNNotificationSound"),
-      glass ? @"soundNamed:" : @"defaultSound", glass ?
-      [NSArray arrayWithObject:
+      (glass || custom) ? @"soundNamed:" : @"defaultSound", (glass || custom) ?
+      [NSArray arrayWithObject:custom ? @"StrappyManualChime.wav" :
         @"/System/Library/Audio/UISounds/sms-received3.caf"] : [NSArray array]);
+    if (toneGlass) {
+      sound = [XPInvoke(NSClassFromString(@"UNNotificationSound"),
+        @"soundWithAlertType:",
+        [NSArray arrayWithObject:[NSNumber numberWithInteger:5]]) mutableCopy];
+      XPInvoke(sound, @"setAlertTopic:", [NSArray arrayWithObject:kToneTopic]);
+      [sound autorelease];
+    }
+    if (custom) {
+      NSString *path = [[NSBundle mainBundle]
+        pathForResource:@"StrappyManualChime" ofType:@"wav"];
+      printf("Sender bundle: %s; custom file: %s\n",
+        [[[NSBundle mainBundle] bundlePath] UTF8String],
+        path ? [path UTF8String] : "none");
+    }
     XPInvoke(content, @"setSound:", [NSArray arrayWithObject:sound]);
     id request = XPInvoke(NSClassFromString(@"UNNotificationRequest"),
       @"requestWithIdentifier:content:trigger:",
