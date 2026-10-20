@@ -4,18 +4,65 @@
 #import <Foundation/Foundation.h>
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
+#include <dlfcn.h>
+#import <objc/runtime.h>
+#import <CoreFoundation/CoreFoundation.h>
 static char fixtureDirectory[] = "/tmp/strappy-provider-XXXXXX";
 static char fixtureSocket[104], fixtureLock[110];
 #define XP_PROVIDER_DIRECTORY fixtureDirectory
 #define XP_PROVIDER_SOCKET fixtureSocket
 #define XP_PROVIDER_LOCK fixtureLock
+static int missingSymbol, missingProtocol, missingRequest, badRequestABI;
+static void Add(id provider, id bulletin);
+static void Withdraw(id provider, NSString *record);
+static void *FixtureSymbol(const char *name)
+{
+  if (missingSymbol) return NULL;
+  if (!strcmp(name,"BBDataProviderAddBulletin")) return (void *)Add;
+  if (!strcmp(name,"BBDataProviderWithdrawBulletinsWithRecordID"))
+    return (void *)Withdraw;
+  return NULL;
+}
+static Class FixtureClass(NSString *name)
+{
+  if (missingRequest && [name isEqual:@"BBBulletinRequest"]) return Nil;
+  return NSClassFromString(name);
+}
+#define dlsym(handle, name) FixtureSymbol(name)
+#define objc_getProtocol(name) (missingProtocol ? NULL : @protocol(NSObject))
+#define NSClassFromString FixtureClass
+/* An iOS-5-era CF version must not disqualify working runtime capabilities. */
+#define kCFCoreFoundationVersionNumber 675.0
 #include "../../iOS/notifications/provider/XPStrappyNotificationProvider.m"
+#undef kCFCoreFoundationVersionNumber
+#undef NSClassFromString
+#undef objc_getProtocol
+#undef dlsym
+
+@interface BBSectionInfo : NSObject
+@end
+@implementation BBSectionInfo
++ (id)defaultSectionInfoForType:(unsigned int)type
+{
+  assert(type == 0);
+  return [[[self alloc] init] autorelease];
+}
+- (void)setSectionID:(id)value { assert([value isEqual:kSection]); }
+@end
+
 
 @interface BBBulletinRequest : NSObject {
   NSMutableDictionary *values_;
 }
 @end
 @implementation BBBulletinRequest
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)selector
+{
+  if (badRequestABI && selector == NSSelectorFromString(@"setTitle:"))
+    return [NSMethodSignature signatureWithObjCTypes:"v@:d"];
+  return [super methodSignatureForSelector:selector];
+}
 - (id)init;
 {
   self = [super init];
@@ -148,6 +195,18 @@ static strappy_notification_packet Packet(unsigned int run)
 int main(void)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+  XPStrappyNotificationProvider *capable =
+    [[XPStrappyNotificationProvider alloc] init];
+  assert(capable); [capable release];
+  missingSymbol = 1;
+  assert(![[XPStrappyNotificationProvider alloc] init]); missingSymbol = 0;
+  missingProtocol = 1;
+  assert(![[XPStrappyNotificationProvider alloc] init]); missingProtocol = 0;
+  missingRequest = 1;
+  assert(![[XPStrappyNotificationProvider alloc] init]); missingRequest = 0;
+  badRequestABI = 1;
+  assert(![[XPStrappyNotificationProvider alloc] init]); badRequestABI = 0;
+  assert(access(fixtureSocket,F_OK) != 0);
   FixtureProvider *provider = [FixtureProvider alloc];
   [provider prepare];
   strappy_notification_packet packet = Packet(1);

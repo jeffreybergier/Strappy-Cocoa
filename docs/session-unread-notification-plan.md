@@ -4,12 +4,62 @@ Design, implementation and device experiments, started 2026-10-18. The policy
 below is implemented for the iOS app and daemon. macOS retains its existing
 app-owned notification presentation policy.
 
+## Runtime capability fallback (2026-10-20)
+
+The daemon attempts modern UserNotifications initialization on its existing
+worker. Class presence alone is insufficient: the bundle-specific center must
+initialize, required authorization/submission/badge methods must have compatible
+signatures, and content/request construction must succeed. These checks precede
+any authorization request or notification submission. Optional sound APIs can
+still fall back to the system default sound.
+
+A missing capability, initialization exception or failed center initialization
+selects the legacy provider transport. Alerts queued during that check have not
+been submitted to UserNotifications and are sent once through the legacy endpoint.
+The badge worker rechecks the selected transport and retains its durable pending
+revision for the legacy acknowledgment path. Modern permission denial, an
+authorization timeout, and submission failures never switch routes, avoiding
+permission bypass or duplicate delivery after an ambiguous callback.
+
+The provider no longer checks the CoreFoundation OS version, and its bundle
+minimum is iOS 5.0, matching the app's armv7 floor. It validates `BBDataProvider`,
+the publication/withdrawal symbols, `BBBulletinRequest` setters, `BBAction` launch
+action and `BBSectionInfo` construction before accepting server registration and
+opening its socket. Private object selectors and scalar signatures are checked
+before invocation. Missing optional sound or badge APIs do not prevent alerts.
+If no capable provider loads, the endpoint remains unavailable and legacy sends
+fail harmlessly; prompt execution and durable unread state remain independent.
+
+This changes capability selection, not the native compatibility evidence. No
+iOS 5 installation or notification delivery is established by these changes.
+The earlier deployment records below describe their original builds. Current
+acceptance and follow-ups remain in [TODO.md](../TODO.md).
+
+Validation: the full offline Linux suite and clean release builds for iOS
+armv7/arm64 and macOS PPC/i386/x86_64/arm64 passed without compiler warnings.
+Package validation and both DEB payload checks passed, including the provider's
+5.0 minimum. The modern recording fixture and production/diagnostic provider
+fixtures passed on x9-vm (macOS 10.9, x86_64), compiled with warnings as errors.
+They cover unavailable capabilities, signature mismatch, initialization failure,
+queued-alert fallback, absent receiver, permission/timeout/submission isolation,
+and legacy acceptance with a simulated iOS-5-era CoreFoundation version. Existing
+badge, history, socket, teardown and callback tests also passed.
+
+The iOS armv7 analyzer completed with no diagnostics in the changed bridge or
+provider. It repeated the existing possible null source in debug-capture
+`memcpy` at `strappy_client.c:1230`; that unchanged warning is not a notification
+fallback finding. Logs are retained under `build/notification-capabilities/` and
+native fixture logs under `~/Desktop/strappy-notification-capabilities-20261020/`
+on x9-vm. No phone deployment, real notification permission change, or native
+iOS 5/6/8/15 presentation test was performed for this change.
+
 ## Modern daemon integration (2026-10-19)
 
-The daemon now selects direct UserNotifications submission when the dynamically
+This integration initially selected direct UserNotifications submission when the dynamically
 loaded `UNUserNotificationCenter` class exists; otherwise it keeps the existing
-legacy provider transport. There is no OS-version table or delivery-time backend
-switch. Private calls use checked signatures and NSInvocation in the iOS-only
+legacy provider transport. The capability checks described above supersede
+that initial class-only selection; there is still no delivery-time retry on a
+second backend. Private calls use checked signatures and NSInvocation in the iOS-only
 `XPDaemonNotifications` bridge. The modern frameworks are not linked at launch.
 
 Initialization repeats the successful probe's bundle-specific center and

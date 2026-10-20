@@ -1,8 +1,9 @@
 #ifndef XP_FOUNDATION_NOTIFICATION_PLATFORM_H
 #define XP_FOUNDATION_NOTIFICATION_PLATFORM_H
 /* Daemon lifecycle: start before producers, stop after producers/workers join.
- * Start selects modern iOS by class existence; other targets retain their
- * previous transport. No notification failure changes daemon readiness. */
+ * Modern capability checks run asynchronously; pre-authorization failure allows
+ * the legacy provider. Other targets retain their previous transport. No
+ * notification failure changes daemon readiness. */
 void strappy_notification_platform_start(void);
 void strappy_notification_platform_stop(void);
 int strappy_notification_platform_modern(void);

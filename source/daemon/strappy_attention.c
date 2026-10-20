@@ -160,21 +160,24 @@ static void *badge_worker(void *unused)
   struct sockaddr_un destination, reply;
   char reply_path[sizeof(reply.sun_path)];
   dev_t device=0; ino_t inode=0;
-  const char *path=strappy_notification_platform_socket();
-  int modern=strappy_notification_platform_modern();
   (void)unused;
   memset(&destination,0,sizeof(destination)); destination.sun_family=AF_UNIX;
   memset(&reply,0,sizeof(reply)); reply.sun_family=AF_UNIX;
   reply_path[0]=0;
-  if (path && strlen(path)<sizeof(destination.sun_path) &&
-      snprintf(reply_path,sizeof(reply_path),"%s.ack",path)<(int)sizeof(reply_path)) {
-    strcpy(destination.sun_path,path); strcpy(reply.sun_path,reply_path);
-  }
   for (;;) {
     sqlite3 *db=NULL; sqlite3_stmt *q=NULL;
     strappy_badge_packet packet;
     long long revision=0, count=0;
+    /* Initialization can reject modern capabilities after this worker starts.
+     * Re-evaluate routing so the durable badge is not stranded on that backend. */
+    int modern=strappy_notification_platform_modern();
+    const char *path=modern ? NULL : strappy_notification_platform_socket();
     int pending=0, stop, retry=path != NULL || modern;
+    if (path && !destination.sun_path[0] &&
+        strlen(path)<sizeof(destination.sun_path) &&
+        snprintf(reply_path,sizeof(reply_path),"%s.ack",path)<(int)sizeof(reply_path)) {
+      strcpy(destination.sun_path,path); strcpy(reply.sun_path,reply_path);
+    }
     unsigned long snapshot;
     strappy_attention_lock(); stop=stopping; snapshot=generation;
     if (!stop && (path || modern) && strappy_db_open(database,&db,NULL)) {

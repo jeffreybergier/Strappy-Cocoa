@@ -1,4 +1,4 @@
-/* Native iOS 6 BulletinBoard provider, MRC. Server owns the provider.
+/* Runtime-capable native BulletinBoard provider, MRC. Server owns the provider.
  * Publication/withdrawal and socket lifecycle run on the main thread. Queries
  * may arrive on other threads: synchronize history; publish outside the lock.
  * History is memory-only, bounded to 32 bulletins and 256 recent run IDs.
@@ -40,10 +40,26 @@ static const NSUInteger kRecentLimit = 256;
 typedef void (*XPAddBulletin)(id, id);
 typedef void (*XPWithdrawBulletin)(id, NSString *);
 
-static BOOL XPSet(id target, NSString *name, id value)
+/* Private object selectors must match the ABI before performSelector is safe. */
+static BOOL XPObjectMethod(id target, NSString *name, const char *result,
+                           NSUInteger arguments)
 {
   SEL selector = NSSelectorFromString(name);
   if (![target respondsToSelector:selector]) return NO;
+  NSMethodSignature *signature = [target methodSignatureForSelector:selector];
+  if (!signature || [signature numberOfArguments] != arguments + 2 ||
+      strcmp([signature methodReturnType], result)) return NO;
+  for (NSUInteger i = 0; i < arguments; ++i) {
+    const char *type = [signature getArgumentTypeAtIndex:i + 2];
+    if (strcmp(type, "@")) return NO;
+  }
+  return YES;
+}
+
+static BOOL XPSet(id target, NSString *name, id value)
+{
+  SEL selector = NSSelectorFromString(name);
+  if (!XPObjectMethod(target, name, "v", 1)) return NO;
   [target performSelector:selector withObject:value];
   return YES;
 }
@@ -52,11 +68,11 @@ static BOOL XPSetClearable(id target)
 {
   SEL selector = NSSelectorFromString(@"setClearable:");
   NSMethodSignature *signature = [target methodSignatureForSelector:selector];
-  NSUInteger size = 0;
   BOOL value = YES;
-  if (!signature || [signature numberOfArguments] != 3) return NO;
-  NSGetSizeAndAlignment([signature getArgumentTypeAtIndex:2], &size, NULL);
-  if (size != sizeof(value)) return NO;
+  if (![target respondsToSelector:selector] || !signature ||
+      [signature numberOfArguments] != 3 ||
+      strcmp([signature methodReturnType], "v") ||
+      strcmp([signature getArgumentTypeAtIndex:2], @encode(BOOL))) return NO;
   NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
   [invocation setTarget:target];
   [invocation setSelector:selector];
@@ -68,7 +84,7 @@ static BOOL XPSetClearable(id target)
 static id XPGet(id target, NSString *name)
 {
   SEL selector = NSSelectorFromString(name);
-  return [target respondsToSelector:selector] ?
+  return XPObjectMethod(target, name, "@", 0) ?
     [target performSelector:selector] : nil;
 }
 
@@ -77,10 +93,44 @@ static id XPApplicationIcon(void)
 {
   id model=XPGet(XPGet(NSClassFromString(@"SBIconController"),@"sharedInstance"),@"model");
   SEL selector=NSSelectorFromString(@"applicationIconForBundleIdentifier:");
-  if (![model respondsToSelector:selector])
+  if (!XPObjectMethod(model, NSStringFromSelector(selector), "@", 1))
     selector=NSSelectorFromString(@"applicationIconForDisplayIdentifier:");
-  return [model respondsToSelector:selector] ?
+  return XPObjectMethod(model, NSStringFromSelector(selector), "@", 1) ?
     [model performSelector:selector withObject:kSection] : nil;
+}
+
+static id XPLaunchAction(void)
+{
+  Class cls = NSClassFromString(@"BBAction");
+  NSString *name = @"actionWithLaunchBundleID:callblock:";
+  SEL selector = NSSelectorFromString(name);
+  NSMethodSignature *signature = [cls methodSignatureForSelector:selector];
+  if (![cls respondsToSelector:selector] || !signature ||
+      [signature numberOfArguments] != 4 ||
+      strcmp([signature methodReturnType], "@") ||
+      strcmp([signature getArgumentTypeAtIndex:2], "@")) return nil;
+  const char *block = [signature getArgumentTypeAtIndex:3];
+  if (strcmp(block, "@") && strcmp(block, "@?")) return nil;
+  return [cls performSelector:selector withObject:kSection withObject:nil];
+}
+
+/* No OS-version gate: a provider only opens its socket after the server loads
+ * it and all required publication APIs, request setters and section APIs work.
+ * Sound and icon badge APIs remain optional and independently guarded. */
+static BOOL XPRequestCapabilities(void)
+{
+  id request = [[NSClassFromString(@"BBBulletinRequest") alloc] init];
+  BOOL ok = NO;
+  @try {
+    NSArray *setters = [NSArray arrayWithObjects:@"setSectionID:",
+      @"setBulletinID:", @"setPublisherBulletinID:", @"setRecordID:",
+      @"setTitle:", @"setMessage:", @"setDate:", @"setDefaultAction:", nil];
+    ok = request != nil;
+    for (NSString *name in setters)
+      if (!XPObjectMethod(request, name, "v", 1)) ok = NO;
+    ok = ok && XPSetClearable(request) && XPLaunchAction() != nil;
+  } @finally { [request release]; }
+  return ok;
 }
 
 /* Main-thread diagnostic only: reserved sender IDs 4..99 set literal badges.
@@ -127,6 +177,7 @@ static void XPSetTestBadge(const char *run)
 }
 /* Only dataProviderDidLoad activates IPC, after server registration. */
 - (void)startReceiving;
+- (id)defaultSectionInfo;
 - (void)receivePackets;
 /* Main-thread teardown: invalidates the borrowed callback target first. */
 - (void)stopReceiving;
@@ -162,13 +213,18 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   self = [super init];
   if (!self) return nil;
   lockFD_ = -1;
-  if (kCFCoreFoundationVersionNumber < 793.0) {
+  @try {
+    add_ = (XPAddBulletin)dlsym(RTLD_DEFAULT, "BBDataProviderAddBulletin");
+    withdraw_ = (XPWithdrawBulletin)dlsym(RTLD_DEFAULT,
+      "BBDataProviderWithdrawBulletinsWithRecordID");
+    if (!objc_getProtocol("BBDataProvider") || !add_ || !withdraw_ ||
+        !XPRequestCapabilities() || ![self defaultSectionInfo]) {
+      [self release]; return nil;
+    }
+  } @catch (NSException *exception) {
+    (void)exception;
     [self release]; return nil;
   }
-  add_ = (XPAddBulletin)dlsym(RTLD_DEFAULT, "BBDataProviderAddBulletin");
-  withdraw_ = (XPWithdrawBulletin)dlsym(RTLD_DEFAULT,
-    "BBDataProviderWithdrawBulletinsWithRecordID");
-  if (!add_ || !withdraw_) { [self release]; return nil; }
   history_ = [[NSMutableArray alloc] init];
   recent_ = [[NSMutableArray alloc] init];
   return self;
@@ -189,13 +245,14 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   Class cls = NSClassFromString(@"BBSectionInfo");
   SEL selector = NSSelectorFromString(@"defaultSectionInfoForType:");
   NSMethodSignature *signature = [cls methodSignatureForSelector:selector];
-  NSUInteger size = 0;
   unsigned int type = 0;
   id info = nil;
-  if (!signature || [signature numberOfArguments] != 3 ||
-      [signature methodReturnLength] != sizeof(id)) return nil;
-  NSGetSizeAndAlignment([signature getArgumentTypeAtIndex:2], &size, NULL);
-  if (size != sizeof(type)) return nil;
+  if (![cls respondsToSelector:selector] || !signature ||
+      [signature numberOfArguments] != 3 ||
+      strcmp([signature methodReturnType], "@")) return nil;
+  const char *argument = [signature getArgumentTypeAtIndex:2];
+  if (strcmp(argument, @encode(unsigned int)) &&
+      strcmp(argument, @encode(int))) return nil;
   NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
   [invocation setTarget:cls];
   [invocation setSelector:selector];
@@ -290,11 +347,11 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
   Class cls = NSClassFromString(@"BBSound");
   SEL selector = NSSelectorFromString(@"alertSoundWithSystemSoundID:");
   NSMethodSignature *signature = [cls methodSignatureForSelector:selector];
-  NSUInteger size = 0;
-  if (!signature || [signature numberOfArguments] != 3 ||
-      [signature methodReturnLength] != sizeof(id)) return nil;
-  NSGetSizeAndAlignment([signature getArgumentTypeAtIndex:2], &size, NULL);
-  if (size != sizeof(soundID)) return nil;
+  if (![cls respondsToSelector:selector] || !signature ||
+      [signature numberOfArguments] != 3 ||
+      strcmp([signature methodReturnType], "@") ||
+      strcmp([signature getArgumentTypeAtIndex:2], @encode(SystemSoundID)))
+    return nil;
   NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
   [invocation setTarget:cls];
   [invocation setSelector:selector];
@@ -327,11 +384,7 @@ static void XPReceive(CFSocketRef socket, CFSocketCallBackType type,
     if ([recent_ containsObject:identifier]) return;
   }
   id request = [[[NSClassFromString(@"BBBulletinRequest") alloc] init] autorelease];
-  Class actionClass = NSClassFromString(@"BBAction");
-  SEL actionSelector = NSSelectorFromString(@"actionWithLaunchBundleID:callblock:");
-  if (![actionClass respondsToSelector:actionSelector]) return;
-  id action = [actionClass performSelector:actionSelector
-    withObject:kSection withObject:nil];
+  id action = XPLaunchAction();
   if (!action || !XPSet(request, @"setSectionID:", kSection) ||
       !XPSet(request, @"setBulletinID:", identifier) ||
       !XPSet(request, @"setPublisherBulletinID:", identifier) ||

@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <syslog.h>
+#include "../../daemon/strappy_notifications.h"
 
 #ifndef XP_NOTIFICATION_REPLY_TIMEOUT
 #define XP_NOTIFICATION_REPLY_TIMEOUT 5.0
@@ -17,7 +18,7 @@ static const unsigned int kQueueLimit = 32;
 static pthread_mutex_t kLock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t kChanged = PTHREAD_COND_INITIALIZER;
 static pthread_t worker;
-static int started, stopping, accepting;
+static int started, stopping, accepting, legacyFallback;
 static unsigned int head, queued;
 static struct { long long run; char title[401], body[1601]; } alerts[32];
 static long long desiredRevision, desiredCount, ackRevision, ackCount;
@@ -63,6 +64,70 @@ static id XPObject(id target, NSString *name, NSArray *arguments)
 static BOOL XPSet(id target, NSString *name, id value)
 {
   return value && XPInvoke(target,name,[NSArray arrayWithObject:value],"v",NULL);
+}
+
+/* Check the complete required ABI before requesting authorization or submitting
+ * anything. Missing optional sound APIs do not disqualify a backend. */
+static BOOL XPMethod(id target, NSString *name, const char *result,
+                     NSArray *types)
+{
+  SEL selector = NSSelectorFromString(name);
+  if (![target respondsToSelector:selector]) return NO;
+  NSMethodSignature *signature = [target methodSignatureForSelector:selector];
+  if (!signature || strcmp([signature methodReturnType], result) ||
+      [signature numberOfArguments] != [types count] + 2) return NO;
+  for (NSUInteger i = 0; i < [types count]; ++i) {
+    const char *actual = [signature getArgumentTypeAtIndex:i + 2];
+    const char *expected = [[types objectAtIndex:i] UTF8String];
+    /* Older runtimes describe block arguments with the ordinary object ABI. */
+    if (strcmp(actual, expected) &&
+        !(strcmp(expected, "@?") == 0 && strcmp(actual, "@") == 0)) return NO;
+  }
+  return YES;
+}
+static BOOL XPCapabilities(id center)
+{
+  NSArray *objects = [NSArray arrayWithObjects:@"@", @"@?", nil];
+  id content = [[NSClassFromString(@"UNMutableNotificationContent") alloc] init];
+  BOOL ok = NO;
+  @try {
+    ok = XPMethod(center, @"requestAuthorizationWithOptions:completionHandler:",
+      "v", [NSArray arrayWithObjects:
+        [NSString stringWithUTF8String:@encode(NSUInteger)], @"@?", nil]) &&
+      XPMethod(center, @"addNotificationRequest:withCompletionHandler:",
+        "v", objects) &&
+      XPMethod(center, @"setBadgeNumber:withCompletionHandler:", "v", objects) &&
+      XPMethod(content, @"setTitle:", "v", [NSArray arrayWithObject:@"@"]) &&
+      XPMethod(content, @"setBody:", "v", [NSArray arrayWithObject:@"@"]) &&
+      XPMethod(NSClassFromString(@"UNNotificationRequest"),
+        @"requestWithIdentifier:content:trigger:", "@",
+        [NSArray arrayWithObjects:@"@", @"@", @"@", nil]);
+    if (ok) {
+      /* Construct only: no authorization, submission or system setting changes. */
+      ok = XPSet(content, @"setTitle:", @"Strappy") &&
+        XPSet(content, @"setBody:", @"") &&
+        XPObject(NSClassFromString(@"UNNotificationRequest"),
+          @"requestWithIdentifier:content:trigger:", [NSArray arrayWithObjects:
+            @"strappy.capability-check", content, [NSNull null], nil]) != nil;
+    }
+  } @finally { [content release]; }
+  return ok;
+}
+
+/* Only pre-authorization capability/initialization failures reach this path.
+ * Queued alerts have never been submitted to UserNotifications. Flush them once
+ * through the legacy endpoint; an absent provider means no notification. */
+static void XPFallBack(void)
+{
+  pthread_mutex_lock(&kLock);
+  legacyFallback = 1; accepting = 0;
+  while (!stopping && queued) {
+    (void)strappy_notifications_send(STRAPPY_NOTIFICATION_SOCKET,
+      alerts[head].run, alerts[head].title, alerts[head].body);
+    head = (head + 1) % kQueueLimit; --queued;
+  }
+  pthread_mutex_unlock(&kLock);
+  syslog(LOG_NOTICE, "StrappyNotifications: trying legacy provider capabilities");
 }
 
 /* Copied system callbacks retain this object after timeout/shutdown. They never
@@ -181,11 +246,17 @@ static void *XPWorker(void *unused)
   (void)unused;
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   id center = nil, sound = nil;
+  BOOL capabilities = NO;
   @try {
-    id allocated = [NSClassFromString(@"UNUserNotificationCenter") alloc];
-    if (!XPInvoke(allocated,@"initWithBundleIdentifier:",
-        [NSArray arrayWithObject:kBundle],"@",&center)) [allocated release];
-    if (!center || !XPAuthorize(center)) {
+    @try {
+      id allocated = [NSClassFromString(@"UNUserNotificationCenter") alloc];
+      if (!XPInvoke(allocated,@"initWithBundleIdentifier:",
+          [NSArray arrayWithObject:kBundle],"@",&center)) [allocated release];
+      capabilities = center && XPCapabilities(center);
+    } @catch (NSException *exception) { (void)exception; }
+    if (!capabilities) {
+      XPFallBack();
+    } else if (!XPAuthorize(center)) {
       syslog(LOG_NOTICE,"StrappyNotifications: modern initialization failed");
     } else {
       @try { sound = [XPSound() retain]; }
@@ -243,14 +314,29 @@ int XPDaemonNotificationsStart(void)
   dlopen("/System/Library/Frameworks/UserNotifications.framework/UserNotifications",
     RTLD_NOW | RTLD_LOCAL);
   int modern = NSClassFromString(@"UNUserNotificationCenter") != Nil;
-  if (modern && !started) {
-    stopping = 0; accepting = 1; head = queued = 0;
+  if (!started) {
+    pthread_mutex_lock(&kLock);
+    legacyFallback = !modern;
+    stopping = 0; accepting = modern; head = queued = 0;
     desiredRevision = desiredCount = ackRevision = ackCount = 0;
-    started = pthread_create(&worker,NULL,XPWorker,NULL) == 0;
-    if (!started) accepting = 0;
+    pthread_mutex_unlock(&kLock);
+    if (modern) {
+      started = pthread_create(&worker,NULL,XPWorker,NULL) == 0;
+      if (!started) {
+        pthread_mutex_lock(&kLock); accepting = 0; legacyFallback = 1;
+        pthread_mutex_unlock(&kLock); modern = 0;
+      }
+    }
   }
   syslog(LOG_NOTICE,"StrappyNotifications: selected %s",modern ? "modern" : "legacy");
   [pool drain];
+  return modern;
+}
+int XPDaemonNotificationsModern(void)
+{
+  pthread_mutex_lock(&kLock);
+  int modern = !legacyFallback;
+  pthread_mutex_unlock(&kLock);
   return modern;
 }
 void XPDaemonNotificationsStop(void)
@@ -264,7 +350,9 @@ int XPDaemonNotificationsPost(long long run, const char *title, const char *body
 {
   int ok = 0;
   pthread_mutex_lock(&kLock);
-  if (accepting && queued < kQueueLimit) {
+  if (legacyFallback && !stopping) {
+    ok = strappy_notifications_send(STRAPPY_NOTIFICATION_SOCKET,run,title,body);
+  } else if (accepting && queued < kQueueLimit) {
     unsigned int slot = (head + queued) % kQueueLimit;
     alerts[slot].run = run;
     snprintf(alerts[slot].title,sizeof(alerts[slot].title),"%s",title);

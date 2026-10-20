@@ -24,8 +24,9 @@ The modern route was integrated in `2ba1d5f`; runtime availability of
 pinkphone-rsa (iOS 15.0, arm64/rootless). The standalone probe separately
 established the Mail-style Glass tone mechanism. These observations do not
 establish every modern production sound, badge, permission-change or restart case.
-The legacy provider rejects pre-iOS-6 runtimes; iOS 5 notification support is not
-established. Cross-builds do not establish native support on untested versions.
+At this date the legacy provider rejected pre-iOS-6 runtimes. The subsequent
+[runtime capability fallback](session-unread-notification-plan.md#runtime-capability-fallback-2026-10-20)
+removes that exclusion; native iOS 5 notification support remains unverified. Cross-builds do not establish native support on untested versions.
 
 Build `8a0f436`, including the initial-service-readiness fix, was deployed to all
 three phones. Package hashes and IPC readiness passed on all three; legacy

@@ -89,10 +89,11 @@ void strappy_notifications_finished(long long run, int state,
                                     const char *title, const char *response,
                                     const char *error)
 {
-  const char *path = strappy_notification_platform_socket();
-  if ((!path && !strappy_notification_platform_modern()) || (state != STRAPPY_RUN_COMPLETED && state != STRAPPY_RUN_FAILED))
+  int modern = strappy_notification_platform_modern();
+  const char *path = modern ? NULL : strappy_notification_platform_socket();
+  if ((!path && !modern) || (state != STRAPPY_RUN_COMPLETED && state != STRAPPY_RUN_FAILED))
     return;
-  if (strappy_notification_platform_modern()) {
+  if (modern) {
     strappy_notification_packet packet;
     memset(&packet, 0, sizeof(packet));
     strappy_notification_preview(packet.title, title,

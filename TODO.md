@@ -20,11 +20,14 @@ this consolidation does not establish any new device acceptance.
   on `8a0f436` (or the merge candidate if production code changes). Its full
   acceptance passed on `ad47a44`; package/readiness checks alone do not repeat it.
   [Device matrix](docs/session-unread-notification-plan.md#latest-production-deployments-2026-10-19)
-- [ ] Resolve the iOS 5 notification boundary: document notifications as requiring
-  iOS 6+ while preserving the app's separate compatibility claim, or implement
-  and validate an iOS 5 route before claiming it works. The legacy provider
-  currently rejects pre-iOS-6 runtimes.
-  [Compatibility evidence](docs/ios6-notification-provider.md#verified-behavior-and-compatibility-2026-10-19)
+- [x] Replace the iOS-version gate with runtime capability selection: attempt
+  UserNotifications first, then the legacy BulletinBoard provider (including
+  iOS 5 when its required APIs work), otherwise deliver no notifications.
+  Validate required signatures/initialization before modern authorization;
+  never switch routes after denial, timeout or an ambiguous submission result.
+  Remove the provider's iOS 6 loader restriction. Native iOS 5 behavior remains
+  unverified; cross-builds and fake-API fixtures do not establish it.
+  [Implementation and validation](docs/session-unread-notification-plan.md#runtime-capability-fallback-2026-10-20)
 - [ ] Resolve the existing uncommitted diagnostic extensions in
   `source/daemon/tests/user_notification_device/main.m`,
   `source/iOS/user_notification_probe.mk`, and

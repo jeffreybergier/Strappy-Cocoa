@@ -3,6 +3,7 @@
 from pathlib import Path
 import io
 import os
+import plistlib
 import subprocess
 import sys
 import tarfile
@@ -53,8 +54,10 @@ for filename in sys.argv[1:]:
         assert b"test badge" not in binary
         assert not any("StrappyBulletin" in name for name in names)
         assert not any("strappy-provider-test" in name for name in names)
-        assert any(name.endswith("/StrappyNotificationProvider.bundle/Info.plist")
-                   for name in names)
+        info_name = next(name for name in names if name.endswith(
+            "/StrappyNotificationProvider.bundle/Info.plist"))
+        info = plistlib.loads(package.extractfile(info_name).read())
+        assert info["MinimumOSVersion"] == "5.0"
     control = subprocess.check_output(["dpkg-deb", "--ctrl-tarfile", str(archive)])
     with tarfile.open(fileobj=io.BytesIO(control)) as package:
         preinst = next(name for name in package.getnames()

@@ -6,12 +6,25 @@
 #include <pthread.h>
 #include <unistd.h>
 static int modernAvailable = 1, denyAuthorization, holdAuthorization, holdBadge;
-static unsigned int posts, badges;
+static pthread_mutex_t testLock = PTHREAD_MUTEX_INITIALIZER;
+static unsigned int posts, badges, legacyPosts;
+static int missingContent, missingAPI, wrongABI, failInit, throwInit;
+static int legacyAvailable = 1, failRequest, failSubmission;
+#include "../strappy_notifications.h"
+int strappy_notifications_send(const char *path, long long run,
+                               const char *title, const char *body)
+{
+  assert(!strcmp(path, STRAPPY_NOTIFICATION_SOCKET));
+  assert(run > 0 && title && body);
+  pthread_mutex_lock(&testLock);
+  if (legacyAvailable) ++legacyPosts;
+  pthread_mutex_unlock(&testLock);
+  return legacyAvailable;
+}
 static NSString *lastIdentifier, *lastTitle, *lastBody;
 static long long lastCount;
 static void (^authorizationReply)(BOOL, NSError *);
 static void (^badgeReply)(NSError *);
-static pthread_mutex_t testLock = PTHREAD_MUTEX_INITIALIZER;
 
 @interface XPTestContent : NSObject {
   NSString *title_, *body_;
@@ -35,6 +48,7 @@ static pthread_mutex_t testLock = PTHREAD_MUTEX_INITIALIZER;
 + (id)requestWithIdentifier:(NSString *)identifier content:(id)content trigger:(id)trigger
 {
   assert(trigger == nil);
+  if (failRequest) return nil;
   return [NSDictionary dictionaryWithObjectsAndKeys:identifier,@"id",content,@"content",nil];
 }
 @end
@@ -51,7 +65,26 @@ withCompletionHandler:(void (^)(NSError *))callback;
 - (id)initWithBundleIdentifier:(NSString *)identifier
 {
   assert([identifier isEqual:@"com.altivecintelligence.Strappy"]);
+  if (failInit || throwInit) {
+    usleep(30000); /* Allow an alert to queue during capability discovery. */
+    [self release];
+    if (throwInit) [NSException raise:@"Fixture" format:@"init failed"];
+    return nil;
+  }
   return [super init];
+}
+- (BOOL)respondsToSelector:(SEL)selector
+{
+  if (missingAPI && selector ==
+      NSSelectorFromString(@"setBadgeNumber:withCompletionHandler:")) return NO;
+  return [super respondsToSelector:selector];
+}
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)selector
+{
+  if (wrongABI && selector ==
+      NSSelectorFromString(@"setBadgeNumber:withCompletionHandler:"))
+    return [NSMethodSignature signatureWithObjCTypes:"v@:d@?"];
+  return [super methodSignatureForSelector:selector];
 }
 - (void)requestAuthorizationWithOptions:(NSUInteger)options
                     completionHandler:(void (^)(BOOL, NSError *))callback
@@ -72,7 +105,8 @@ withCompletionHandler:(void (^)(NSError *))callback;
   [lastTitle release]; lastTitle = [[content title] copy];
   [lastBody release]; lastBody = [[content body] copy];
   pthread_mutex_unlock(&testLock);
-  callback(nil);
+  callback(failSubmission ? [NSError errorWithDomain:@"Fixture" code:1
+    userInfo:nil] : nil);
 }
 - (void)setBadgeNumber:(NSNumber *)number
 withCompletionHandler:(void (^)(NSError *))callback
@@ -88,7 +122,7 @@ static Class XPTestClass(NSString *name)
 {
   if ([name isEqual:@"UNUserNotificationCenter"])
     return modernAvailable ? [XPTestCenter class] : Nil;
-  if ([name isEqual:@"UNMutableNotificationContent"]) return [XPTestContent class];
+  if ([name isEqual:@"UNMutableNotificationContent"]) return missingContent ? Nil : [XPTestContent class];
   if ([name isEqual:@"UNNotificationRequest"]) return [XPTestRequest class];
   return Nil; /* Sound unavailable must not prevent delivery. */
 }
@@ -119,11 +153,37 @@ static void waitForBadge(long long revision, long long count)
   }
   assert(0 && "badge timed out");
 }
+static void waitForLegacy(void)
+{
+  for (unsigned int i = 0; i < 2000; ++i) {
+    if (!XPDaemonNotificationsModern()) return;
+    usleep(1000);
+  }
+  assert(0 && "capability fallback timed out");
+}
+static void checkFallback(void)
+{
+  pthread_mutex_lock(&testLock);
+  unsigned int previous = legacyPosts, modernPosts = posts;
+  pthread_mutex_unlock(&testLock);
+  assert(XPDaemonNotificationsStart());
+  assert(XPDaemonNotificationsPost(400,"Fallback","Body"));
+  waitForLegacy();
+  pthread_mutex_lock(&testLock);
+  assert(legacyPosts == previous + 1 && posts == modernPosts);
+  pthread_mutex_unlock(&testLock);
+  assert(!XPDaemonNotificationsBadge(50,1));
+  XPDaemonNotificationsStop();
+}
 int main(void)
 {
   NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
   modernAvailable = 0;
   assert(!XPDaemonNotificationsStart());
+  assert(!XPDaemonNotificationsModern());
+  legacyAvailable = 0;
+  assert(!XPDaemonNotificationsPost(1,"No backend","Body"));
+  legacyAvailable = 1;
   XPDaemonNotificationsStop();
   modernAvailable = 1;
   assert(XPDaemonNotificationsStart());
@@ -148,6 +208,7 @@ int main(void)
     assert(XPDaemonNotificationsPost(100+i,"Queued","Body"));
   assert(!XPDaemonNotificationsPost(200,"Full","Body"));
   usleep(200000);
+  assert(XPDaemonNotificationsModern()); /* No fallback on timeout. */
   XPDaemonNotificationsStop();
   assert(authorizationReply);
   authorizationReply(YES,nil); /* Safe after timeout and teardown. */
@@ -171,9 +232,28 @@ int main(void)
   assert(XPDaemonNotificationsStart());
   usleep(200000);
   assert(!XPDaemonNotificationsPost(300,"Denied","Body"));
+  assert(XPDaemonNotificationsModern()); /* Denial must not bypass permission. */
   XPDaemonNotificationsStop();
+  denyAuthorization = 0;
+  failSubmission = 1;
+  assert(XPDaemonNotificationsStart());
+  pthread_mutex_lock(&testLock);
+  unsigned int expectedPosts = posts + 1, expectedLegacy = legacyPosts;
+  pthread_mutex_unlock(&testLock);
+  assert(XPDaemonNotificationsPost(500,"Submission error","Body"));
+  waitForPosts(expectedPosts);
+  assert(XPDaemonNotificationsModern());
+  XPDaemonNotificationsStop();
+  assert(legacyPosts == expectedLegacy); /* Never duplicate a submitted alert. */
+  failSubmission = 0;
+  failRequest = 1; checkFallback(); failRequest = 0;
+  missingContent = 1; checkFallback(); missingContent = 0;
+  missingAPI = 1; checkFallback(); missingAPI = 0;
+  wrongABI = 1; checkFallback(); wrongABI = 0;
+  failInit = 1; checkFallback(); failInit = 0;
+  throwInit = 1; checkFallback(); throwInit = 0;
   [lastIdentifier release]; [lastTitle release]; [lastBody release];
-  puts("PASS: class selection, authorization, content, missing API, bounded queue, badge revisions, zero, late callbacks, shutdown");
+  puts("PASS: capability fallback, absent receiver, ABI mismatch, init failure, queued fallback, permission/timeout/submission isolation, bounded queue, badge revisions, late callbacks, shutdown");
   [pool drain];
   return 0;
 }

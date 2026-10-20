@@ -21,7 +21,7 @@
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>MinimumOSVersion</key>
-	<string>6.0</string>
+	<string>5.0</string>
 	<key>NSPrincipalClass</key>
 	<string>XPStrappyNotificationProvider</string>
 	<key>UIDeviceFamily</key>
