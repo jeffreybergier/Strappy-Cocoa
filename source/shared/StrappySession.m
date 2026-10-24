@@ -691,6 +691,8 @@ static NSString *StrappyServiceCommand(unsigned int operation, NSDictionary *val
       @"The background service is busy. Try again after the current work finishes." :
       (status == STRAPPY_IPC_NOT_READY ? @"The service did not acknowledge this change. Reload stored state before trying again." :
        @"The background service could not apply this change. Check the selected values and account credentials.");
+    if (status == STRAPPY_IPC_ACCOUNT_REQUIRED)
+      message = NSLocalizedString(@STRAPPY_DB_ACCOUNT_REQUIRED_ERROR, nil);
     *error = [NSError errorWithDomain:@"StrappyServiceErrorDomain" code:(NSInteger)status
       userInfo:[NSDictionary dictionaryWithObject:message forKey:NSLocalizedDescriptionKey]];
   }

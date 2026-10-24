@@ -382,7 +382,7 @@ int strappy_db_create_session_with_working_directory(
   if ((defaults.model_id[0] == '\0') ||
       (defaults.provider_account_id[0] == '\0')) {
     strappy_set_error(error_out,
-                      "Add an account before creating a session.");
+                      STRAPPY_DB_ACCOUNT_REQUIRED_ERROR);
     goto rollback;
   }
 

@@ -395,7 +395,8 @@ static void strappy_execution_dispatch(const strappy_ipc_message *request,
             /* Control mutations never reserve the prompt/maintenance worker. */
             pthread_mutex_unlock(&e->mutex);
             if (!strcmp(action,"delete_session")) strappy_attention_lock();
-            reply->status = strappy_mutation(e->db,e->resources,command,&result) ? STRAPPY_IPC_OK : STRAPPY_IPC_INVALID;
+            (void)strappy_mutation(e->db,e->resources,command,&result,
+                &reply->status);
             if (!strcmp(action,"delete_session")) {
                 if (reply->status==STRAPPY_IPC_OK)
                     strappy_attention_deleted(strappy_command_number(command,"session"));

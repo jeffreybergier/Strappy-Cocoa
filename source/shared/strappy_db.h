@@ -682,6 +682,9 @@ int strappy_db_update_discovered_database_hidden(const char *db_path,
 int strappy_db_create_session(const char *db_path,
                               long long *session_id_out,
                               char **error_out);
+/* Stable local validation diagnostic; safe to classify at the IPC boundary. */
+#define STRAPPY_DB_ACCOUNT_REQUIRED_ERROR \
+  "Add an account before creating a session."
 int strappy_db_create_session_with_working_directory(
   const char *db_path,
   const char *working_directory,

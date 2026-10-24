@@ -7,7 +7,8 @@
 #include <unistd.h>
 
 static const char *socket_path;
-static int command(unsigned int operation, const char *json, char *result, size_t capacity)
+static int command_status(unsigned int operation, const char *json,
+    unsigned int expected, char *result, size_t capacity)
 {
     strappy_ipc_message m;
     int fd = strappy_ipc_connect(socket_path,geteuid(),3000), ok;
@@ -20,13 +21,17 @@ static int command(unsigned int operation, const char *json, char *result, size_
         memset(&m,0,sizeof(m)); m.kind = STRAPPY_IPC_REQUEST; m.operation = operation; m.request_id = 2;
         m.length = (uint32_t)strlen(json); memcpy(m.payload,json,m.length);
         ok = strappy_ipc_send(fd,&m,3000) == 0 && strappy_ipc_receive(fd,&m,10000) == 0 &&
-            m.status == 0 && m.kind == STRAPPY_IPC_REPLY && m.operation == operation && m.request_id == 2;
+            m.status == expected && m.kind == STRAPPY_IPC_REPLY && m.operation == operation && m.request_id == 2;
         if (ok && result) {
             ok = m.length < capacity;
             if (ok) { memcpy(result,m.payload,m.length); result[m.length] = 0; }
         }
     }
     close(fd); return ok;
+}
+static int command(unsigned int operation, const char *json, char *result, size_t capacity)
+{
+    return command_status(operation,json,STRAPPY_IPC_OK,result,capacity);
 }
 #define CHECK(expression) do { if (!(expression)) { fprintf(stderr,"Step 4 probe failed at line %d\n",__LINE__); return 1; } } while (0)
 int main(int argc, char **argv)
@@ -35,6 +40,15 @@ int main(int argc, char **argv)
     int count;
     if (argc != 3 || argv[2][0] != '/' || strchr(argv[2],'"') || strchr(argv[2],'\\') || strlen(argv[2]) > 512) return 2;
     socket_path = argv[1];
+    snprintf(json,sizeof(json),"{\"action\":\"create_session\",\"directory\":\"%s/work\"}",argv[2]);
+    CHECK(command_status(STRAPPY_IPC_MUTATE,json,STRAPPY_IPC_ACCOUNT_REQUIRED,
+        state,sizeof(state)) && !strcmp(state,"account_required"));
+    CHECK(command_status(STRAPPY_IPC_CREATE_SESSION,json,
+        STRAPPY_IPC_ACCOUNT_REQUIRED,state,sizeof(state)) &&
+        !strcmp(state,"account_required"));
+    CHECK(command_status(STRAPPY_IPC_MUTATE,
+        "{\"action\":\"create_session\",\"directory\":\"relative\"}",
+        STRAPPY_IPC_INVALID,state,sizeof(state)) && !strcmp(state,"invalid_request"));
     CHECK(command(25,"{\"action\":\"create_account\",\"id\":\"other\",\"name\":\"Step 4 native fixture\"}",account,sizeof(account)));
     CHECK(command(25,"{\"action\":\"create_model\",\"id\":\"other\",\"wire\":\"step4-fixture\",\"name\":\"Native fixture\",\"context\":\"8192\",\"output\":\"4096\",\"reasoning\":\"0\",\"image\":\"0\",\"functions\":\"1\"}",model,sizeof(model)));
     snprintf(json,sizeof(json),"{\"action\":\"approve_model\",\"id\":\"%s\",\"value\":\"1\"}",model);
@@ -68,6 +82,6 @@ int main(int argc, char **argv)
         CHECK(!strstr(snapshot,"\"failed\"")); usleep(100000);
     }
     CHECK(count<100);
-    puts("Step 4 native probe passed: accounts, models, defaults, session create/delete, daemon scan, approvals, visibility, cross-connection status.");
+    puts("Native mutation probe passed: missing-account classification, invalid input, accounts, models, defaults, session create/delete, daemon scan, approvals, visibility, cross-connection status.");
     return 0;
 }

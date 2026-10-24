@@ -61,7 +61,7 @@ static void strappy_ipc_error(strappy_ipc_message *reply)
 {
     static const char *const errors[] = { "", "invalid_request", "incompatible_version",
         "handshake_required", "duplicate_request", "execution_not_ready", "unknown_operation",
-        "service_busy", "request_conflict", "storage_error" };
+        "service_busy", "request_conflict", "storage_error", "account_required" };
     if (reply->status >= sizeof(errors) / sizeof(errors[0])) reply->status = STRAPPY_IPC_STORAGE_ERROR;
     if (reply->status) {
         reply->length = (uint32_t)strlen(errors[reply->status]);

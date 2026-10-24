@@ -123,6 +123,19 @@ with tempfile.TemporaryDirectory(prefix='strappy-mutations-', dir='/tmp') as tem
     def idle(): return struct.unpack('!III',command(directory,26)[1])[0] == 0
     process = start()
     try:
+        # Fresh installs must distinguish missing account setup from broken IPC.
+        # Both the shared UI mutation and the dedicated operation carry only a
+        # stable error code/token, never raw database or credential diagnostics.
+        for operation in (25, 19):
+            assert command(directory, operation, json.dumps(dict(
+                action='create_session', directory=str(directory))).encode()) == (
+                    10, b'account_required')
+        assert scalar('SELECT count(*) FROM sessions') == 0
+        assert command(directory, 25, json.dumps(dict(
+            action='create_session', directory='relative')).encode()) == (
+                1, b'invalid_request')
+        assert command(directory, 25, b'{"action":"unknown"}') == (
+            1, b'invalid_request')
         account = rpc('create_account', id='other', name='Offline')
         def auth_rpc(op, **values):
             return command(directory,op,json.dumps(values).encode())

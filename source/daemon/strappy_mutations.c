@@ -46,7 +46,8 @@ int strappy_command_options(const cJSON *c, strappy_session_options *input,
     input->answer_quality_enabled = (int)strappy_command_number(c,"quality");
     return strappy_web_provider_parse(strappy_command_text(c,"web_provider"),&input->web_provider);
 }
-int strappy_mutation(const char *db, const char *resources, const cJSON *c, char **result)
+int strappy_mutation(const char *db, const char *resources, const cJSON *c,
+    char **result, unsigned int *status)
 {
     const char *action = strappy_command_text(c, "action");
     const char *id = strappy_command_text(c, "id");
@@ -54,6 +55,7 @@ int strappy_mutation(const char *db, const char *resources, const cJSON *c, char
     int ok = 0;
     char *error = NULL;
     *result = NULL;
+    *status = STRAPPY_IPC_INVALID;
     if (!strcmp(action, "create_session")) {
         char number[32];
         ok = strappy_session_create_with_working_directory(db, strappy_command_text(c,"directory"), &session, &error);
@@ -117,7 +119,12 @@ int strappy_mutation(const char *db, const char *resources, const cJSON *c, char
     } else if (!strcmp(action,"create_account")) {
         ok = strappy_db_create_provider_account(db,id,strappy_command_text(c,"name"),NULL,result,&error);
     }
-    /* Return only stable status codes; provider and Keychain diagnostics may contain secrets. */
+    /* Classify only this exact, local validation error. Provider, filesystem,
+     * SQLite and Keychain diagnostics must not become UI response payloads. */
+    if (ok) *status = STRAPPY_IPC_OK;
+    else if (!strcmp(action, "create_session") && error &&
+        !strcmp(error, STRAPPY_DB_ACCOUNT_REQUIRED_ERROR))
+        *status = STRAPPY_IPC_ACCOUNT_REQUIRED;
     free(error);
     return ok;
 }
