@@ -68,6 +68,7 @@ static NSDictionary *StrappyKeychainPropertyListFromData(NSData *data)
 
   if (([data length] == 0U) ||
       ([data length] > (NSUInteger)kStrappyChatGPTCredentialMaximumBytes)) {
+    NSLog(@"[StrappyKeychain] operation=credential-decode invalid-size");
     return nil;
   }
   format = NSPropertyListOpenStepFormat;
@@ -75,8 +76,12 @@ static NSDictionary *StrappyKeychainPropertyListFromData(NSData *data)
     XP_propertyListWithData:data
                      options:(XPUInteger)NSPropertyListImmutable
                       format:&format];
-  return ([propertyList isKindOfClass:[NSDictionary class]] &&
-          (format == NSPropertyListBinaryFormat_v1_0)) ? propertyList : nil;
+  if (![propertyList isKindOfClass:[NSDictionary class]] ||
+      format != NSPropertyListBinaryFormat_v1_0) {
+    NSLog(@"[StrappyKeychain] operation=credential-decode invalid-format");
+    return nil;
+  }
+  return propertyList;
 }
 
 static NSMutableDictionary *StrappyKeychainMutableCredential(
@@ -291,6 +296,7 @@ providerAccountIdentifier:(NSString *)providerAccountIdentifier
         kStrappyBearerCredentialFormatVersion) ||
       ![kind isEqual:@"api_token"] ||
       ([normalizedToken length] == 0U)) {
+    NSLog(@"[StrappyKeychain] operation=bearer-decode invalid-schema");
     return NO;
   }
   if (bearerToken != NULL) {

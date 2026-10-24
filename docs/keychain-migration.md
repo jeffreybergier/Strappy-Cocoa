@@ -17,6 +17,34 @@ The daemon explicitly links static AltivecCocoa. Its process-wide Mac
 no-dialog configuration and iOS generic-password device-only creation policy
 are preserved. OAuth serialization and provider/account schemas are unchanged.
 
+## Credential diagnostics
+
+The daemon logs Keychain operation failures with the `[StrappyKeychain]` prefix
+using `NSLog`. Each native failure includes a fixed operation name, numeric
+OSStatus and whether NSError was present; no NSError description, account,
+service, URL, credential bytes or token is logged. Missing-item failures are
+included: they can be expected during first-time saves and idempotent deletes,
+so a logged failure alone does not establish a regression.
+
+Successful generic-password writes perform one diagnostic read-back and log
+only readability and byte equality. Read-back failure does not change the
+write result, retry, delete or rewrite the item. Credential decoding separately
+logs invalid size, format or bearer schema without including stored contents.
+The existing noninteractive daemon policy remains unchanged.
+
+On Leopard, inspect the daemon's system log from Terminal:
+
+```sh
+syslog -k Sender strappyd | grep '\[StrappyKeychain\]'
+```
+
+Use the GUI login session to reproduce Save. An SSH credential probe may have
+a different authorization context and is not proof of GUI-session behavior.
+Launch the diagnostic app after quitting the old app so its normal service
+controller can deploy the matching bundled daemon; copying the app alone does
+not replace the running service. No Keychain reset or ACL changes are required
+for collecting these diagnostics.
+
 Validation on 2026-10-15: clean Mac/iOS debug and release builds, the app's
 complete offline suite, and isolated consumer-facade tests on the host Mac
 and `x4-vm` (Tiger 10.4.11/PPC) passed. Shared tests are in the sibling engine's
