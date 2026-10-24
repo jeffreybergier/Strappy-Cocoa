@@ -92,14 +92,16 @@ actual iOS 5 device still requires validation.
 
 The Mac app embeds a PPC/i386/x86_64/arm64 `strappyd` under
 `Contents/Library/LaunchServices`. Like Retro-Cloud-Sync's
-`RCServiceController`, Strappy installs a stable per-user copy and a
-LaunchAgent that runs the same durable execution and recovery code as iOS.
+`RCServiceController`, Strappy installs a stable per-user copy. Unlike iOS,
+the Mac service is explicitly loaded when the app starts and unloaded on normal
+app termination; it is not registered to start at login.
 
 On app launch, before provider/Keychain bootstrap, `StrappyServiceController`
 installs or updates these files:
 
 - `~/Library/Application Support/Strappy/Service/strappyd` (mode 0700).
-- `~/Library/LaunchAgents/com.altivecintelligence.strappyd.plist` (mode 0600).
+- `~/Library/Application Support/Strappy/Service/com.altivecintelligence.strappyd.plist`
+  (mode 0600, outside the automatically discovered LaunchAgents directory).
 - Log: `~/Library/Logs/Strappy/heartbeat.log`, with the same 64 KiB rotation
   and `.1` backup as iOS. New log directories/files are 0700/0600.
 
@@ -107,30 +109,55 @@ The agent runs as the logged-in user, without root privileges. It statically lin
 the complete prompt catalogs, `Info.plist` and CA bundle beside the installed service. It has no bundled framework
 dependency; the legacy compiler also links
 Apple's system `libgcc_s.1.dylib`. Paths in the plist are absolute. A stable copy
-outside the bundle lets the service survive closing, moving, or replacing the
-app. A per-user file lock serializes installation; reopening an unchanged app
-keeps the existing daemon. Changed binary/plist/catalog content unloads the old job,
-atomically replaces the files, and loads one replacement.
+outside the bundle preserves the executable path used by Keychain permissions.
+A per-user file lock serializes installation; reopening an unchanged app can
+reuse an already-loaded daemon. Changed binary/plist/catalog content unloads
+the old job, atomically replaces the files, and loads one replacement. Startup
+migrates an older login agent by unloading it and removing only Strappy's old
+`~/Library/LaunchAgents/com.altivecintelligence.strappyd.plist` registration.
+
+Normal Quit unloads the job and waits for the service exclusion lock before
+returning, retaining the installed executable, resources, logs and user data.
+Startup and shutdown are serialized; shutdown prevents a queued startup from
+launching a daemon after Quit. Closing a window is not Quit. Active work is
+interrupted when the daemon stops and uses existing recovery on the next launch.
+Force Quit or an app crash can skip the termination callback and leave the job
+loaded until a later normal launch/quit, explicit uninstall, or logout. iOS
+package startup and always-running service behavior are unchanged.
 
 `XPAppKit` owns launchd compatibility: Tiger uses `OnDemand = false` and plain
 `load`/`unload`; newer systems use `KeepAlive = true` and the Aqua session flag.
-The plist registers startup at login. Actual logout/login and newer Mac runtime
-coverage remain separate from the recorded Tiger tests.
+KeepAlive applies only while the app has explicitly loaded this job. The plist
+is not automatically loaded at login. Actual logout/login coverage remains
+separate from source checks and cross-build validation.
 
 Explicit maintenance commands (run as the same user, not with sudo):
 
 ```sh
-"/Applications/Strappy.app/Contents/MacOS/Strappy" --install-daemon
 "/Applications/Strappy.app/Contents/MacOS/Strappy" --uninstall-daemon
 tail -F "$HOME/Library/Logs/Strappy/heartbeat.log"
 ```
 
-Quit Strappy and run `--uninstall-daemon` before removing the app if the service
-should also be removed. It unloads the job and deletes the plist and installed
-executable, retaining logs, the installation lock file, and all user app data.
-Deleting the app alone leaves the installed service; launching Strappy again
-installs it again. The maintenance command-line options do not initialize the UI or provider
-credentials. Installing starts the service, which initializes its store. Provider and scanner workers remain unavailable; store ownership has moved.
+Quit Strappy and run `--uninstall-daemon` to remove retained service files. It
+unloads the job and deletes the current/legacy plist and installed executable,
+retaining logs, the installation lock file, and all user app data. Run it in the
+GUI login session: an SSH bootstrap context may not see the Aqua job. The
+maintenance command does not initialize the UI or provider credentials.
+`--install-daemon` is rejected with guidance to launch the app normally; there
+is no command-line installation path that intentionally leaves a background
+service running after its owning app exits.
+
+Host Mac lifecycle regression fixture:
+
+```sh
+make -C source/daemon/tests mac-service-lifecycle-test
+```
+
+It exercises the production controller against a disposable home and a recorded
+launchctl implementation: old-agent migration, unchanged startup, normal quit,
+queued-start rejection, relaunch, uninstall and load/unload failures. It does not touch
+the real login agent or Keychain and does not establish native launchd or
+interactive authorization behavior.
 
 ## Response diagnostics during the refactor
 

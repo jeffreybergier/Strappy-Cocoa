@@ -13,9 +13,10 @@ removes the first match; iOS iterates account matches with a 128-attempt race
 bound. Unknown native protocols/authentication types fail without rewriting
 credentials. Environment overrides, caching and login behavior remain app-owned.
 
-The daemon explicitly links static AltivecCocoa. Its process-wide Mac
-no-dialog configuration and iOS generic-password device-only creation policy
-are preserved. OAuth serialization and provider/account schemas are unchanged.
+The daemon explicitly links static AltivecCocoa. Normal Mac daemon startup
+preserves default Keychain authorization dialogs; only the explicit command-line
+credential probe disables interaction. The iOS generic-password device-only
+creation policy, OAuth serialization and provider/account schemas are unchanged.
 
 ## Credential diagnostics
 
@@ -30,7 +31,8 @@ Successful generic-password writes perform one diagnostic read-back and log
 only readability and byte equality. Read-back failure does not change the
 write result, retry, delete or rewrite the item. Credential decoding separately
 logs invalid size, format or bearer schema without including stored contents.
-The existing noninteractive daemon policy remains unchanged.
+Normal Mac daemon operations allow Keychain authorization dialogs; a denied
+operation is still logged and returned as a failure.
 
 On Leopard, inspect the daemon's system log from Terminal:
 

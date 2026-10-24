@@ -648,7 +648,7 @@ NSArray *XPLaunchAgentArguments(NSString *action, NSString *path)
   return [NSArray arrayWithObjects:action, path, nil];
 }
 
-void XPConfigurePersistentLaunchAgent(NSMutableDictionary *plist)
+void XPConfigureApplicationLaunchAgent(NSMutableDictionary *plist)
 {
   [plist setObject:[NSNumber numberWithBool:YES] forKey:@"RunAtLoad"];
   if (NSAppKitVersionNumber >= 949.0) {

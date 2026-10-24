@@ -93,7 +93,7 @@ static void XPKeychainLogFailure(NSString *operation, NSError *error)
   return ok;
 }
 
-+ (BOOL)configureBackgroundAccess;
++ (BOOL)configureNoninteractiveProbeAccess;
 {
 #if TARGET_OS_IPHONE
   return YES;

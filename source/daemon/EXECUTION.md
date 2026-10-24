@@ -73,15 +73,17 @@ It uses the existing Keychain account formats and owns provider credential
 retrieval and OAuth refresh, including refresh cancellation and identity checks.
 Prompt execution never returns secrets through IPC. Step 4 authentication
 commands transfer user-entered credentials over the authenticated private socket;
-credentials never enter diagnostic logs or the run table. macOS disables
-Keychain interaction for the background executable; inaccessible credentials
-fail the run. Unlock/access authorization belongs to the user-facing application
-or Keychain UI. The implementation does not bypass an existing Keychain ACL.
+credentials never enter diagnostic logs or the run table. The Mac app-owned
+service preserves default Keychain interaction so the logged-in user can approve
+access, including Leopard's authorization dialogs. No prompt suppression occurs
+at normal daemon startup; permission denial still fails the operation. The
+implementation does not bypass an existing Keychain ACL.
 iOS signs the daemon with `com.altivecintelligence.Strappy` as its Keychain access
 group, preserving the normal mobile identity. Locked-device accessibility and
 first unlock are still platform validation work.
 
-A read-only, noninteractive access probe is available:
+A read-only access probe explicitly disables interaction only in its dedicated
+command-line process (not the normal daemon):
 
 ```
 strappyd --credential-probe /absolute/path/strappy.sqlite

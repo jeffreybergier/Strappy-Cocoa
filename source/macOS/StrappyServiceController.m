@@ -63,14 +63,17 @@ static BOOL StrappyServiceDirectory(NSString *path)
           forKey:NSFilePosixPermissions] error:NULL];
 }
 
-static BOOL StrappyServiceChange(BOOL install, NSString **error)
+/* Stop retains the stable executable and resources; uninstall removes them. */
+static BOOL StrappyServiceChange(BOOL install, BOOL removeFiles, NSString **error)
 {
   NSString *library = [NSHomeDirectory() stringByAppendingPathComponent:@"Library"];
   NSString *support = [library stringByAppendingPathComponent:@"Application Support/Strappy/Service"];
   NSString *installed = [support stringByAppendingPathComponent:@"strappyd"];
-  NSString *agents = [library stringByAppendingPathComponent:@"LaunchAgents"];
-  NSString *plistPath = [agents stringByAppendingPathComponent:
-      [StrappyServiceLabel stringByAppendingPathExtension:@"plist"]];
+  NSString *plistName = [StrappyServiceLabel stringByAppendingPathExtension:@"plist"];
+  NSString *legacyPlistPath = [[library stringByAppendingPathComponent:@"LaunchAgents"]
+      stringByAppendingPathComponent:plistName];
+  /* Explicitly loaded by the app, never discovered automatically at login. */
+  NSString *plistPath = [support stringByAppendingPathComponent:plistName];
   NSString *logDirectory = [library stringByAppendingPathComponent:@"Logs/Strappy"];
   NSString *logPath = [logDirectory stringByAppendingPathComponent:@"heartbeat.log"];
   NSString *embedded = [[[NSBundle mainBundle] bundlePath]
@@ -102,9 +105,9 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
     (void)close(lockFD);
     return NO;
   }
-  XPConfigurePersistentLaunchAgent(plist);
+  XPConfigureApplicationLaunchAgent(plist);
   if (install) {
-    if (!StrappyServiceDirectory(agents) || !StrappyServiceDirectory(logDirectory))
+    if (!StrappyServiceDirectory(logDirectory))
       goto done;
     binary = [NSData dataWithContentsOfFile:embedded];
     if ([binary length] == 0U) {
@@ -119,11 +122,16 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
   }
   unchanged = install && resourcesUnchanged && [manager contentsEqualAtPath:embedded andPath:installed] &&
       [[NSDictionary dictionaryWithContentsOfFile:plistPath] isEqual:plist];
-  if (unchanged && StrappyServiceLoaded()) {
+  if (unchanged && ![manager fileExistsAtPath:legacyPlistPath] &&
+      StrappyServiceLoaded()) {
     success = YES;
     goto done;
   }
   if (error != NULL) *error = @"Could not unload the existing background service.";
+  if ([manager fileExistsAtPath:legacyPlistPath]) {
+    int status = StrappyLaunchctl(XPLaunchAgentArguments(@"unload", legacyPlistPath), NULL);
+    if (status != 0 && StrappyServiceLoaded()) goto done;
+  }
   if ([manager fileExistsAtPath:plistPath]) {
     int status = StrappyLaunchctl(XPLaunchAgentArguments(@"unload", plistPath), NULL);
     if (status != 0 && StrappyServiceLoaded()) goto done;
@@ -141,6 +149,15 @@ static BOOL StrappyServiceChange(BOOL install, NSString **error)
       usleep(100000);
     }
     if (attempt == 150) goto done;
+  }
+  /* Remove only our old login registration after the service has exited. */
+  if (unlink([legacyPlistPath fileSystemRepresentation]) != 0 && errno != ENOENT) {
+    if (error != NULL) *error = @"Could not remove the old login service registration.";
+    goto done;
+  }
+  if (!install && !removeFiles) {
+    success = YES;
+    goto done;
   }
   if (!install) {
     if (error != NULL) *error = @"Could not remove the background service files.";
@@ -174,22 +191,40 @@ done:
   return success;
 }
 
+static BOOL StrappyServiceApplicationStopping = NO;
+
 @implementation StrappyServiceController
-+ (BOOL)prepareForApplicationWithError:(NSError **)error
++ (BOOL)prepareForApplicationWithError:(NSError **)error;
 {
-  NSString *message = nil;
-  BOOL success = [self installWithError:&message];
-  if (!success && error) *error = [NSError errorWithDomain:@"StrappyServiceErrorDomain" code:1
-    userInfo:[NSDictionary dictionaryWithObject:message ? message : @"The background service could not be started."
-      forKey:NSLocalizedDescriptionKey]];
+  BOOL success = NO;
+  /* Quit can arrive before or during the asynchronous startup operation. */
+  @synchronized(self) {
+    NSString *message = nil;
+    if (StrappyServiceApplicationStopping)
+      message = @"Strappy is quitting; the background service was not started.";
+    else
+      success = StrappyServiceChange(YES, NO, &message);
+    if (!success && error) *error = [NSError errorWithDomain:@"StrappyServiceErrorDomain" code:1
+      userInfo:[NSDictionary dictionaryWithObject:message ? message : @"The background service could not be started."
+        forKey:NSLocalizedDescriptionKey]];
+  }
   return success;
 }
-+ (BOOL)installWithError:(NSString **)error
++ (BOOL)stopForApplicationWithError:(NSString **)error;
 {
-  return StrappyServiceChange(YES, error);
+  BOOL success;
+  @synchronized(self) {
+    StrappyServiceApplicationStopping = YES;
+    success = StrappyServiceChange(NO, NO, error);
+  }
+  return success;
 }
-+ (BOOL)uninstallWithError:(NSString **)error
++ (BOOL)uninstallWithError:(NSString **)error;
 {
-  return StrappyServiceChange(NO, error);
+  BOOL success;
+  @synchronized(self) {
+    success = StrappyServiceChange(NO, YES, error);
+  }
+  return success;
 }
 @end

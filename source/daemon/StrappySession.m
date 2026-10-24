@@ -186,7 +186,7 @@ static int StrappyServiceCopyCredentials(
 
 int strappy_service_credentials_configure(void)
 {
-    if (![XPKeychain configureBackgroundAccess]) return 0;
+    /* Preserve the GUI session's default Keychain authorization prompts. */
     strappy_responses_set_provider_credentials_callback(StrappyServiceCopyCredentials, NULL);
     return 1;
 }
@@ -202,7 +202,8 @@ int strappy_service_credentials_probe(const char *database)
   size_t i;
   int available = 0;
   strappy_provider_account_record_list_init(&accounts);
-  if (!strappy_service_credentials_configure() ||
+  if (![XPKeychain configureNoninteractiveProbeAccess] ||
+      !strappy_service_credentials_configure() ||
       !strappy_db_list_provider_accounts(database, NULL, 0, &accounts, NULL)) {
     [pool release]; return 1;
   }

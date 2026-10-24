@@ -1,8 +1,9 @@
 #import <Foundation/Foundation.h>
 
 @interface XPKeychain : NSObject
-/* Daemons must fail without authentication dialogs or identity-bearing logs. */
-+ (BOOL)configureBackgroundAccess;
+/* Command-line probe only: disables Mac prompts process-wide. Call before
+ * credential reads in the dedicated probe process, never in the GUI daemon. */
++ (BOOL)configureNoninteractiveProbeAccess;
 
 + (BOOL)findInternetPasswordForAccount:(NSString *)account
                                 outURL:(NSString **)outURL

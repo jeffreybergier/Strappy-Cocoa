@@ -134,6 +134,15 @@ static NSAlert *StrappyAsyncErrorAlert;
   [self showMainWindow];
 }
 
+- (void)applicationWillTerminate:(NSNotification *)notification;
+{
+  NSString *error = nil;
+  (void)notification;
+  if (![StrappyServiceController stopForApplicationWithError:&error]) {
+    NSLog(@"[StrappyServiceController] shutdown failed: %@", error);
+  }
+}
+
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender
 {
   (void)sender;

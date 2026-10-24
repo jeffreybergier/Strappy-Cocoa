@@ -194,4 +194,6 @@
 
 /* LaunchAgent compatibility: Tiger has OnDemand and no Aqua session flag. */
 NSArray *XPLaunchAgentArguments(NSString *action, NSString *path);
-void XPConfigurePersistentLaunchAgent(NSMutableDictionary *plist);
+/* Restart while explicitly loaded; caller must unload when the app quits.
+ * Store the plist outside LaunchAgents so login does not auto-load it. */
+void XPConfigureApplicationLaunchAgent(NSMutableDictionary *plist);

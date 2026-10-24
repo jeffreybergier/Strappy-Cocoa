@@ -523,6 +523,11 @@ app-boundary-test:
 	python3 check_app_boundary.py
 test: app-boundary-test
 
+# Native host Mac fixture; intentionally separate from the Linux suite.
+.PHONY: mac-service-lifecycle-test
+mac-service-lifecycle-test:
+	bash mac_service_lifecycle_test.sh
+
 $(BUILD_DIR)/auth_harness: auth_harness.c ../strappy_auth.c $(STRAPPY_STORE_SOURCES) | $(BUILD_DIR)
 	$(CC) $(CPPFLAGS) $(CFLAGS) -D_GNU_SOURCE $^ $(CJSON_DIR)/cJSON.c -lsqlite3 -pthread -o $@
 .PHONY: auth-test
