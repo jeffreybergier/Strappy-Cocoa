@@ -537,7 +537,63 @@ static id XPAppKitLegacyWebFrameViewForView(NSView *view)
 
 @end
 
+static NSTextField *XPAlertLabel(NSString *text, NSFont *font, CGFloat width)
+{
+  NSTextField *label = [[[NSTextField alloc] initWithFrame:NSZeroRect] autorelease];
+  NSSize size;
+  [label setEditable:NO];
+  [label setSelectable:NO];
+  [label setBezeled:NO];
+  [label setDrawsBackground:NO];
+  [label setFont:font];
+  [label setStringValue:text ? text : @""];
+  [[label cell] setWraps:YES];
+  [[label cell] setScrollable:NO];
+  size = [[label cell] cellSizeForBounds:NSMakeRect(0, 0, width, 10000)];
+  [label setFrame:NSMakeRect(0, 0, width, MAX(18.0, size.height + 2.0))];
+  return label;
+}
+
 @implementation NSAlert (XPAppKit)
+
+- (void)XP_layoutSingleButtonAlert;
+{
+  SEL selector = @selector(layout);
+  NSWindow *window;
+  NSView *content;
+  NSTextField *title;
+  NSTextField *information;
+  NSImageView *icon;
+  NSButton *button;
+  CGFloat height;
+  if ([self respondsToSelector:selector]) {
+    [self performSelector:selector];
+    return;
+  }
+  /* Tiger's -window leaves unused nib buttons visible until a modal
+   * presentation. Build this simple nonmodal alert using public view APIs. */
+  NSAssert([[self buttons] count] == 1, @"Expected a single-button alert");
+  window = [self window];
+  title = XPAlertLabel([self messageText], [NSFont boldSystemFontOfSize:13], 316);
+  information = XPAlertLabel([self informativeText], [NSFont systemFontOfSize:12], 316);
+  height = MAX(150.0, NSHeight([title frame]) + NSHeight([information frame]) + 92.0);
+  content = [[[NSView alloc] initWithFrame:NSMakeRect(0, 0, 440, height)] autorelease];
+  [title setFrameOrigin:NSMakePoint(104, height - 20 - NSHeight([title frame]))];
+  [information setFrameOrigin:NSMakePoint(104,
+    NSMinY([title frame]) - 8 - NSHeight([information frame]))];
+  [content addSubview:title];
+  [content addSubview:information];
+  icon = [[[NSImageView alloc] initWithFrame:NSMakeRect(20, height - 84, 64, 64)] autorelease];
+  [icon setImage:[self icon]];
+  [content addSubview:icon];
+  button = [[self buttons] objectAtIndex:0];
+  [button removeFromSuperview];
+  [button setFrame:NSMakeRect(330, 12, 90, 32)];
+  [button setBezelStyle:XPBezelStyleRounded];
+  [content addSubview:button];
+  [window setContentSize:NSMakeSize(440, height)];
+  [window setContentView:content];
+}
 
 - (void)XP_beginSheetModalForWindow:(NSWindow *)window
                       modalDelegate:(id)delegate

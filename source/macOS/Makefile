@@ -4,7 +4,7 @@ ifeq ($(_altivec_relocated),)
 PROJECT_ROOT := $(abspath $(dir $(firstword $(MAKEFILE_LIST)))/../..)
 include ../daemon/store.mk
 STRAPPY_IPC_SOURCES = ../shared/strappy_ipc.c ../shared/XPFoundation/strappy_ipc_platform.c ../daemon/strappy_ipc_server.c
-GROUP_ui_SOURCES = main.m AppDelegate.m StrappyServiceController.m XPAppKit.m PreferencesWindowController.m \
+GROUP_ui_SOURCES = main.m AppDelegate.m StrappyServiceController.m StrappyStartupController.m XPAppKit.m PreferencesWindowController.m \
           StrappyAuthentication.m \
           StrappyPreferencesWhitelistView.m \
           StrappyPreferencesAuthenticationView.m \

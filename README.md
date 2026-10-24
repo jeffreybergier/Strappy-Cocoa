@@ -375,6 +375,10 @@ ssh \
 
 ### First launch
 
+On Mac, a spinner waits for background-service startup before opening the main
+window. Startup failures or a 20-second timeout show a Quit button. See the
+[startup behavior and native regression tests](docs/mac-startup.md).
+
 In Preferences:
 
 1. Add your accounts (OpenRouter and/or ChatGPT OAUTH)

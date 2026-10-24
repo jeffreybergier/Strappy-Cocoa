@@ -122,15 +122,16 @@ static NSAlert *StrappyAsyncErrorAlert;
        selector:@selector(strappySessionPromptDidFinish:)
            name:StrappySessionPromptDidFinishNotification
          object:nil];
-  [[StrappyAsync backgroundTarget:[StrappyServiceController class]
-    title:NSLocalizedString(@"Start background service",nil) receiver:self
-    completion:@selector(backgroundServicePrepared:) context:nil] prepareForApplicationWithError:NULL];
+  startupController_ = [[StrappyStartupController alloc] initWithDelegate:self];
+  [startupController_ start];
 }
 
-- (void)backgroundServicePrepared:(StrappyAsyncResult *)result
+- (void)startupDidFinish:(StrappyStartupController *)controller;
 {
-  (void)result;
-  (void)[StrappySession initializeSessionStoreWithError:NULL];
+  if (controller != startupController_) return;
+  startupFinished_ = YES;
+  [startupController_ release];
+  startupController_ = nil;
   [self showMainWindow];
 }
 
@@ -138,6 +139,7 @@ static NSAlert *StrappyAsyncErrorAlert;
 {
   NSString *error = nil;
   (void)notification;
+  [startupController_ invalidate];
   if (![StrappyServiceController stopForApplicationWithError:&error]) {
     NSLog(@"[StrappyServiceController] shutdown failed: %@", error);
   }
@@ -173,6 +175,10 @@ static NSAlert *StrappyAsyncErrorAlert;
 - (void)showPreferencesWindow:(id)sender
 {
   (void)sender;
+  if (!startupFinished_) {
+    [startupController_ showWindow];
+    return;
+  }
   (void)[StrappySession prepareProviderCredentialsWithError:NULL];
   if (_preferencesWindowController == nil) {
     _preferencesWindowController = [[PreferencesWindowController alloc] init];
@@ -605,6 +611,10 @@ static NSAlert *StrappyAsyncErrorAlert;
 
 - (void)showMainWindow
 {
+  if (!startupFinished_) {
+    [startupController_ showWindow];
+    return;
+  }
   _terminateWhenInFlightSessionsFinish = NO;
   if (_windowController != nil) {
     [_windowController showWindow:self];
@@ -712,6 +722,8 @@ static NSAlert *StrappyAsyncErrorAlert;
 
 - (void)dealloc
 {
+  [startupController_ invalidate];
+  [startupController_ release];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [_modelMenu setDelegate:nil];
   [_modelMenu release];

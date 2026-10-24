@@ -162,6 +162,9 @@
 @end
 
 @interface NSAlert (XPAppKit)
+/* Main-thread single-button alerts shown without runModal/beginSheet. Uses
+ * native layout when present; Tiger rebuilds supported controls explicitly. */
+- (void)XP_layoutSingleButtonAlert;
 - (void)XP_beginSheetModalForWindow:(NSWindow *)window
                       modalDelegate:(id)delegate
                      didEndSelector:(SEL)didEndSelector
